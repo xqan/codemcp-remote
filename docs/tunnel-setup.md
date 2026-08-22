@@ -117,6 +117,12 @@ persisted operation, checkpoint metadata, and audit events. Tunnel transport
 does not replace Bridge authorization, approval, project registration, or
 audit checks.
 
+Some Streamable HTTP connectors reuse JSON-RPC request ID `0` for every call.
+The Bridge preserves that value in the response for transport correlation but
+derives a unique internal idempotency key for read-only operations so multiple
+reads in one session remain independent. Mutation tools still require the
+caller-provided `client_request_id` and `request_hash`.
+
 ## Failure handling
 
 - If Bridge is down, `tunnel-client` may remain connected but MCP discovery and

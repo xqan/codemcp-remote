@@ -114,12 +114,21 @@ class BridgeService:
     ) -> dict[str, Any]:
         await self.start()
         request_id = self._request_id(ctx)
-        client_id = client_request_id or ("" if mutation else request_id)
         input_data = operation_input or {}
         request_hash_value = (
             supplied_request_hash or ("" if mutation else calculate_request_hash(input_data))
         )
         operation_id = uuid.uuid4().hex
+        if client_request_id:
+            client_id = client_request_id
+        elif mutation:
+            client_id = ""
+        elif request_id == "0":
+            # Some Streamable HTTP clients reuse JSON-RPC id "0" for every
+            # request. It cannot serve as a per-session read operation key.
+            client_id = f"{operation_kind}-{operation_id}"
+        else:
+            client_id = request_id
         try:
             started = self.operations.start(
                 operation_id=operation_id,

@@ -42,20 +42,29 @@ doctor.ps1 -SkipTunnel: emitted structured diagnostics and correctly reported
 ```
 
 The existing Bridge and codemcp test suites were run as the required
-regression checks: the Bridge suite passed `24 passed, 1 skipped, 2 xfailed`,
+regression checks: the Bridge suite passed `25 passed, 1 skipped, 2 xfailed`,
 and the fixed codemcp compatibility suite passed `4 passed, 2 xfailed`.
 
-## Account-backed validation pending
+## Account-backed validation
 
-The following acceptance criteria require external OpenAI Platform and
-ChatGPT workspace state and were not claimed as locally verified:
+On 2026-08-22, the real Tunnel and ChatGPT workspace completed the main
+contract flow against a disposable registered Git project:
 
-- associating the tunnel with the target Platform organization and ChatGPT
-  workspace;
-- ChatGPT developer-mode tool discovery through Tunnel;
-- remote read, edit, test, diff, checkpoint, and rollback calls;
-- disconnect/restart checks across tunnel-client, Bridge, and worker.
+- Tunnel-connected Bridge tools were discovered;
+- `project_open`, `project_status`, `file_read`, `code_search`, and
+  `file_list` succeeded consecutively in one session;
+- deterministic `file_edit`, registered `test_run`, `git_diff`, and
+  `operation_status` succeeded;
+- explicit approval, manual checkpoint creation, compare-and-swap rollback,
+  rollback safety checkpointing, and idempotent mutation replay succeeded;
+- the final project returned to its original HEAD with a clean worktree.
 
-Run [tests/e2e/test_tunnel_contract.md](../tests/e2e/test_tunnel_contract.md)
-with a real `tunnel_id`, runtime API key, and workspace permission before
-marking the full Phase 5 acceptance complete.
+The connector reused `request_id="0"` for multiple read calls. Bridge now
+keeps that external correlation value but generates a unique internal read
+operation key, so distinct read calls do not collide in the idempotency table.
+The regression is covered by
+`test_static_zero_request_id_does_not_conflict_for_read_operations`.
+
+The disconnect/restart and external-change failure matrix in
+[tests/e2e/test_tunnel_contract.md](../tests/e2e/test_tunnel_contract.md)
+remains the next Phase 5 validation item before Phase 6.

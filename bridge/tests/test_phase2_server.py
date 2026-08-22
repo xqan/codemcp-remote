@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -264,6 +265,31 @@ async def test_local_mcp_contract_and_policy_rejections(git_project: Path) -> No
                         )
                     )
                     assert dirty["error"]["code"] == "WORKSPACE_DIRTY"
+
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_static_zero_request_id_does_not_conflict_for_read_operations(
+    git_project: Path,
+) -> None:
+    adapter = FakeAdapter()
+    app, service = create_app(_settings(git_project), adapter=adapter)
+    context = SimpleNamespace(request_id="0")
+
+    async with app.router.lifespan_context(app):
+        opened = await service.project_open(context, "demo")
+        session_id = opened["data"]["session_id"]
+        responses = [
+            await service.project_status(context, "demo", session_id),
+            await service.file_read(context, "demo", session_id, "src/hello.txt", None, None),
+            await service.code_search(context, "demo", session_id, "hello", None, None),
+            await service.file_list(context, "demo", session_id, "src"),
+        ]
+
+    assert all(response["status"] == "succeeded" for response in responses)
+    assert all(response["request_id"] == "0" for response in responses)
+    assert len({response["operation_id"] for response in responses}) == len(responses)
 
     await service.close()
 
