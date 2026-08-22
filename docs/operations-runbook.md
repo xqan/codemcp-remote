@@ -19,6 +19,34 @@ The Phase 0 doctor should report:
 - model egress is denied
 - codemcp is installed and pinned from Phase 1 onward
 
+## Phase 6 local lifecycle control
+
+Start the Bridge first and keep it running before starting the Tunnel:
+
+~~~text
+pwsh -File .\scripts\start-bridge.ps1
+pwsh -File .\scripts\start-tunnel.ps1
+pwsh -File .\scripts\doctor.ps1
+~~~
+
+Preview the process trees that Phase 6 will stop:
+
+~~~text
+pwsh -File .\scripts\stop-all.ps1 -WhatIf
+~~~
+
+Stop only the project-owned Bridge, Tunnel profile and codemcp worker trees:
+
+~~~text
+pwsh -File .\scripts\stop-all.ps1
+~~~
+
+`stop-all.ps1` matches the repository Bridge command line, the configured
+Tunnel profile directory and the WSL2 codemcp worker. It does not terminate an
+unrelated process that merely occupies port 46200 or 46201; such a listener is
+reported for manual investigation. Run it with permission to query
+`Win32_Process` when a service was started elevated.
+
 ## Phase 5 local Bridge and Tunnel
 
 The local Bridge can be started for loopback-only validation with:
