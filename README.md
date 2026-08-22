@@ -10,7 +10,7 @@ ChatGPT（唯一推理） → Secure MCP Tunnel → 本机 MCP Bridge → codemc
 
 - 当前阶段：Phase 5（Secure MCP Tunnel 集成）
 - 当前实现：loopback MCP Bridge、SQLite 生命周期、幂等 operation、一次性审批、审计、Bridge-owned Git checkpoint/CAS rollback、WSL2 codemcp worker，以及受限的 tunnel-client 启动/诊断包装
-- 当前远程验收：真实 Tunnel 工具发现和主合同流程已通过；失败恢复矩阵仍待补测；Windows 原生 Git mutation 仍不支持
+- 当前远程验收：真实 Tunnel 工具发现、主合同和失败恢复矩阵已通过；Phase 6 尚未开始；Windows 原生 Git mutation 仍不支持
 - 平台决策：codemcp mutation worker 运行在 WSL2；Windows 原生 Git-backed
   mutation 不支持，详见 [docs/codemcp-compatibility-matrix.md](docs/codemcp-compatibility-matrix.md)
 

@@ -65,6 +65,17 @@ operation key, so distinct read calls do not collide in the idempotency table.
 The regression is covered by
 `test_static_zero_request_id_does_not_conflict_for_read_operations`.
 
-The disconnect/restart and external-change failure matrix in
-[tests/e2e/test_tunnel_contract.md](../tests/e2e/test_tunnel_contract.md)
-remains the next Phase 5 validation item before Phase 6.
+The failure and recovery matrix was also completed on 2026-08-22:
+
+- stopping Tunnel caused remote MCP failure without a mutation replay;
+- stopping Bridge caused an MCP internal error while Tunnel remained up;
+- restarting Bridge restored `doctor.ps1`, `/healthz`, and `/readyz`; the old
+  session was rejected instead of replayed, and a new session worked;
+- a rollback approval raced with an external HEAD commit and returned
+  `CHECKPOINT_CONFLICT` without resetting the external HEAD;
+- the existing local profile-contract checks covered non-loopback targets and
+  plaintext API-key rejection.
+
+Phase 5 account-backed validation is complete. Phase 6 remains intentionally
+unstarted; its operationalization work must follow the plan in
+[docs/implementation-plan.md](implementation-plan.md).
