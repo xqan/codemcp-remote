@@ -19,25 +19,25 @@ The Phase 0 doctor should report:
 - model egress is denied
 - codemcp is installed and pinned from Phase 1 onward
 
-## Phase 4 local Bridge
+## Phase 5 local Bridge and Tunnel
 
-The local Bridge can now be started for loopback-only validation:
+The local Bridge can be started for loopback-only validation with:
 
 ~~~text
-uv run --project bridge codemcp-bridge-server check
-uv run --project bridge codemcp-bridge-server serve
+pwsh -File .\scripts\start-bridge.ps1
 curl http://127.0.0.1:46200/healthz
 ~~~
 
 On Windows, the default codemcp worker runs in WSL2 Ubuntu. The WSL virtual
 environment is expected at `.local/bridge-venv-wsl`; configure
 `codemcp.wsl_python` when the environment is elsewhere. This is a local
-development server, not the production startup flow, and it is not connected
-to Secure MCP Tunnel yet.
+development server. The Phase 5 tunnel wrapper is configured separately and
+never points directly at codemcp.
 
-Do not expose codemcp directly to ChatGPT. The intended future startup order
-is Bridge, codemcp worker, tunnel-client, then ChatGPT tool discovery. The
-Bridge is the only MCP server exposed to a future Tunnel.
+Do not expose codemcp directly to ChatGPT. The startup order is Bridge,
+codemcp worker on demand, tunnel-client, then ChatGPT tool discovery. The
+Bridge is the only MCP server exposed to the Tunnel. See
+[docs/tunnel-setup.md](tunnel-setup.md) for the complete setup.
 
 SQLite state is stored at `.local/bridge.sqlite3` and is ignored by Git. A
 normal shutdown closes active sessions. After an unclean restart, active
@@ -71,7 +71,9 @@ The reset is issued only for a database-registered checkpoint and only when
 the registered project is the Git worktree root. Use `git_diff` with
 `checkpoint_id` to inspect a bounded, sensitive-path-filtered comparison.
 
-Secure MCP Tunnel integration remains deferred to Phase 5.
+Secure MCP Tunnel local setup is implemented in Phase 5. Account-backed
+ChatGPT workspace association and remote tool-call acceptance remain an
+operator test documented in `tests/e2e/test_tunnel_contract.md`.
 
 ## Local state
 

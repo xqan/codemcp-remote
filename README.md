@@ -8,13 +8,13 @@ ChatGPT（唯一推理） → Secure MCP Tunnel → 本机 MCP Bridge → codemc
 
 ## 当前状态
 
-- 当前阶段：Phase 4（Git checkpoint、diff 和 rollback）
-- 当前实现：loopback MCP Bridge、SQLite 生命周期、幂等 operation、一次性审批、审计、Bridge-owned Git checkpoint/CAS rollback 和 WSL2 codemcp worker
-- 尚未实现：Secure MCP Tunnel 联调和 Windows 原生 Git mutation
+- 当前阶段：Phase 5（Secure MCP Tunnel 集成）
+- 当前实现：loopback MCP Bridge、SQLite 生命周期、幂等 operation、一次性审批、审计、Bridge-owned Git checkpoint/CAS rollback、WSL2 codemcp worker，以及受限的 tunnel-client 启动/诊断包装
+- 尚未完成：需要真实 OpenAI tunnel_id、runtime API key 和 ChatGPT workspace 权限的远程端到端验收；Windows 原生 Git mutation 仍不支持
 - 平台决策：codemcp mutation worker 运行在 WSL2；Windows 原生 Git-backed
   mutation 不支持，详见 [docs/codemcp-compatibility-matrix.md](docs/codemcp-compatibility-matrix.md)
 
-## Phase 4 本地检查
+## Phase 5 本地检查
 
 需要 Python 3.12+、uv 和 Git：
 
@@ -22,7 +22,7 @@ ChatGPT（唯一推理） → Secure MCP Tunnel → 本机 MCP Bridge → codemc
 uv sync --project bridge
 uv run --project bridge codemcp-bridge doctor --strict --json
 uv run --project bridge codemcp-bridge-server check
-uv run --project bridge pytest -q --basetemp=.local/pytest-phase4
+uv run --project bridge pytest -q --basetemp=.local/pytest-phase5
 uv run --project bridge ruff check bridge/src bridge/tests
 ~~~
 
@@ -31,13 +31,18 @@ Phase 1 已固定并安装 `codemcp==0.3.0`；WSL2 路径已通过 Git-backed �
 [docs/phase-2-validation.md](docs/phase-2-validation.md)，Phase 3 的生命周期验证记录在
 [docs/phase-3-validation.md](docs/phase-3-validation.md)，Phase 4 的 Git 安全验证记录在
 [docs/phase-4-validation.md](docs/phase-4-validation.md)。Git 边界和 rollback
-约束见 [docs/git-policy.md](docs/git-policy.md)。
+约束见 [docs/git-policy.md](docs/git-policy.md)。Tunnel 配置和诊断见
+[docs/tunnel-setup.md](docs/tunnel-setup.md)，远程验收合同见
+[tests/e2e/test_tunnel_contract.md](tests/e2e/test_tunnel_contract.md)。Phase 5
+本地验证记录见 [docs/phase-5-validation.md](docs/phase-5-validation.md)。
 
-本地启动 Bridge（尚未接入 Tunnel）：
+本地启动 Bridge 和 Tunnel：
 
 ~~~text
-uv run --project bridge codemcp-bridge-server serve
-GET http://127.0.0.1:46200/healthz
+Copy-Item config/tunnel-profile.example.env config/tunnel-profile.local.env
+pwsh -File .\scripts\start-bridge.ps1
+pwsh -File .\scripts\start-tunnel.ps1 -Initialize
+pwsh -File .\scripts\doctor.ps1
 ~~~
 
 ## 关键约束
@@ -47,6 +52,8 @@ GET http://127.0.0.1:46200/healthz
 - Bridge 只允许已登记的 project_id、项目路径和命令 ID。
 - 不暴露任意路径读写和任意 shell。
 - Secure MCP Tunnel 只承担远程传输，不替代 Bridge 的授权、审批和审计。
+- tunnel-client 只允许使用 OpenAI control plane、loopback Bridge MCP URL 和环境变量密钥引用。
+- 本机不开放公网入站端口；Tunnel 通过出站 HTTPS 连接 OpenAI control plane。
 - 默认禁止 dirty workspace 直接写入。
 - checkpoint 使用 `refs/codemcp-remote/checkpoints/<id>`，只允许 Bridge 登记的 ref。
 - rollback 必须显式审批，并提交当前 branch/HEAD 作为 compare-and-swap 预期值；发生外部修改时 fail closed。

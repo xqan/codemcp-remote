@@ -74,3 +74,19 @@ ref, current branch, caller-supplied expected HEAD and clean worktree before
 issuing the fixed `git reset --hard <Bridge-owned-ref>`. Any external change
 causes a fail-closed `CHECKPOINT_CONFLICT`; an uncertain Git result becomes
 `UNKNOWN_SIDE_EFFECT` and requires reconciliation.
+
+## Phase 5 Secure MCP Tunnel
+
+The repository wrapper starts `tunnel-client` with a generated HTTP profile:
+
+~~~text
+OpenAI Secure MCP Tunnel
+  -> tunnel-client (outbound HTTPS, loopback admin UI)
+  -> Bridge: http://127.0.0.1:46200/mcp
+  -> codemcp Adapter / Worker
+~~~
+
+The wrapper rejects profiles that use a non-OpenAI control plane, store a
+plaintext API key, point at a non-loopback MCP target, or configure a stdio
+command. Tunnel transport does not add project authorization; the Bridge
+continues to own session, operation, approval, idempotency, and audit checks.

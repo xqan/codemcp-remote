@@ -1,4 +1,4 @@
-"""Configuration models for the Phase 4 local Bridge."""
+"""Configuration models for the local Bridge."""
 
 from __future__ import annotations
 

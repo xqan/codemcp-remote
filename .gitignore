@@ -26,6 +26,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+config/tunnel-profile.local.env
 
 # Build artifacts
 dist/

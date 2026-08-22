@@ -1,4 +1,4 @@
-"""Loopback MCP server and the Phase 4 policy-controlled tool surface."""
+"""Loopback MCP server and the policy-controlled tool surface."""
 
 from __future__ import annotations
 
@@ -1276,7 +1276,7 @@ class BridgeService:
     async def health(self) -> dict[str, Any]:
         return {
             "status": "ok",
-            "phase": "4",
+            "phase": "5",
             "transport": self.settings.server.transport,
             "endpoint": (
                 f"{self.settings.server.host}:{self.settings.server.port}"

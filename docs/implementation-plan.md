@@ -755,8 +755,10 @@ codemcp-remote/
 
 # Developer 起始顺序
 
-Phase 0、Phase 1、Phase 2、Phase 3 和 Phase 4 已完成；下一步进入 Phase 5
-的 Secure MCP Tunnel 集成。不要在本地 Git 安全验证之外扩大当前阶段范围。
+Phase 0、Phase 1、Phase 2、Phase 3 和 Phase 4 已完成。Phase 5 的本地
+tunnel-client 包装、profile 校验和诊断入口已实现；仍需使用真实 OpenAI
+tunnel_id、runtime API key 和 ChatGPT workspace 权限完成 account-backed
+验收。未完成该验收前，不进入 Phase 6，也不要扩大当前阶段范围。
 
 Phase 1 已确定：
 
@@ -765,4 +767,5 @@ Phase 1 已确定：
 3. 上游 Git commit 只作为后端事实记录；Bridge 的审批、checkpoint 和 rollback
    由 Phase 3/4 的本地 Bridge 实现。
 
-Phase 4 的本地安全和可靠性测试通过后，才可以进入 Tunnel 联调。
+Phase 4 的本地安全和可靠性测试已通过；Phase 5 的远程合同验收完成后，
+才可以进入 Phase 6 运维化。

@@ -36,7 +36,7 @@ def main() -> int:
             json.dumps(
                 {
                     "status": "ok",
-                    "phase": "4",
+                    "phase": "5",
                     "host": settings.server.host,
                     "port": settings.server.port,
                     "path": settings.server.path,
