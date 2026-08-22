@@ -1,4 +1,4 @@
-"""Configuration models for the Phase 2 local Bridge."""
+"""Configuration models for the Phase 3 local Bridge."""
 
 from __future__ import annotations
 
@@ -58,6 +58,7 @@ class PolicySettings:
     max_file_bytes: int
     max_result_bytes: int
     mutation_lock: str
+    approval_ttl_seconds: float = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +203,7 @@ def load_settings(
         raise SettingsError("server.path must start with '/'")
     transport = server_raw.get("transport", "streamable-http")
     if transport != "streamable-http":
-        raise SettingsError("server.transport must be streamable-http in Phase 2")
+        raise SettingsError("server.transport must be streamable-http in Phase 3")
     port = server_raw.get("port", 46200)
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise SettingsError("server.port must be between 1 and 65535")
@@ -235,10 +236,13 @@ def load_settings(
     if any(policy_raw[key] for key in bool_keys[:3]):
         raise SettingsError(
             "policy.allow_arbitrary_paths, policy.allow_arbitrary_commands, and "
-            "policy.allow_model_calls must remain false in Phase 2"
+            "policy.allow_model_calls must remain false in Phase 3"
         )
     if policy_raw.get("mutation_lock", "per-project") != "per-project":
-        raise SettingsError("policy.mutation_lock must be per-project in Phase 2")
+        raise SettingsError("policy.mutation_lock must be per-project in Phase 3")
+    approval_ttl_seconds = policy_raw.get("approval_ttl_seconds", 300)
+    if not isinstance(approval_ttl_seconds, int | float) or approval_ttl_seconds <= 0:
+        raise SettingsError("policy.approval_ttl_seconds must be positive")
     max_file_bytes = policy_raw.get("max_file_bytes", 1_048_576)
     max_result_bytes = policy_raw.get("max_result_bytes", 262_144)
     if not isinstance(max_file_bytes, int) or max_file_bytes <= 0:
@@ -283,6 +287,7 @@ def load_settings(
             max_file_bytes=max_file_bytes,
             max_result_bytes=max_result_bytes,
             mutation_lock=str(policy_raw.get("mutation_lock", "per-project")),
+            approval_ttl_seconds=float(approval_ttl_seconds),
         ),
         codemcp=CodemcpSettings(
             worker_mode=worker_mode,

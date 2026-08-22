@@ -1,4 +1,4 @@
-# Phase 0 Architecture Baseline
+# Architecture Baseline
 
 ## Scope
 
@@ -44,3 +44,18 @@ ChatGPT
 The Tunnel is only the remote transport. It does not grant access to arbitrary
 projects or commands. All project, path, command, approval, audit, and
 idempotency checks belong to the Bridge.
+
+## Phase 3 lifecycle persistence
+
+The Bridge stores lifecycle metadata in `.local/bridge.sqlite3`:
+
+~~~text
+Bridge
+  -> sessions: created / active / closing / closed / blocked
+  -> operations: validated / awaiting_approval / running / terminal state
+  -> approvals: hashed, short-lived, one-time tokens
+  -> audit_events: append-only state transition records
+~~~
+
+The database stores paths, hashes, bounded result summaries, and error
+metadata. It does not store full source files or plaintext approval tokens.

@@ -51,7 +51,14 @@ class PolicyEngine:
             )
         return status
 
-    def command(self, project: ProjectSpec, command_id: str, expected_kind: str) -> CommandSpec:
+    def command(
+        self,
+        project: ProjectSpec,
+        command_id: str,
+        expected_kind: str,
+        *,
+        require_approval: bool = True,
+    ) -> CommandSpec:
         if self._settings.policy.allow_arbitrary_commands:
             raise BridgeError("COMMAND_NOT_ALLOWED", "arbitrary commands are disabled by policy")
         command = project.commands.get(command_id)
@@ -61,7 +68,7 @@ class PolicyEngine:
                 "command_id is not registered for this operation",
                 {"command_id": command_id, "expected_kind": expected_kind},
             )
-        if command.approval == "required":
+        if require_approval and command.approval == "required":
             raise BridgeError(
                 "APPROVAL_REQUIRED",
                 "the registered command requires explicit approval",

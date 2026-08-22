@@ -17,6 +17,7 @@ require_clean_workspace = true
 max_file_bytes = 1048576
 max_result_bytes = 262144
 mutation_lock = "per-project"
+approval_ttl_seconds = 300
 
 [network]
 model_egress = "deny"

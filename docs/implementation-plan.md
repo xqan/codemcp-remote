@@ -483,8 +483,8 @@ codemcp-remote/
 - bridge/src/codemcp_bridge/approval_service.py
 - bridge/src/codemcp_bridge/audit_store.py
 - bridge/src/codemcp_bridge/db/
-- bridge/tests/unit/test_idempotency.py
-- bridge/tests/integration/test_recovery.py
+- bridge/tests/test_phase3_persistence.py
+- bridge/tests/test_phase2_server.py
 
 ### Changes
 
@@ -755,8 +755,8 @@ codemcp-remote/
 
 # Developer 起始顺序
 
-Phase 0 和 Phase 1 已完成；下一步从 Phase 2 的本地 Bridge 核心与 codemcp
-Adapter 开始。不要先进行 Tunnel 联调。
+Phase 0、Phase 1、Phase 2 和 Phase 3 已完成；下一步进入 Phase 4 的 Git
+checkpoint、diff 和 rollback。不要先进行 Tunnel 联调。
 
 Phase 1 已确定：
 
@@ -765,4 +765,4 @@ Phase 1 已确定：
 3. 上游 Git commit 只作为后端事实记录；Bridge 的审批、checkpoint 和 rollback
    仍由后续 Phase 实现。
 
-在 Phase 2/3 的本地安全和可靠性测试通过前，不应进入 Tunnel 联调。
+在 Phase 4 的本地安全和可靠性测试通过前，不应进入 Tunnel 联调。

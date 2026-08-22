@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
@@ -35,7 +36,7 @@ def main() -> int:
             json.dumps(
                 {
                     "status": "ok",
-                    "phase": "2",
+                    "phase": "3",
                     "host": settings.server.host,
                     "port": settings.server.port,
                     "path": settings.server.path,
@@ -49,8 +50,11 @@ def main() -> int:
         )
         return 0
 
-    server, _ = create_server(settings)
-    server.run(transport=settings.server.transport)
+    server, service = create_server(settings)
+    try:
+        server.run(transport=settings.server.transport)
+    finally:
+        asyncio.run(service.close())
     return 0
 
 

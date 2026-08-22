@@ -14,6 +14,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from codemcp_bridge.mcp_server import create_app
+from codemcp_bridge.operation_service import request_hash
 from codemcp_bridge.settings import (
     BridgeSettings,
     CodemcpSettings,
@@ -211,6 +212,10 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                                 "old_string": "hello codemcp",
                                 "new_string": "edited codemcp",
                                 "description": "test the real Bridge edit path",
+                                "client_request_id": "edit-1",
+                                "request_hash": request_hash(
+                                    {"path": "src/hello file.txt", "new_string": "edited codemcp"}
+                                ),
                             },
                         )
                     )
@@ -227,6 +232,8 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                                 "project_id": "integration",
                                 "session_id": session_id,
                                 "command_id": "format",
+                                "client_request_id": "format-1",
+                                "request_hash": request_hash({"command_id": "format"}),
                             },
                         )
                     )
@@ -240,6 +247,8 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                                 "project_id": "integration",
                                 "session_id": session_id,
                                 "command_id": "test",
+                                "client_request_id": "test-1",
+                                "request_hash": request_hash({"command_id": "test"}),
                             },
                         )
                     )

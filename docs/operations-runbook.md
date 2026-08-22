@@ -19,7 +19,7 @@ The Phase 0 doctor should report:
 - model egress is denied
 - codemcp is installed and pinned from Phase 1 onward
 
-## Phase 2 local Bridge
+## Phase 3 local Bridge
 
 The local Bridge can now be started for loopback-only validation:
 
@@ -39,9 +39,25 @@ Do not expose codemcp directly to ChatGPT. The intended future startup order
 is Bridge, codemcp worker, tunnel-client, then ChatGPT tool discovery. The
 Bridge is the only MCP server exposed to a future Tunnel.
 
-Phase 2 intentionally keeps sessions in memory. A Bridge restart closes all
-sessions and does not provide operation recovery, approval records, audit
-records, checkpoints, or rollback. Those behaviors belong to later phases.
+SQLite state is stored at `.local/bridge.sqlite3` and is ignored by Git. A
+normal shutdown closes active sessions. After an unclean restart, active
+sessions become `blocked`; operations that were not dispatched become
+`failed`, while mutations that may have crossed the backend boundary become
+`unknown` and require explicit `operation_reconcile` before the project can be
+mutated again.
+
+Mutation tools require a caller-provided `client_request_id` and SHA-256
+`request_hash`. Repeating the same key and hash replays the persisted result;
+changing the hash is rejected. Commands configured with `approval =
+"required"` return a short-lived one-time token. The plaintext token is never
+stored in SQLite; use `approval_confirm` or `operation_cancel` while the
+operation is awaiting approval.
+
+Use `operation_status` to inspect the state and audit events of an operation.
+Do not manually edit the SQLite file while the Bridge is running.
+
+Git checkpoints, rollback, and Secure MCP Tunnel integration remain deferred
+to later phases.
 
 ## Local state
 
