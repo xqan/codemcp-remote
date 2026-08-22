@@ -61,6 +61,20 @@ def _package_version(package: str) -> str | None:
         return None
 
 
+def _codemcp_diagnostics() -> dict[str, Any]:
+    """Inspect codemcp metadata without starting its long-lived MCP server."""
+
+    executable = shutil.which("codemcp")
+    package_version = _package_version("codemcp")
+    return {
+        "installed": executable is not None and package_version is not None,
+        "executable": executable,
+        "version": f"codemcp {package_version}" if package_version else None,
+        "package_version": package_version,
+        "probe": "distribution-metadata",
+    }
+
+
 def _validate_configuration() -> list[str]:
     errors: list[str] = []
 
@@ -107,7 +121,7 @@ def _validate_configuration() -> list[str]:
 
 def collect_diagnostics() -> dict[str, Any]:
     configuration_errors = _validate_configuration()
-    codemcp_command = _command_version("codemcp")
+    codemcp_command = _codemcp_diagnostics()
 
     return {
         "phase": "0",
@@ -157,8 +171,12 @@ def main() -> int:
     args = parser.parse_args()
 
     diagnostics = collect_diagnostics()
-    if args.strict and not diagnostics["codemcp"]["installed_command"]["installed"]:
-        diagnostics["status"] = "codemcp_not_installed"
+    if args.strict:
+        codemcp = diagnostics["codemcp"]["installed_command"]
+        if not codemcp["installed"]:
+            diagnostics["status"] = "codemcp_not_installed"
+        elif codemcp["package_version"] != diagnostics["codemcp"]["expected_release"]:
+            diagnostics["status"] = "codemcp_version_mismatch"
 
     if args.json:
         print(json.dumps(diagnostics, ensure_ascii=False, indent=2))

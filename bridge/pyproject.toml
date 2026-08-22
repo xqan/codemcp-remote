@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Fank", email = "cloudw2023@gmail.com" }]
 dependencies = [
+    "codemcp==0.3.0",
     "mcp>=1.13,<2",
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",

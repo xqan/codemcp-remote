@@ -8,21 +8,22 @@ ChatGPT（唯一推理） → Secure MCP Tunnel → 本机 MCP Bridge → codemc
 
 ## 当前状态
 
-- 当前阶段：Phase 0
-- 当前实现：项目骨架、配置基线、运行环境诊断
+- 当前阶段：Phase 1（codemcp 本地兼容性验证）
+- 当前实现：项目骨架、固定版 codemcp、stdio MCP 探针和兼容性测试
 - 尚未实现：Bridge MCP Server、codemcp Adapter、Secure MCP Tunnel 联调
+- 当前限制：Windows 原生环境的 Git-backed codemcp subtool 会在 stdio worker 内阻塞；详见 [docs/codemcp-compatibility-matrix.md](docs/codemcp-compatibility-matrix.md)
 
-## Phase 0 本地检查
+## Phase 1 本地检查
 
 需要 Python 3.12+、uv 和 Git：
 
 ~~~text
 uv sync --project bridge
-uv run --project bridge codemcp-bridge doctor --json
-uv run --project bridge pytest -q
+uv run --project bridge codemcp-bridge doctor --strict --json
+uv run --project bridge pytest -q --basetemp=.local/pytest-phase1 tests/integration/test_codemcp_compatibility.py
 ~~~
 
-Phase 0 不要求 codemcp 已经安装；codemcp 的实际协议、工具和 Git 行为在 Phase 1 验证。
+Phase 1 已固定并安装 `codemcp==0.3.0`；实际协议、工具和 Git 行为记录在兼容性矩阵中。
 
 ## 关键约束
 

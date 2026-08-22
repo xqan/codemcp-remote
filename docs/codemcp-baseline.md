@@ -1,4 +1,4 @@
-# codemcp Phase 0 Baseline
+# codemcp Pinned Baseline
 
 ## Pinned source
 
@@ -9,6 +9,9 @@
 
 The release tag and commit must be rechecked locally in Phase 1 before the
 adapter is implemented. The Bridge must not depend on the moving main branch.
+
+Phase 1 results are recorded in
+[docs/codemcp-compatibility-matrix.md](codemcp-compatibility-matrix.md).
 
 ## Intended use in this project
 
