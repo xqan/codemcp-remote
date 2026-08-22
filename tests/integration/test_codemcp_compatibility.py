@@ -26,6 +26,13 @@ WINDOWS_GIT_SUBPROCESS_BLOCKER = pytest.mark.xfail(
     ),
 )
 
+# Native Windows is intentionally kept at two seconds so the inherited-stdin
+# blocker fails fast.  Git operations against the Windows-mounted project
+# path are materially slower from WSL2, but complete successfully within this
+# bound; that is a performance distinction, not a protocol compatibility
+# failure.
+GIT_SUBTOOL_TIMEOUT_SECONDS = 2.0 if os.name == "nt" else 30.0
+
 
 def _git(project: Path, *arguments: str) -> str:
     completed = subprocess.run(
@@ -146,7 +153,13 @@ async def test_initialize_and_tools_list(git_project: Path, tmp_path: Path) -> N
 @WINDOWS_GIT_SUBPROCESS_BLOCKER
 async def test_read_only_subtools(git_project: Path, tmp_path: Path) -> None:
     source_file = next(git_project.rglob("hello file.txt"))
-    async with connect(_probe_config(git_project, tmp_path, timeout_seconds=2.0)) as connection:
+    async with connect(
+        _probe_config(
+            git_project,
+            tmp_path,
+            timeout_seconds=GIT_SUBTOOL_TIMEOUT_SECONDS,
+        )
+    ) as connection:
         ls_result = await connection.call_subtool(
             "LS", path=str(git_project), chat_id="read-only-probe"
         )
@@ -199,7 +212,13 @@ async def test_subtools_commands_and_git_behavior(
     initial_head = _head(git_project)
     initial_count = _commit_count(git_project)
 
-    async with connect(_probe_config(git_project, tmp_path, timeout_seconds=2.0)) as connection:
+    async with connect(
+        _probe_config(
+            git_project,
+            tmp_path,
+            timeout_seconds=GIT_SUBTOOL_TIMEOUT_SECONDS,
+        )
+    ) as connection:
         init_result = await connection.call_subtool(
             "InitProject",
             path=str(git_project),

@@ -402,6 +402,21 @@ codemcp-remote/
 - 明确选择直接使用上游还是维护最小 fork。
 - 未发现任何模型调用路径。
 
+### Phase 1 decision record (2026-08-22)
+
+- 平台选择：codemcp mutation worker 运行在 WSL2 Ubuntu；原生 Windows
+  worker 的 Git-backed subtool 在 stdio 场景阻塞，不纳入当前支持矩阵。
+- 上游选择：Phase 2 先直接使用固定的上游 `codemcp==0.3.0`，不维护 fork。
+  如果未来必须支持原生 Windows，再单独评估最小 stdin/timeout/process-tree fork。
+- 路径与超时：Adapter 必须把已登记的 Windows 项目根显式映射到 WSL 路径，
+  在 worker 外部执行超时和进程树清理；WSL 挂载路径的兼容性测试使用 30 秒
+  probe budget。上游 `RunCommand` 的可选 timeout 不足以替代 Bridge 的超时控制。
+- Git 语义：已确认 `InitProject` 创建初始 codemcp commit，`EditFile` 和
+  `WriteFile` 会改变 HEAD 但不增加 commit 数；Bridge 的 checkpoint、审计和
+  rollback 语义仍需在 Phase 2/3 设计，不把上游 commit 当作审批替代品。
+- ChatGPT-only：安装包源码和依赖未发现模型 provider；Bridge 仍必须保持
+  `model_egress = "deny"`。
+
 ## Phase 2：Bridge 核心与 codemcp Adapter
 
 ### Goal
@@ -740,12 +755,14 @@ codemcp-remote/
 
 # Developer 起始顺序
 
-建议从 Phase 0 开始，紧接着完成 Phase 1 的 codemcp 兼容性验证。不要先开发完整 Bridge。
+Phase 0 和 Phase 1 已完成；下一步从 Phase 2 的本地 Bridge 核心与 codemcp
+Adapter 开始。不要先进行 Tunnel 联调。
 
-Phase 1 的结论将决定：
+Phase 1 已确定：
 
-1. Windows 原生还是 WSL2。
-2. 直接依赖上游 codemcp 还是维护最小 fork。
-3. 保留 codemcp 自动 commit 还是增加 Bridge 控制的 commit_mode。
+1. codemcp mutation worker 使用 WSL2，原生 Windows mutation 不支持。
+2. 初始 Adapter 直接依赖上游 `codemcp==0.3.0`，暂不维护 fork。
+3. 上游 Git commit 只作为后端事实记录；Bridge 的审批、checkpoint 和 rollback
+   仍由后续 Phase 实现。
 
-在这三个结论明确前，不应进入大规模 MCP 工具封装和 Tunnel 联调。
+在 Phase 2/3 的本地安全和可靠性测试通过前，不应进入 Tunnel 联调。

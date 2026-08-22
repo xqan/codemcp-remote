@@ -7,11 +7,14 @@
 - Commit: 683e6ec29b15b91ec12430afabf5a45ed57d2489
 - License reported by the repository: Apache-2.0
 
-The release tag and commit must be rechecked locally in Phase 1 before the
+The release tag and commit were rechecked locally in Phase 1 before the
 adapter is implemented. The Bridge must not depend on the moving main branch.
 
 Phase 1 results are recorded in
 [docs/codemcp-compatibility-matrix.md](codemcp-compatibility-matrix.md).
+
+The initial Adapter target is the upstream release running in WSL2 Ubuntu;
+native Windows Git-backed mutation is outside the supported worker matrix.
 
 ## Intended use in this project
 
