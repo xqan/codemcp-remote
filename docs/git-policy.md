@@ -1,0 +1,43 @@
+# Git Policy
+
+Phase 4 treats Git as a local protection and recovery boundary. The Bridge
+does not expose arbitrary Git arguments and does not perform push, merge,
+rebase, deploy, branch deletion, or force-reset operations on behalf of
+ChatGPT.
+
+## Mutation baseline
+
+- A registered project must be the Git worktree root. This prevents a reset
+  issued for one project from changing an unregistered sibling directory in a
+  monorepo.
+- The default policy requires an allowed branch and a clean worktree before
+  every mutation.
+- Before a mutation, the Bridge records branch, HEAD, changed paths, and a
+  Git tree manifest containing object IDs. It also creates a ref in
+  `refs/codemcp-remote/checkpoints/<checkpoint_id>`.
+- After a successful mutation, the Bridge records the new branch/HEAD,
+  changed paths, and a SHA-256 hash of the bounded diff representation.
+- The SQLite row and audit events are linked to the operation. Source file
+  contents are not copied into the database.
+
+## Manual checkpoint and diff
+
+`checkpoint_create` is an approved mutation and only creates a lightweight
+Bridge-owned ref after rechecking the clean worktree. `git_diff` accepts an
+optional `checkpoint_id`; when present, it compares the current worktree with
+that registered ref and rejects sensitive paths before returning any diff.
+
+## Compare-and-swap rollback
+
+`checkpoint_restore` requires the caller to obtain the current `head` from
+`git_status` and pass it as `expected_head`. The Bridge then rechecks:
+
+1. the checkpoint belongs to the current project and session;
+2. its ref still resolves to the recorded commit;
+3. the branch and HEAD still match the expected values; and
+4. the worktree is still clean.
+
+Only after a second explicit approval does the Bridge create a rollback safety
+checkpoint and execute the fixed reset to the registered ref. A failed
+compare-and-swap does not run Git reset. If the reset or post-reset check has
+an uncertain result, the operation becomes `unknown` and must be reconciled.

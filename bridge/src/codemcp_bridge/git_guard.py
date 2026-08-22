@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import re
 import signal
 import subprocess
 from dataclasses import dataclass
@@ -19,6 +21,30 @@ class GitStatus:
     head: str
     dirty: bool
     changed_files: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GitSnapshot:
+    branch: str
+    head: str
+    dirty: bool
+    changed_files: tuple[str, ...]
+    file_hashes: dict[str, str]
+
+    def as_data(self) -> dict[str, object]:
+        return {
+            "branch": self.branch,
+            "head": self.head,
+            "dirty": self.dirty,
+            "changed_files": list(self.changed_files),
+            "file_hashes": dict(self.file_hashes),
+        }
+
+
+_CHECKPOINT_REF_PATTERN = re.compile(
+    r"^refs/codemcp-remote/checkpoints/[0-9a-f]{32}$"
+)
+_HEAD_PATTERN = re.compile(r"^[0-9a-fA-F]{40,64}$")
 
 
 def _truncate_text(value: str, max_bytes: int) -> tuple[str, bool]:
@@ -127,10 +153,24 @@ class GitGuard:
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
+            "-z",
         )
-        changed_files = tuple(
-            line[3:].strip() for line in porcelain.splitlines() if len(line) >= 3
-        )
+        entries = porcelain.split("\0")
+        changed: list[str] = []
+        index = 0
+        while index < len(entries):
+            entry = entries[index]
+            if len(entry) < 3:
+                index += 1
+                continue
+            status_code = entry[:2]
+            changed.append(entry[3:])
+            if "R" in status_code or "C" in status_code:
+                index += 1
+                if index < len(entries) and entries[index]:
+                    changed.append(entries[index])
+            index += 1
+        changed_files = tuple(changed)
         return GitStatus(
             branch=branch,
             head=head,
@@ -138,7 +178,90 @@ class GitGuard:
             changed_files=changed_files,
         )
 
+    async def require_worktree_root(self, project_root: Path) -> None:
+        actual = Path(
+            (await self._run(project_root, "rev-parse", "--show-toplevel")).strip()
+        ).resolve(strict=False)
+        expected = project_root.resolve(strict=False)
+        if os.path.normcase(str(actual)) != os.path.normcase(str(expected)):
+            raise BridgeError(
+                "PROJECT_NOT_ALLOWED",
+                "registered project root must be the Git worktree root",
+                {"expected_root": str(expected), "actual_root": str(actual)},
+            )
+
+    async def snapshot(self, project_root: Path) -> GitSnapshot:
+        status = await self.status(project_root)
+        tree = await self._run(project_root, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+        file_hashes: dict[str, str] = {}
+        for entry in tree.split("\0"):
+            if "\t" not in entry:
+                continue
+            header, path = entry.split("\t", 1)
+            fields = header.split()
+            if len(fields) == 3 and fields[1] == "blob":
+                file_hashes[path] = fields[2]
+        return GitSnapshot(
+            branch=status.branch,
+            head=status.head,
+            dirty=status.dirty,
+            changed_files=status.changed_files,
+            file_hashes=file_hashes,
+        )
+
+    @staticmethod
+    def diff_hash(diff: str) -> str:
+        return hashlib.sha256(diff.encode("utf-8", errors="replace")).hexdigest()
+
+    @staticmethod
+    def _require_checkpoint_ref(ref_name: str) -> None:
+        if not _CHECKPOINT_REF_PATTERN.fullmatch(ref_name):
+            raise BridgeError("CHECKPOINT_INVALID", "checkpoint ref is not Bridge-owned")
+
+    @staticmethod
+    def _require_head(head: str) -> None:
+        if not _HEAD_PATTERN.fullmatch(head):
+            raise BridgeError("CHECKPOINT_INVALID", "checkpoint head is not a Git commit")
+
+    @staticmethod
+    def _reject_sensitive_names(names: tuple[str, ...] | list[str]) -> None:
+        sensitive_names = [name for name in names if is_sensitive_relative_path(name)]
+        if sensitive_names:
+            raise BridgeError(
+                "SENSITIVE_PATH",
+                "diff includes sensitive paths and is not exposed",
+                {"paths": sensitive_names},
+            )
+
+    async def create_checkpoint_ref(self, project_root: Path, ref_name: str, head: str) -> None:
+        self._require_checkpoint_ref(ref_name)
+        self._require_head(head)
+        await self._run(project_root, "update-ref", "--no-deref", ref_name, head)
+
+    async def delete_checkpoint_ref(self, project_root: Path, ref_name: str) -> None:
+        self._require_checkpoint_ref(ref_name)
+        await self._run(project_root, "update-ref", "--no-deref", "-d", ref_name)
+
+    async def resolve_checkpoint_ref(self, project_root: Path, ref_name: str) -> str:
+        self._require_checkpoint_ref(ref_name)
+        resolved = (
+            await self._run(
+                project_root,
+                "rev-parse",
+                "--verify",
+                f"{ref_name}^{{commit}}",
+            )
+        ).strip()
+        self._require_head(resolved)
+        return resolved
+
+    async def reset_to_checkpoint(self, project_root: Path, ref_name: str) -> None:
+        self._require_checkpoint_ref(ref_name)
+        await self._run(project_root, "reset", "--hard", ref_name)
+
     async def diff(self, project_root: Path) -> tuple[str, bool]:
+        status = await self.status(project_root)
+        self._reject_sensitive_names(status.changed_files)
         changed_names = await self._run(
             project_root,
             "diff",
@@ -146,15 +269,49 @@ class GitGuard:
             "--no-renames",
             "--name-only",
             "-z",
+            "HEAD",
+            "--",
         )
-        sensitive_names = [
-            name for name in changed_names.split("\0") if name and is_sensitive_relative_path(name)
-        ]
-        if sensitive_names:
-            raise BridgeError(
-                "SENSITIVE_PATH",
-                "diff includes sensitive paths and is not exposed",
-                {"paths": sensitive_names},
-            )
-        output = await self._run(project_root, "diff", "--no-ext-diff", "--unified=3")
+        self._reject_sensitive_names([name for name in changed_names.split("\0") if name])
+        output = await self._run(
+            project_root,
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--unified=3",
+            "HEAD",
+            "--",
+        )
+        return _truncate_text(output, self._max_output_bytes)
+
+    async def diff_names_from(self, project_root: Path, ref_name: str) -> tuple[str, ...]:
+        self._require_checkpoint_ref(ref_name)
+        status = await self.status(project_root)
+        self._reject_sensitive_names(status.changed_files)
+        changed_names = await self._run(
+            project_root,
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            ref_name,
+            "--",
+        )
+        names = tuple(name for name in changed_names.split("\0") if name)
+        self._reject_sensitive_names(names)
+        return names
+
+    async def diff_from(self, project_root: Path, ref_name: str) -> tuple[str, bool]:
+        self._require_checkpoint_ref(ref_name)
+        await self.diff_names_from(project_root, ref_name)
+        output = await self._run(
+            project_root,
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--unified=3",
+            ref_name,
+            "--",
+        )
         return _truncate_text(output, self._max_output_bytes)

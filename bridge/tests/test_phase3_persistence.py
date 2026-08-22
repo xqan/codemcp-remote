@@ -46,15 +46,18 @@ def test_schema_migrations_are_idempotent(tmp_path: Path) -> None:
     with sqlite3.connect(database.path) as connection:
         assert connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        ).fetchall() == [(1,), (2,)]
+        ).fetchall() == [(1,), (2,), (3,)]
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_events'"
         ).fetchone() == ("audit_events",)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='checkpoints'"
+        ).fetchone() == ("checkpoints",)
 
     database.close()
     database.initialize()
     with sqlite3.connect(database.path) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (2,)
+        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (3,)
     database.close()
 
 

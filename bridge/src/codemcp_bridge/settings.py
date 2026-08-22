@@ -1,4 +1,4 @@
-"""Configuration models for the Phase 3 local Bridge."""
+"""Configuration models for the Phase 4 local Bridge."""
 
 from __future__ import annotations
 
@@ -203,7 +203,7 @@ def load_settings(
         raise SettingsError("server.path must start with '/'")
     transport = server_raw.get("transport", "streamable-http")
     if transport != "streamable-http":
-        raise SettingsError("server.transport must be streamable-http in Phase 3")
+        raise SettingsError("server.transport must be streamable-http in Phase 4")
     port = server_raw.get("port", 46200)
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise SettingsError("server.port must be between 1 and 65535")
@@ -236,10 +236,10 @@ def load_settings(
     if any(policy_raw[key] for key in bool_keys[:3]):
         raise SettingsError(
             "policy.allow_arbitrary_paths, policy.allow_arbitrary_commands, and "
-            "policy.allow_model_calls must remain false in Phase 3"
+            "policy.allow_model_calls must remain false in Phase 4"
         )
     if policy_raw.get("mutation_lock", "per-project") != "per-project":
-        raise SettingsError("policy.mutation_lock must be per-project in Phase 3")
+        raise SettingsError("policy.mutation_lock must be per-project in Phase 4")
     approval_ttl_seconds = policy_raw.get("approval_ttl_seconds", 300)
     if not isinstance(approval_ttl_seconds, int | float) or approval_ttl_seconds <= 0:
         raise SettingsError("policy.approval_ttl_seconds must be positive")

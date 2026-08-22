@@ -1,4 +1,4 @@
-"""Small transactional SQLite store used by the Phase 3 services."""
+"""Small transactional SQLite store used by the Bridge services."""
 
 from __future__ import annotations
 
@@ -106,6 +106,33 @@ class OperationRecord:
     @property
     def error_data(self) -> dict[str, Any] | None:
         return json.loads(self.error_json) if self.error_json else None
+
+
+@dataclass(frozen=True, slots=True)
+class CheckpointRecord:
+    checkpoint_id: str
+    project_id: str
+    session_id: str | None
+    operation_id: str | None
+    owner_id: str
+    kind: str
+    branch: str
+    head: str
+    ref_name: str
+    before_json: str
+    after_json: str | None
+    diff_hash: str | None
+    status: str
+    created_at: str
+    updated_at: str
+
+    @property
+    def before_data(self) -> dict[str, Any]:
+        return json.loads(self.before_json)
+
+    @property
+    def after_data(self) -> dict[str, Any] | None:
+        return json.loads(self.after_json) if self.after_json else None
 
 
 class PersistenceError(RuntimeError):
@@ -285,6 +312,28 @@ class Database:
             updated_at=row["updated_at"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],
+        )
+
+    @staticmethod
+    def _checkpoint(row: sqlite3.Row | None) -> CheckpointRecord | None:
+        if row is None:
+            return None
+        return CheckpointRecord(
+            checkpoint_id=row["checkpoint_id"],
+            project_id=row["project_id"],
+            session_id=row["session_id"],
+            operation_id=row["operation_id"],
+            owner_id=row["owner_id"],
+            kind=row["kind"],
+            branch=row["branch"],
+            head=row["head"],
+            ref_name=row["ref_name"],
+            before_json=row["before_json"],
+            after_json=row["after_json"],
+            diff_hash=row["diff_hash"],
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )
 
     def create_session(self, session_id: str, project_id: str, owner_id: str) -> SessionRecord:
@@ -614,6 +663,175 @@ class Database:
                 "SELECT * FROM operations WHERE operation_id=?", (operation_id,)
             ).fetchone()
         return self._operation(row)
+
+    def create_checkpoint(
+        self,
+        *,
+        checkpoint_id: str,
+        project_id: str,
+        session_id: str | None,
+        operation_id: str | None,
+        owner_id: str,
+        kind: str,
+        branch: str,
+        head: str,
+        ref_name: str,
+        before_data: dict[str, Any],
+    ) -> CheckpointRecord:
+        now = utc_now()
+        with self._transaction() as connection:
+            connection.execute(
+                "INSERT INTO checkpoints("
+                "checkpoint_id, project_id, session_id, operation_id, owner_id, kind, "
+                "branch, head, ref_name, before_json, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)",
+                (
+                    checkpoint_id,
+                    project_id,
+                    session_id,
+                    operation_id,
+                    owner_id,
+                    kind,
+                    branch,
+                    head,
+                    ref_name,
+                    json_dumps(before_data),
+                    now,
+                    now,
+                ),
+            )
+            self._audit(
+                connection,
+                operation_id=operation_id,
+                project_id=project_id,
+                session_id=session_id,
+                owner_id=owner_id,
+                event_type="checkpoint.created",
+                from_state=None,
+                to_state="created",
+                details={
+                    "checkpoint_id": checkpoint_id,
+                    "kind": kind,
+                    "branch": branch,
+                    "head": head,
+                    "ref_name": ref_name,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+            ).fetchone()
+        result = self._checkpoint(row)
+        assert result is not None
+        return result
+
+    def finalize_checkpoint(
+        self,
+        checkpoint_id: str,
+        *,
+        after_data: dict[str, Any],
+        diff_hash: str,
+    ) -> CheckpointRecord:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+            ).fetchone()
+            current = self._checkpoint(row)
+            if current is None:
+                raise PersistenceError("checkpoint not found")
+            now = utc_now()
+            connection.execute(
+                "UPDATE checkpoints SET after_json=?, diff_hash=?, updated_at=? "
+                "WHERE checkpoint_id=?",
+                (json_dumps(after_data), diff_hash, now, checkpoint_id),
+            )
+            self._audit(
+                connection,
+                operation_id=current.operation_id,
+                project_id=current.project_id,
+                session_id=current.session_id,
+                owner_id=current.owner_id,
+                event_type="checkpoint.finalized",
+                from_state=current.status,
+                to_state=current.status,
+                details={
+                    "checkpoint_id": checkpoint_id,
+                    "after_head": after_data.get("head"),
+                    "diff_hash": diff_hash,
+                },
+            )
+            updated = connection.execute(
+                "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+            ).fetchone()
+        result = self._checkpoint(updated)
+        assert result is not None
+        return result
+
+    def mark_checkpoint_restored(self, checkpoint_id: str) -> CheckpointRecord:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+            ).fetchone()
+            current = self._checkpoint(row)
+            if current is None:
+                raise PersistenceError("checkpoint not found")
+            now = utc_now()
+            connection.execute(
+                "UPDATE checkpoints SET status='restored', updated_at=? "
+                "WHERE checkpoint_id=?",
+                (now, checkpoint_id),
+            )
+            self._audit(
+                connection,
+                operation_id=current.operation_id,
+                project_id=current.project_id,
+                session_id=current.session_id,
+                owner_id=current.owner_id,
+                event_type="checkpoint.restored",
+                from_state=current.status,
+                to_state="restored",
+                details={"checkpoint_id": checkpoint_id, "head": current.head},
+            )
+            updated = connection.execute(
+                "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+            ).fetchone()
+        result = self._checkpoint(updated)
+        assert result is not None
+        return result
+
+    def get_checkpoint(self, checkpoint_id: str) -> CheckpointRecord | None:
+        connection = self._require_connection()
+        with self._lock:
+            row = connection.execute(
+                "SELECT * FROM checkpoints WHERE checkpoint_id=?", (checkpoint_id,)
+            ).fetchone()
+        return self._checkpoint(row)
+
+    def list_checkpoints(
+        self,
+        *,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        operation_id: str | None = None,
+    ) -> list[CheckpointRecord]:
+        connection = self._require_connection()
+        clauses: list[str] = []
+        values: list[str] = []
+        if project_id is not None:
+            clauses.append("project_id=?")
+            values.append(project_id)
+        if session_id is not None:
+            clauses.append("session_id=?")
+            values.append(session_id)
+        if operation_id is not None:
+            clauses.append("operation_id=?")
+            values.append(operation_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            rows = connection.execute(
+                f"SELECT * FROM checkpoints{where} ORDER BY created_at, checkpoint_id",
+                values,
+            ).fetchall()
+        return [checkpoint for row in rows if (checkpoint := self._checkpoint(row))]
 
     def transition_operation(
         self,

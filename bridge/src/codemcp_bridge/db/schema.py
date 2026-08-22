@@ -1,8 +1,8 @@
-"""SQLite schema migrations for Phase 3 lifecycle state."""
+"""SQLite schema migrations for Bridge lifecycle and Git state."""
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -105,6 +105,36 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             WHERE mutation = 1 AND state IN (
                 'received', 'validated', 'awaiting_approval', 'dispatched', 'running', 'unknown'
             );
+        """,
+    ),
+    (
+        3,
+        """
+        CREATE TABLE IF NOT EXISTS checkpoints (
+            checkpoint_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            session_id TEXT,
+            operation_id TEXT REFERENCES operations(operation_id),
+            owner_id TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (
+                kind IN ('manual', 'mutation', 'rollback_safety')
+            ),
+            branch TEXT NOT NULL,
+            head TEXT NOT NULL,
+            ref_name TEXT NOT NULL UNIQUE,
+            before_json TEXT NOT NULL,
+            after_json TEXT,
+            diff_hash TEXT,
+            status TEXT NOT NULL CHECK (status IN ('created', 'restored')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS checkpoints_project_created_idx
+            ON checkpoints(project_id, created_at);
+
+        CREATE INDEX IF NOT EXISTS checkpoints_operation_idx
+            ON checkpoints(operation_id, created_at);
         """,
     ),
 )

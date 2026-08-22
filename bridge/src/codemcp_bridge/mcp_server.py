@@ -1,4 +1,4 @@
-"""Loopback MCP server and the Phase 3 policy-controlled tool surface."""
+"""Loopback MCP server and the Phase 4 policy-controlled tool surface."""
 
 from __future__ import annotations
 
@@ -16,8 +16,9 @@ from starlette.responses import JSONResponse
 
 from .approval_service import ApprovalService
 from .audit_store import AuditStore
+from .checkpoint_service import CheckpointService
 from .codemcp_adapter import CodemcpAdapter
-from .db import Database, OperationRecord, SessionRecord
+from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
 from .git_guard import GitGuard
 from .operation_service import OperationService
@@ -54,7 +55,7 @@ class AdapterLike(Protocol):
     async def close(self) -> None: ...
 
 
-Operation = Callable[[], Awaitable[_Outcome]]
+Operation = Callable[[str], Awaitable[_Outcome]]
 
 
 def _is_codemcp_error(result: Any) -> bool:
@@ -75,6 +76,7 @@ class BridgeService:
             self.database, ttl_seconds=settings.policy.approval_ttl_seconds
         )
         self.audit = AuditStore(self.database)
+        self.checkpoints = CheckpointService(self.database, self.git)
         self._started = False
         self._mutation_locks: dict[str, asyncio.Lock] = {}
 
@@ -180,7 +182,7 @@ class BridgeService:
             return payload
         try:
             self.operations.dispatch(operation_id)
-            outcome = await operation()
+            outcome = await operation(operation_id)
             response_session_id = session_id
             returned_session_id = outcome.data.get("session_id")
             if response_session_id is None and isinstance(returned_session_id, str):
@@ -231,6 +233,38 @@ class BridgeService:
     async def _require_session(self, project_id: str, session_id: str | None) -> SessionRecord:
         return self.sessions.require_active(project_id, session_id)
 
+    async def _begin_mutation(
+        self,
+        project: ProjectSpec,
+        *,
+        session_id: str,
+        operation_id: str,
+    ) -> CheckpointRecord:
+        await self.policy.require_mutation_preconditions(project)
+        return await self.checkpoints.create(
+            project,
+            session_id=session_id,
+            operation_id=operation_id,
+            kind="mutation",
+        )
+
+    async def _finish_mutation(
+        self, project: ProjectSpec, checkpoint: CheckpointRecord
+    ) -> dict[str, Any]:
+        try:
+            finalized = await self.checkpoints.finalize(project, checkpoint)
+        except BridgeError as exc:
+            raise BridgeError(
+                "UNKNOWN_SIDE_EFFECT",
+                "mutation completed but its Git result could not be recorded",
+                {
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "cause": exc.code,
+                },
+                status="unknown",
+            ) from exc
+        return self.checkpoints.summary(finalized)
+
     async def start(self) -> None:
         if self._started:
             return
@@ -239,7 +273,7 @@ class BridgeService:
         self._started = True
 
     async def project_open(self, ctx: Context | None, project_id: str) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             project = self.registry.get(project_id)
             status = await self.policy.inspect_project(project)
             session = self.sessions.create(project_id)
@@ -272,7 +306,7 @@ class BridgeService:
         project_id: str,
         session_id: str | None,
     ) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             project = self.registry.get(project_id)
             if session_id:
                 await self._require_session(project_id, session_id)
@@ -306,7 +340,7 @@ class BridgeService:
         offset: int | None,
         limit: int | None,
     ) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             if offset is not None and offset < 0:
                 raise BridgeError("INVALID_REQUEST", "offset must not be negative")
@@ -356,7 +390,7 @@ class BridgeService:
         path: str | None,
         include: str | None,
     ) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             self.policy.validate_pattern(pattern)
             project, target, _ = self.registry.resolve_path(project_id, path, allow_root=True)
@@ -389,7 +423,7 @@ class BridgeService:
         session_id: str,
         path: str | None,
     ) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             project, target, _ = self.registry.resolve_path(project_id, path, allow_root=True)
             if not target.is_dir():
@@ -428,7 +462,7 @@ class BridgeService:
         client_request_id: str | None,
         request_hash: str | None,
     ) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             if not description or len(description) > 500:
                 raise BridgeError("INVALID_REQUEST", "description must be 1-500 characters")
@@ -440,7 +474,11 @@ class BridgeService:
             self.policy.require_regular_file(target)
             self.policy.validate_file_size(target)
             async with self._mutation_lock(project_id):
-                await self.policy.require_mutation_preconditions(project)
+                checkpoint = await self._begin_mutation(
+                    project,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                )
                 result = await self.adapter.call(
                     project,
                     "EditFile",
@@ -457,7 +495,12 @@ class BridgeService:
                 raise BridgeError("CONFLICT", "codemcp rejected EditFile", status="failed")
             if result.text.startswith("String to replace not found"):
                 raise BridgeError("CONFLICT", "old_string was not found in the file")
-            return _Outcome({"text": result.text}, [relative], result.truncated)
+            checkpoint_data = await self._finish_mutation(project, checkpoint)
+            return _Outcome(
+                {"text": result.text, "checkpoint": checkpoint_data},
+                [relative],
+                result.truncated,
+            )
 
         return await self._execute(
             ctx,
@@ -498,7 +541,7 @@ class BridgeService:
             prepared["command"] = command
             return command.approval == "required"
 
-        async def operation() -> _Outcome:
+        async def operation(operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             project = prepared.get("project") or self.registry.get(project_id)
             command = prepared.get("command")
@@ -506,7 +549,7 @@ class BridgeService:
                 command = self.policy.command(
                     project, command_id, expected_kind, require_approval=False
                 )
-            return await self._run_command_body(project, command, session_id)
+            return await self._run_command_body(project, command, session_id, operation_id)
 
         return await self._execute(
             ctx,
@@ -526,10 +569,18 @@ class BridgeService:
         )
 
     async def _run_command_body(
-        self, project: ProjectSpec, command: CommandSpec, session_id: str
+        self,
+        project: ProjectSpec,
+        command: CommandSpec,
+        session_id: str,
+        operation_id: str,
     ) -> _Outcome:
         async with self._mutation_lock(project.project_id):
-            await self.policy.require_mutation_preconditions(project)
+            checkpoint = await self._begin_mutation(
+                project,
+                session_id=session_id,
+                operation_id=operation_id,
+            )
             result = await self.adapter.call(
                 project,
                 "RunCommand",
@@ -543,9 +594,14 @@ class BridgeService:
                 "codemcp rejected RunCommand",
                 status="failed",
             )
+        checkpoint_data = await self._finish_mutation(project, checkpoint)
         return _Outcome(
-            {"command_id": command.command_id, "text": result.text},
-            [],
+            {
+                "command_id": command.command_id,
+                "text": result.text,
+                "checkpoint": checkpoint_data,
+            },
+            checkpoint_data["after"]["changed_files"],
             result.truncated,
             "succeeded",
         )
@@ -594,7 +650,7 @@ class BridgeService:
         project_id: str,
         session_id: str,
     ) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             project = self.registry.get(project_id)
             status = await self.policy.inspect_project(project)
@@ -622,13 +678,31 @@ class BridgeService:
         ctx: Context | None,
         project_id: str,
         session_id: str,
+        checkpoint_id: str | None = None,
     ) -> dict[str, Any]:
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             project = self.registry.get(project_id)
             await self.policy.inspect_project(project)
-            diff, truncated = await self.git.diff(project.root)
-            return _Outcome({"text": diff}, [], truncated)
+            if checkpoint_id is None:
+                diff, truncated = await self.git.diff(project.root)
+                return _Outcome({"text": diff}, [], truncated)
+            checkpoint = self.checkpoints.get_for_session(
+                checkpoint_id,
+                project_id=project_id,
+                session_id=session_id,
+            )
+            await self.checkpoints.verify_ref(project, checkpoint)
+            changed_files = await self.git.diff_names_from(project.root, checkpoint.ref_name)
+            diff, truncated = await self.git.diff_from(project.root, checkpoint.ref_name)
+            return _Outcome(
+                {
+                    "text": diff,
+                    "checkpoint": self.checkpoints.summary(checkpoint),
+                },
+                list(changed_files),
+                truncated,
+            )
 
         return await self._execute(
             ctx,
@@ -636,8 +710,274 @@ class BridgeService:
             session_id=session_id,
             operation=operation,
             operation_kind="git_diff",
-            operation_input={"project_id": project_id, "session_id": session_id},
+            operation_input={
+                "project_id": project_id,
+                "session_id": session_id,
+                "checkpoint_id": checkpoint_id,
+            },
         )
+
+    async def _create_checkpoint_for_operation(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        operation_id: str,
+    ) -> _Outcome:
+        project = self.registry.get(project_id)
+        async with self._mutation_lock(project.project_id):
+            checkpoint = await self.checkpoints.create(
+                project,
+                session_id=session_id,
+                operation_id=operation_id,
+                kind="manual",
+            )
+        return _Outcome(
+            {"checkpoint": self.checkpoints.summary(checkpoint)},
+            [],
+        )
+
+    async def _run_checkpoint_create_for_operation(
+        self, operation: OperationRecord
+    ) -> _Outcome:
+        if operation.session_id is None:
+            raise BridgeError("SESSION_REQUIRED", "checkpoint operation has no session")
+        return await self._create_checkpoint_for_operation(
+            project_id=operation.project_id,
+            session_id=operation.session_id,
+            operation_id=operation.operation_id,
+        )
+
+    async def checkpoint_create(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        async def approval_check() -> bool:
+            await self._require_session(project_id, session_id)
+            project = self.registry.get(project_id)
+            await self.policy.require_mutation_preconditions(project)
+            return True
+
+        async def operation(operation_id: str) -> _Outcome:
+            await self._require_session(project_id, session_id)
+            return await self._create_checkpoint_for_operation(
+                project_id=project_id,
+                session_id=session_id,
+                operation_id=operation_id,
+            )
+
+        return await self._execute(
+            ctx,
+            project_id=project_id,
+            session_id=session_id,
+            operation=operation,
+            operation_kind="checkpoint_create",
+            operation_input={"project_id": project_id, "session_id": session_id},
+            mutation=True,
+            client_request_id=client_request_id,
+            supplied_request_hash=request_hash,
+            approval_action="checkpoint_create",
+            approval_check=approval_check,
+        )
+
+    async def _restore_checkpoint_for_operation(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        checkpoint_id: str,
+        expected_head: str,
+        operation_id: str,
+    ) -> _Outcome:
+        self.checkpoints.validate_expected_head(expected_head)
+        await self._require_session(project_id, session_id)
+        project = self.registry.get(project_id)
+        async with self._mutation_lock(project_id):
+            checkpoint = self.checkpoints.get_for_session(
+                checkpoint_id,
+                project_id=project_id,
+                session_id=session_id,
+            )
+            await self.checkpoints.verify_ref(project, checkpoint)
+            current = await self.policy.inspect_project(project, enforce_branch=False)
+            if current.branch != checkpoint.branch or current.head.lower() != expected_head.lower():
+                raise BridgeError(
+                    "CHECKPOINT_CONFLICT",
+                    "rollback compare-and-swap precondition failed",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "expected_branch": checkpoint.branch,
+                        "actual_branch": current.branch,
+                        "expected_head": expected_head,
+                        "actual_head": current.head,
+                    },
+                )
+            self.policy.require_allowed_branch(project, current.branch)
+            self.policy.require_clean_workspace(project, current)
+            safety = await self.checkpoints.create(
+                project,
+                session_id=session_id,
+                operation_id=operation_id,
+                kind="rollback_safety",
+            )
+            try:
+                await self.git.reset_to_checkpoint(project.root, checkpoint.ref_name)
+            except BridgeError as exc:
+                raise BridgeError(
+                    "UNKNOWN_SIDE_EFFECT",
+                    "rollback outcome is unknown and requires reconciliation",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "safety_checkpoint_id": safety.checkpoint_id,
+                        "cause": exc.code,
+                    },
+                    status="unknown",
+                ) from exc
+            try:
+                after = await self.git.snapshot(project.root)
+                if (
+                    after.branch != checkpoint.branch
+                    or after.head.lower() != checkpoint.head.lower()
+                    or after.dirty
+                ):
+                    raise BridgeError(
+                        "UNKNOWN_SIDE_EFFECT",
+                        "rollback completed but the restored Git state cannot be confirmed",
+                        {
+                            "checkpoint_id": checkpoint_id,
+                            "expected_branch": checkpoint.branch,
+                            "actual_branch": after.branch,
+                            "expected_head": checkpoint.head,
+                            "actual_head": after.head,
+                            "dirty": after.dirty,
+                        },
+                        status="unknown",
+                    )
+                safety = await self.checkpoints.finalize(project, safety)
+            except BridgeError as exc:
+                if exc.code == "UNKNOWN_SIDE_EFFECT":
+                    raise
+                raise BridgeError(
+                    "UNKNOWN_SIDE_EFFECT",
+                    "rollback completed but its Git result could not be recorded",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "safety_checkpoint_id": safety.checkpoint_id,
+                        "cause": exc.code,
+                    },
+                    status="unknown",
+                ) from exc
+            restored = self.checkpoints.mark_restored(checkpoint_id)
+        return _Outcome(
+            {
+                "checkpoint": self.checkpoints.summary(restored),
+                "safety_checkpoint": self.checkpoints.summary(safety),
+                "restored_head": checkpoint.head,
+                "branch": checkpoint.branch,
+            },
+            safety.after_data.get("changed_files", []) if safety.after_data else [],
+        )
+
+    async def _run_checkpoint_restore_for_operation(
+        self, operation: OperationRecord
+    ) -> _Outcome:
+        if operation.session_id is None:
+            raise BridgeError("SESSION_REQUIRED", "rollback operation has no session")
+        input_data = operation.input_data
+        checkpoint_id = input_data.get("checkpoint_id")
+        expected_head = input_data.get("expected_head")
+        if not isinstance(checkpoint_id, str) or not isinstance(expected_head, str):
+            raise BridgeError("INVALID_REQUEST", "stored rollback operation is malformed")
+        return await self._restore_checkpoint_for_operation(
+            project_id=operation.project_id,
+            session_id=operation.session_id,
+            checkpoint_id=checkpoint_id,
+            expected_head=expected_head,
+            operation_id=operation.operation_id,
+        )
+
+    async def checkpoint_restore(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        checkpoint_id: str,
+        expected_head: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        async def approval_check() -> bool:
+            await self._restore_checkpoint_preconditions(
+                project_id,
+                session_id,
+                checkpoint_id,
+                expected_head,
+            )
+            return True
+
+        async def operation(operation_id: str) -> _Outcome:
+            return await self._restore_checkpoint_for_operation(
+                project_id=project_id,
+                session_id=session_id,
+                checkpoint_id=checkpoint_id,
+                expected_head=expected_head,
+                operation_id=operation_id,
+            )
+
+        return await self._execute(
+            ctx,
+            project_id=project_id,
+            session_id=session_id,
+            operation=operation,
+            operation_kind="checkpoint_restore",
+            operation_input={
+                "project_id": project_id,
+                "session_id": session_id,
+                "checkpoint_id": checkpoint_id,
+                "expected_head": expected_head,
+            },
+            mutation=True,
+            client_request_id=client_request_id,
+            supplied_request_hash=request_hash,
+            approval_action=f"checkpoint_restore:{checkpoint_id}",
+            approval_check=approval_check,
+        )
+
+    async def _restore_checkpoint_preconditions(
+        self,
+        project_id: str,
+        session_id: str,
+        checkpoint_id: str,
+        expected_head: str,
+    ) -> None:
+        self.checkpoints.validate_expected_head(expected_head)
+        await self._require_session(project_id, session_id)
+        project = self.registry.get(project_id)
+        checkpoint = self.checkpoints.get_for_session(
+            checkpoint_id,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        await self.checkpoints.verify_ref(project, checkpoint)
+        current = await self.policy.inspect_project(project, enforce_branch=False)
+        if current.branch != checkpoint.branch or current.head.lower() != expected_head.lower():
+            raise BridgeError(
+                "CHECKPOINT_CONFLICT",
+                "rollback compare-and-swap precondition failed",
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "expected_branch": checkpoint.branch,
+                    "actual_branch": current.branch,
+                    "expected_head": expected_head,
+                    "actual_head": current.head,
+                },
+            )
+        self.policy.require_allowed_branch(project, current.branch)
+        self.policy.require_clean_workspace(project, current)
 
     async def operation_status(
         self,
@@ -670,6 +1010,7 @@ class BridgeService:
                     "finished_at": record.finished_at,
                     "result": record.result_data,
                     "error": record.error_data,
+                    "checkpoints": self.checkpoints.for_operation(record.operation_id),
                     "audit_events": self.audit.for_operation(record.operation_id),
                 },
             )
@@ -703,7 +1044,7 @@ class BridgeService:
                 error=exc,
             )
 
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             self.sessions.require_active(original.project_id, session_id)
             if original.session_id != session_id:
                 raise BridgeError(
@@ -722,7 +1063,7 @@ class BridgeService:
                 approved.operation_id, from_state="awaiting_approval"
             )
             try:
-                outcome = await self._run_command_for_operation(running)
+                outcome = await self._run_approved_operation(running)
             except BridgeError as exc:
                 final = error_payload(
                     request_id=self._request_id(ctx),
@@ -790,6 +1131,13 @@ class BridgeService:
             supplied_request_hash=request_hash,
         )
 
+    async def _run_approved_operation(self, operation: OperationRecord) -> _Outcome:
+        if operation.kind == "checkpoint_create":
+            return await self._run_checkpoint_create_for_operation(operation)
+        if operation.kind == "checkpoint_restore":
+            return await self._run_checkpoint_restore_for_operation(operation)
+        return await self._run_command_for_operation(operation)
+
     async def _run_command_for_operation(self, operation: OperationRecord) -> _Outcome:
         input_data = operation.input_data
         command_id = input_data.get("command_id")
@@ -802,7 +1150,12 @@ class BridgeService:
         )
         if operation.session_id is None:
             raise BridgeError("SESSION_REQUIRED", "approved operation has no session")
-        return await self._run_command_body(project, command, operation.session_id)
+        return await self._run_command_body(
+            project,
+            command,
+            operation.session_id,
+            operation.operation_id,
+        )
 
     async def operation_cancel(
         self,
@@ -824,7 +1177,7 @@ class BridgeService:
                 error=exc,
             )
 
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             self.sessions.require_active(original.project_id, session_id)
             if original.session_id != session_id:
                 raise BridgeError("SESSION_NOT_FOUND", "operation belongs to a different session")
@@ -879,7 +1232,7 @@ class BridgeService:
                 error=exc,
             )
 
-        async def operation() -> _Outcome:
+        async def operation(_operation_id: str) -> _Outcome:
             self.sessions.require_active(original.project_id, session_id)
             if decision != "failed":
                 raise BridgeError(
@@ -923,7 +1276,7 @@ class BridgeService:
     async def health(self) -> dict[str, Any]:
         return {
             "status": "ok",
-            "phase": "3",
+            "phase": "4",
             "transport": self.settings.server.transport,
             "endpoint": (
                 f"{self.settings.server.host}:{self.settings.server.port}"
@@ -1086,9 +1439,48 @@ def create_server(
 
     @server.tool(description="Return a bounded Git diff for a registered project.")
     async def git_diff(
-        project_id: str, session_id: str, ctx: Context | None = None
+        project_id: str,
+        session_id: str,
+        checkpoint_id: str | None = None,
+        ctx: Context | None = None,
     ) -> dict[str, Any]:
-        return await service.git_diff(ctx, project_id, session_id)
+        return await service.git_diff(ctx, project_id, session_id, checkpoint_id)
+
+    @server.tool(description="Create a Bridge-owned Git checkpoint after explicit approval.")
+    async def checkpoint_create(
+        project_id: str,
+        session_id: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.checkpoint_create(
+            ctx,
+            project_id,
+            session_id,
+            client_request_id,
+            request_hash,
+        )
+
+    @server.tool(description="Restore a Bridge-owned checkpoint with compare-and-swap approval.")
+    async def checkpoint_restore(
+        project_id: str,
+        session_id: str,
+        checkpoint_id: str,
+        expected_head: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.checkpoint_restore(
+            ctx,
+            project_id,
+            session_id,
+            checkpoint_id,
+            expected_head,
+            client_request_id,
+            request_hash,
+        )
 
     @server.tool(description="Return the persistent state and audit trail of one operation.")
     async def operation_status(

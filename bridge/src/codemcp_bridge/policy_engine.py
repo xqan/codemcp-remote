@@ -18,27 +18,31 @@ class PolicyEngine:
         self._registry = registry
         self._git = git
 
-    async def inspect_project(self, project: ProjectSpec) -> GitStatus:
+    async def inspect_project(
+        self, project: ProjectSpec, *, enforce_branch: bool = True
+    ) -> GitStatus:
         if not project.root.is_dir():
             raise BridgeError(
                 "PROJECT_NOT_ALLOWED",
                 "registered project root does not exist",
                 {"project_id": project.project_id},
             )
+        await self._git.require_worktree_root(project.root)
         status = await self._git.status(project.root)
-        if not any(
-            fnmatch.fnmatchcase(status.branch, pattern)
-            for pattern in project.allowed_branches
-        ):
+        if enforce_branch:
+            self.require_allowed_branch(project, status.branch)
+        return status
+
+    @staticmethod
+    def require_allowed_branch(project: ProjectSpec, branch: str) -> None:
+        if not any(fnmatch.fnmatchcase(branch, pattern) for pattern in project.allowed_branches):
             raise BridgeError(
                 "BRANCH_NOT_ALLOWED",
                 "current branch is not allowed for this project",
-                {"project_id": project.project_id, "branch": status.branch},
+                {"project_id": project.project_id, "branch": branch},
             )
-        return status
 
-    async def require_mutation_preconditions(self, project: ProjectSpec) -> GitStatus:
-        status = await self.inspect_project(project)
+    def require_clean_workspace(self, project: ProjectSpec, status: GitStatus) -> GitStatus:
         if (
             self._settings.policy.require_clean_workspace
             and project.require_clean_workspace
@@ -50,6 +54,12 @@ class PolicyEngine:
                 {"changed_files": list(status.changed_files)},
             )
         return status
+
+    async def require_mutation_preconditions(
+        self, project: ProjectSpec, *, enforce_branch: bool = True
+    ) -> GitStatus:
+        status = await self.inspect_project(project, enforce_branch=enforce_branch)
+        return self.require_clean_workspace(project, status)
 
     def command(
         self,

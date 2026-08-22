@@ -33,6 +33,9 @@ ERROR_CODES = frozenset(
         "CONFLICT",
         "BACKEND_UNAVAILABLE",
         "UNKNOWN_SIDE_EFFECT",
+        "CHECKPOINT_NOT_FOUND",
+        "CHECKPOINT_INVALID",
+        "CHECKPOINT_CONFLICT",
     }
 )
 

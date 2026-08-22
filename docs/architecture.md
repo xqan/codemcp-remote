@@ -59,3 +59,18 @@ Bridge
 
 The database stores paths, hashes, bounded result summaries, and error
 metadata. It does not store full source files or plaintext approval tokens.
+
+## Phase 4 Git protection
+
+Each mutation runs under the existing project lock. After the clean-worktree
+and worktree-root checks, the Bridge records a Git tree manifest (object IDs,
+not source contents) and creates a lightweight ref under
+`refs/codemcp-remote/checkpoints/`. The post-mutation HEAD, changed paths and
+bounded diff hash are persisted with the operation. Manual checkpoints and
+rollback safety checkpoints use the same namespace and SQLite table.
+
+`checkpoint_restore` is a two-step approved mutation. It verifies the recorded
+ref, current branch, caller-supplied expected HEAD and clean worktree before
+issuing the fixed `git reset --hard <Bridge-owned-ref>`. Any external change
+causes a fail-closed `CHECKPOINT_CONFLICT`; an uncertain Git result becomes
+`UNKNOWN_SIDE_EFFECT` and requires reconciliation.

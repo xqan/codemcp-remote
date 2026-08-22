@@ -148,6 +148,8 @@ async def test_local_mcp_contract_and_policy_rejections(git_project: Path) -> No
                         "test_run",
                         "git_status",
                         "git_diff",
+                        "checkpoint_create",
+                        "checkpoint_restore",
                         "operation_status",
                         "approval_confirm",
                         "operation_cancel",

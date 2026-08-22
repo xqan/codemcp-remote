@@ -19,7 +19,7 @@ The Phase 0 doctor should report:
 - model egress is denied
 - codemcp is installed and pinned from Phase 1 onward
 
-## Phase 3 local Bridge
+## Phase 4 local Bridge
 
 The local Bridge can now be started for loopback-only validation:
 
@@ -56,8 +56,22 @@ operation is awaiting approval.
 Use `operation_status` to inspect the state and audit events of an operation.
 Do not manually edit the SQLite file while the Bridge is running.
 
-Git checkpoints, rollback, and Secure MCP Tunnel integration remain deferred
-to later phases.
+Before a mutation, the Bridge records a clean Git baseline and creates a
+Bridge-owned checkpoint ref. The mutation result contains the before/after
+branch and HEAD, changed files, and a bounded diff hash. The ref and metadata
+are persisted in `.local/bridge.sqlite3` and linked to the operation audit
+trail.
+
+`checkpoint_create` requires explicit approval and a clean worktree. To
+restore, first call `git_status`, then pass its current `head` as
+`expected_head` to `checkpoint_restore`; the restore requires a second explicit
+approval. A branch change, HEAD change, dirty worktree, missing checkpoint ref,
+or ref mismatch rejects the operation without running `git reset --hard`.
+The reset is issued only for a database-registered checkpoint and only when
+the registered project is the Git worktree root. Use `git_diff` with
+`checkpoint_id` to inspect a bounded, sensitive-path-filtered comparison.
+
+Secure MCP Tunnel integration remains deferred to Phase 5.
 
 ## Local state
 
