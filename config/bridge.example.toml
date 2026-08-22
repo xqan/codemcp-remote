@@ -25,4 +25,10 @@ remote_transport = "secure-mcp-tunnel-only"
 [codemcp]
 release = "0.3.0"
 commit = "683e6ec29b15b91ec12430afabf5a45ed57d2489"
-adapter_mode = "phase-1-probe"
+adapter_mode = "wsl2-stdio"
+worker_mode = "wsl2"
+wsl_distribution = "Ubuntu"
+wsl_python = ""
+startup_timeout_seconds = 30
+worker_timeout_seconds = 60
+shutdown_timeout_seconds = 5

@@ -1,0 +1,217 @@
+"""Lifecycle management for isolated codemcp stdio workers."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import sys
+from contextlib import suppress
+from dataclasses import dataclass
+from typing import Any
+
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
+
+from .errors import BridgeError
+from .settings import BridgeSettings, ProjectSpec, to_wsl_path
+
+logger = logging.getLogger(__name__)
+CODEMCP_TOOL = "codemcp"
+SAFE_ENVIRONMENT = (
+    "PATH",
+    "PATHEXT",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "USER",
+    "LANG",
+    "LC_ALL",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterResult:
+    text: str
+    is_error: bool
+    truncated: bool = False
+
+
+def _result_text(result: Any) -> str:
+    chunks = [
+        block.text
+        for block in getattr(result, "content", [])
+        if isinstance(getattr(block, "text", None), str)
+    ]
+    if chunks:
+        return "\n".join(chunks)
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        return json.dumps(structured, ensure_ascii=False, separators=(",", ":"))
+    return ""
+
+
+class _CodemcpWorker:
+    def __init__(self, settings: BridgeSettings, project: ProjectSpec):
+        self._settings = settings
+        self._project = project
+        self._call_lock = asyncio.Lock()
+        self._stdio_context = None
+        self._session_context = None
+        self._session: ClientSession | None = None
+        self._stderr = None
+
+    def _parameters(self) -> StdioServerParameters:
+        worker_home = self._settings.storage.data_dir / "workers" / self._project.project_id
+        worker_home.mkdir(parents=True, exist_ok=True)
+        environment = {
+            key: os.environ[key] for key in SAFE_ENVIRONMENT if os.environ.get(key) is not None
+        }
+        environment["PYTHONIOENCODING"] = "utf-8"
+        stderr_path = worker_home / "worker.stderr.log"
+        self._stderr = stderr_path.open("w+", encoding="utf-8")
+
+        if self._settings.codemcp.worker_mode == "wsl2" and os.name == "nt":
+            python = self._settings.codemcp.wsl_python or to_wsl_path(
+                self._settings.repository_root / ".local" / "bridge-venv-wsl" / "bin" / "python"
+            )
+            command = "wsl.exe"
+            args = [
+                "--distribution",
+                self._settings.codemcp.wsl_distribution,
+                "--cd",
+                to_wsl_path(self._project.root),
+                "--",
+                python,
+                "-m",
+                "codemcp",
+            ]
+            environment["HOME"] = to_wsl_path(worker_home)
+            environment["USERPROFILE"] = str(worker_home)
+            cwd = None
+        else:
+            command = sys.executable
+            args = ["-m", "codemcp"]
+            environment["HOME"] = str(worker_home)
+            environment["USERPROFILE"] = str(worker_home)
+            cwd = str(self._project.root)
+
+        return StdioServerParameters(command=command, args=args, env=environment, cwd=cwd)
+
+    async def start(self) -> None:
+        if self._session is not None:
+            return
+        parameters = self._parameters()
+        try:
+            self._stdio_context = stdio_client(parameters, errlog=self._stderr)
+            read_stream, write_stream = await self._stdio_context.__aenter__()
+            self._session_context = ClientSession(read_stream, write_stream)
+            self._session = await self._session_context.__aenter__()
+            await asyncio.wait_for(
+                self._session.initialize(),
+                timeout=self._settings.codemcp.startup_timeout_seconds,
+            )
+        except Exception:
+            await self.close()
+            raise
+
+    async def call(
+        self,
+        subtool: str,
+        arguments: dict[str, Any],
+        timeout_seconds: float,
+    ) -> AdapterResult:
+        async with self._call_lock:
+            if self._session is None:
+                await self.start()
+            assert self._session is not None
+            result = await asyncio.wait_for(
+                self._session.call_tool(CODEMCP_TOOL, {"subtool": subtool, **arguments}),
+                timeout=timeout_seconds,
+            )
+            return AdapterResult(text=_result_text(result), is_error=bool(result.isError))
+
+    async def close(self) -> None:
+        session_context, stdio_context = self._session_context, self._stdio_context
+        self._session = None
+        self._session_context = None
+        self._stdio_context = None
+        if session_context is not None:
+            with suppress(Exception):
+                await session_context.__aexit__(None, None, None)
+        if stdio_context is not None:
+            with suppress(Exception):
+                await stdio_context.__aexit__(None, None, None)
+        if self._stderr is not None:
+            self._stderr.close()
+            self._stderr = None
+
+
+class WorkerManager:
+    """Maintain at most one serialized worker per registered project."""
+
+    def __init__(self, settings: BridgeSettings):
+        self._settings = settings
+        self._workers: dict[str, _CodemcpWorker] = {}
+        self._workers_lock = asyncio.Lock()
+
+    async def _get_worker(self, project: ProjectSpec) -> _CodemcpWorker:
+        async with self._workers_lock:
+            worker = self._workers.get(project.project_id)
+            if worker is None:
+                worker = _CodemcpWorker(self._settings, project)
+                self._workers[project.project_id] = worker
+            return worker
+
+    async def _discard(self, project_id: str, worker: _CodemcpWorker) -> None:
+        async with self._workers_lock:
+            if self._workers.get(project_id) is worker:
+                self._workers.pop(project_id, None)
+        await worker.close()
+
+    async def call(
+        self,
+        project: ProjectSpec,
+        subtool: str,
+        arguments: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        mutation: bool = False,
+    ) -> AdapterResult:
+        worker = await self._get_worker(project)
+        timeout = timeout_seconds or self._settings.codemcp.worker_timeout_seconds
+        try:
+            return await worker.call(subtool, arguments, timeout)
+        except TimeoutError as exc:
+            await self._discard(project.project_id, worker)
+            code = "UNKNOWN_SIDE_EFFECT" if mutation else "BACKEND_UNAVAILABLE"
+            raise BridgeError(
+                code,
+                "codemcp worker timed out",
+                {"subtool": subtool, "project_id": project.project_id},
+                retryable=not mutation,
+                status="unknown" if mutation else "failed",
+            ) from exc
+        except BridgeError:
+            await self._discard(project.project_id, worker)
+            raise
+        except Exception as exc:
+            await self._discard(project.project_id, worker)
+            raise BridgeError(
+                "BACKEND_UNAVAILABLE",
+                "codemcp worker is unavailable",
+                {"project_id": project.project_id, "subtool": subtool},
+                retryable=True,
+                status="failed",
+            ) from exc
+
+    def is_active(self, project_id: str) -> bool:
+        return project_id in self._workers
+
+    async def close(self) -> None:
+        async with self._workers_lock:
+            workers = list(self._workers.values())
+            self._workers.clear()
+        await asyncio.gather(*(worker.close() for worker in workers), return_exceptions=True)

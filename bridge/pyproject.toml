@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 codemcp-bridge = "codemcp_bridge.doctor:main"
+codemcp-bridge-server = "codemcp_bridge.main:main"
 
 [dependency-groups]
 dev = [
