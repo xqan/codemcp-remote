@@ -86,6 +86,7 @@ if ($SkipTunnel) {
             $tunnelDoctorOutput = (& $tunnelClient.Source doctor `
                 --profile $settings.ProfileName `
                 --profile-dir $settings.ProfileDir `
+                --health.listen-addr "127.0.0.1:0" `
                 --explain --json 2>&1 | Out-String).Trim()
             $tunnelDoctorExit = $LASTEXITCODE
             $tunnelHealth = Test-Phase5HttpEndpoint -Url ("{0}/healthz" -f $settings.TunnelHealthUrl)
