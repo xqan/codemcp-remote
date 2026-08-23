@@ -1863,10 +1863,10 @@ def create_server(
     @asynccontextmanager
     async def lifespan(_: FastMCP):
         await service.start()
-        try:
-            yield
-        finally:
-            await service.close_backend()
+        # Stateless HTTP starts one MCP Server.run() per request. Closing the
+        # backend here would destroy the project worker after every tool call.
+        # Process shutdown is handled by main.py via service.close().
+        yield
 
     server = FastMCP(
         "codemcp-remote-bridge",
@@ -2000,6 +2000,28 @@ def create_server(
             path,
             content,
             expected_sha256,
+            description,
+            client_request_id,
+            request_hash,
+        )
+
+    @server.tool(
+        description="Create one new Git-trackable directory with a .gitkeep marker."
+    )
+    async def directory_create(
+        project_id: str,
+        session_id: str,
+        path: str,
+        description: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.directory_create(
+            ctx,
+            project_id,
+            session_id,
+            path,
             description,
             client_request_id,
             request_hash,

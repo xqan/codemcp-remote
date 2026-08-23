@@ -274,6 +274,13 @@ def _file_write_input(
     }
 
 
+def _directory_create_input(path: str, description: str) -> dict[str, str]:
+    return {
+        "path": path,
+        "description": description,
+    }
+
+
 @pytest.fixture
 def git_project(tmp_path: Path) -> Path:
     project = tmp_path / "phase2 project"
@@ -327,6 +334,7 @@ async def test_local_mcp_contract_and_policy_rejections(
                         "file_edit",
                         "file_create",
                         "file_write",
+                        "directory_create",
                         "format_run",
                         "test_run",
                         "git_status",
