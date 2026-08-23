@@ -8,7 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from .project_profiles import SUPPORTED_PROFILE_IDS
+from .project_resolution import resolve_project_profile
+from .security_defaults import (
+    DEFAULT_ALLOWED_BRANCHES,
+    DEFAULT_REQUIRE_CLEAN_WORKSPACE,
+    default_command_approval,
+    default_command_timeout_seconds,
+)
+
 PROJECT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 class SettingsError(ValueError):
@@ -32,6 +42,8 @@ class ProjectSpec:
     require_clean_workspace: bool
     codemcp_config: Path
     commands: dict[str, CommandSpec]
+    profile: str | None = None
+    profile_source: str = "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,11 +140,20 @@ def _parse_command(command_id: str, raw: Any) -> CommandSpec:
     kind = raw.get("kind")
     if not isinstance(kind, str) or not kind:
         raise SettingsError(f"commands.{command_id}.kind must be a non-empty string")
-    approval = raw.get("approval", "not-required")
+    default_approval = default_command_approval(kind)
+    approval = raw.get("approval", default_approval)
     if approval not in {"not-required", "required"}:
         raise SettingsError(f"commands.{command_id}.approval must be 'not-required' or 'required'")
-    timeout_seconds = raw.get("timeout_seconds", 60)
-    if not isinstance(timeout_seconds, int | float) or timeout_seconds <= 0:
+    if default_approval == "required" and approval != "required":
+        raise SettingsError(
+            f"commands.{command_id}.approval cannot disable required approval for kind {kind!r}"
+        )
+    timeout_seconds = raw.get("timeout_seconds", default_command_timeout_seconds(kind))
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int | float)
+        or timeout_seconds <= 0
+    ):
         raise SettingsError(f"commands.{command_id}.timeout_seconds must be positive")
     return CommandSpec(
         command_id=command_id,
@@ -151,7 +172,7 @@ def _parse_projects(path: Path, base: Path) -> dict[str, ProjectSpec]:
             raise SettingsError(f"invalid project_id: {project_id!r}")
         raw = _as_mapping(raw_value, f"projects.{project_id}")
         root = _resolve_path(base, raw.get("root"), f"projects.{project_id}.root")
-        raw_branches = raw.get("allowed_branches", ["*"])
+        raw_branches = raw.get("allowed_branches", list(DEFAULT_ALLOWED_BRANCHES))
         if (
             not isinstance(raw_branches, list)
             or not raw_branches
@@ -164,18 +185,54 @@ def _parse_projects(path: Path, base: Path) -> dict[str, ProjectSpec]:
             raw.get("codemcp_config", "codemcp.toml"),
             f"projects.{project_id}.codemcp_config",
         )
+        explicit_profile = raw.get("profile")
+        if explicit_profile is not None:
+            if not isinstance(explicit_profile, str) or not PROFILE_ID_PATTERN.fullmatch(
+                explicit_profile
+            ):
+                raise SettingsError(
+                    f"projects.{project_id}.profile must be a lowercase profile identifier"
+                )
+            if explicit_profile not in SUPPORTED_PROFILE_IDS:
+                raise SettingsError(
+                    "projects."
+                    f"{project_id}.profile is not a supported built-in profile: {explicit_profile}"
+                )
+
+        resolution = resolve_project_profile(root, explicit_profile)
+        profile_commands: dict[str, CommandSpec] = {}
+        if resolution.profile is not None:
+            profile_commands = {
+                command_id: CommandSpec(
+                    command_id=command.command_id,
+                    kind=command.kind,
+                    argv=command.argv,
+                    timeout_seconds=command.timeout_seconds,
+                    approval=command.approval,
+                )
+                for command_id, command in resolution.profile.commands.items()
+            }
+
         commands_raw = _as_mapping(raw.get("commands", {}), f"projects.{project_id}.commands")
-        commands = {
+        explicit_commands = {
             command_id: _parse_command(command_id, command_raw)
             for command_id, command_raw in commands_raw.items()
         }
+        commands = {**profile_commands, **explicit_commands}
+        require_clean_workspace = raw.get(
+            "require_clean_workspace", DEFAULT_REQUIRE_CLEAN_WORKSPACE
+        )
+        if not isinstance(require_clean_workspace, bool):
+            raise SettingsError(f"projects.{project_id}.require_clean_workspace must be boolean")
         projects[project_id] = ProjectSpec(
             project_id=project_id,
             root=root,
             allowed_branches=tuple(raw_branches),
-            require_clean_workspace=bool(raw.get("require_clean_workspace", True)),
+            require_clean_workspace=require_clean_workspace,
             codemcp_config=root / codemcp_config_name,
             commands=commands,
+            profile=resolution.profile_id,
+            profile_source=resolution.source,
         )
     return projects
 

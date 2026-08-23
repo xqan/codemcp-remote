@@ -29,6 +29,7 @@ from .mcp_transport import BridgeStreamableHTTPSessionManager
 from .operation_service import OperationService
 from .operation_service import request_hash as calculate_request_hash
 from .policy_engine import PolicyEngine
+from .project_readiness import inspect_development_readiness
 from .project_registry import ProjectRegistry, is_sensitive_relative_path
 from .session_service import SessionService
 from .settings import BridgeSettings, CommandSpec, ProjectSpec
@@ -458,6 +459,7 @@ class BridgeService:
             if session_id:
                 await self._require_session(project_id, session_id)
             status = await self.policy.inspect_project(project)
+            readiness = inspect_development_readiness(project)
             return _Outcome(
                 data={
                     "root": str(project.root),
@@ -465,6 +467,23 @@ class BridgeService:
                     "head": status.head,
                     "dirty": status.dirty,
                     "worker_active": self.adapter.is_active(project_id),
+                    "profile": readiness.profile_id,
+                    "profile_source": readiness.profile_source,
+                    "profile_resolved": readiness.profile_id is not None,
+                    "detection": {
+                        "candidates": list(readiness.detection_candidates),
+                        "ambiguous": readiness.detection_ambiguous,
+                    },
+                    "commands_resolved": bool(readiness.available_commands),
+                    "available_commands": list(readiness.available_commands),
+                    "command_verification": {
+                        "matched": list(readiness.matched_commands),
+                        "missing": list(readiness.missing_commands),
+                        "mismatched": list(readiness.mismatched_commands),
+                    },
+                    "codemcp_config_ready": readiness.codemcp_config_ready,
+                    "development_ready": readiness.development_ready,
+                    "issues": list(readiness.issues),
                 },
                 changed_files=list(status.changed_files),
             )
