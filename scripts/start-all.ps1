@@ -7,6 +7,7 @@ param(
     [string]$ProfileDir,
     [string]$BridgeUrl,
     [string]$TunnelHealthUrl,
+    [string]$LogDir,
     [string]$HealthListenAddress,
     [ValidateRange(5, 300)]
     [int]$StartupTimeoutSec = 45,
@@ -58,6 +59,16 @@ $projectsConfigPath = Resolve-Phase5Path -RepositoryRoot $repositoryRoot -Value 
 if (-not (Test-Path -LiteralPath $projectsConfigPath -PathType Leaf)) {
     throw "Projects config was not found: $projectsConfigPath"
 }
+
+$logDirValue = $LogDir
+if ([string]::IsNullOrWhiteSpace($logDirValue)) {
+    $logDirValue = Get-Phase5TomlString `
+        -Path $bridgeConfigPath `
+        -Section "storage" `
+        -Key "log_dir" `
+        -Default ".local/logs"
+}
+$logDirPath = Resolve-Phase5Path -RepositoryRoot $repositoryRoot -Value $logDirValue
 
 $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 if ($null -eq $pwsh) {
@@ -280,6 +291,8 @@ try {
         [void]$tunnelArguments.Add($settings.ProfileDir)
         [void]$tunnelArguments.Add("-BridgeUrl")
         [void]$tunnelArguments.Add($settings.BridgeUrl)
+        [void]$tunnelArguments.Add("-LogDir")
+        [void]$tunnelArguments.Add($logDirPath)
         [void]$tunnelArguments.Add("-HealthListenAddress")
         [void]$tunnelArguments.Add($effectiveHealthListenAddress)
         if ($Initialize) {

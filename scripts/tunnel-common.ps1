@@ -1,5 +1,130 @@
 Set-StrictMode -Version Latest
 
+$script:Phase6LogMaxBytes = 5MB
+$script:Phase6LogBackupCount = 3
+
+function Redact-Phase6LogText {
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ($null -eq $Value) {
+        return ""
+    }
+
+    $redacted = [regex]::Replace(
+        $Value,
+        '(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+',
+        'Bearer <redacted>'
+    )
+    $keyPrefix = "(?i)((?:[\`"']?\b(?:CONTROL_PLANE_API_KEY|OPENAI_API_KEY|API_KEY|AUTHORIZATION|ACCESS_TOKEN|REFRESH_TOKEN|TOKEN)\b[\`"']?)\s*[:=]\s*)"
+    $quotedValuePattern = $keyPrefix + "(\`"[^\`"]*\`"|'[^']*')"
+    $redacted = [regex]::Replace($redacted, $quotedValuePattern, '$1<redacted>')
+    $redacted = [regex]::Replace($redacted, $keyPrefix + '([^\s,;]+)', '$1<redacted>')
+    return [regex]::Replace($redacted, '(?i)\bsk-[A-Za-z0-9_-]{8,}', '<redacted-api-key>')
+}
+
+function Rotate-Phase6Log {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return
+    }
+    if ((Get-Item -LiteralPath $Path).Length -lt $script:Phase6LogMaxBytes) {
+        return
+    }
+
+    for ($index = $script:Phase6LogBackupCount - 1; $index -ge 1; $index--) {
+        $source = "{0}.{1}" -f $Path, $index
+        $destination = "{0}.{1}" -f $Path, ($index + 1)
+        if (Test-Path -LiteralPath $source -PathType Leaf) {
+            [System.IO.File]::Move($source, $destination, $true)
+        }
+    }
+    [System.IO.File]::Move($Path, ("{0}.1" -f $Path), $true)
+}
+
+function New-Phase6LogWriter {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $parent = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    Rotate-Phase6Log -Path $Path
+    $fileStream = [System.IO.FileStream]::new(
+        $Path,
+        [System.IO.FileMode]::Append,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::ReadWrite
+    )
+    $writer = [System.IO.StreamWriter]::new(
+        $fileStream,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    $writer.AutoFlush = $true
+    return $writer
+}
+
+function Write-Phase6LogLine {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.IO.TextWriter]$Writer,
+        [AllowNull()]
+        [object]$Value
+    )
+
+    $text = if ($null -eq $Value) { "" } else { [string]$Value }
+    $redacted = Redact-Phase6LogText -Value $text
+    $timestamp = [DateTime]::UtcNow.ToString(
+        "o",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+    $Writer.WriteLine(("{0} {1}" -f $timestamp, $redacted))
+    return $redacted
+}
+
+function Get-Phase5TomlString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Section,
+        [Parameter(Mandatory = $true)]
+        [string]$Key,
+        [AllowNull()]
+        [string]$Default
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $Default
+    }
+    $currentSection = ""
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[(?<section>[^\]]+)\]\s*$') {
+            $currentSection = $Matches["section"]
+            continue
+        }
+        if ($currentSection -ne $Section -or
+            $trimmed -notmatch ("^(?<key>" + [regex]::Escape($Key) + ")\s*=\s*(?<value>.+)$")) {
+            continue
+        }
+        $value = ($Matches["value"] -split '\s+#', 2)[0].Trim()
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or
+            ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+            return $value.Substring(1, $value.Length - 2)
+        }
+        return $value
+    }
+    return $Default
+}
+
 function Get-Phase5RepositoryRoot {
     return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 }

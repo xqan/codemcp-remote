@@ -41,6 +41,12 @@ the existing service is reused. An unknown process occupying a health endpoint
 is rejected. The codemcp WSL2 worker is started on demand by the Bridge when a
 registered project operation requires it.
 
+The Tunnel wrapper writes its merged stdout/stderr to
+`.local/logs/tunnel-client.log`, with the same 5 MB limit and three backups as
+the Bridge log. Common API-key, Bearer-token, and token fields are redacted
+before the line is written. `start-all.ps1` follows the Bridge
+`[storage].log_dir`; use `-LogDir` on either startup script to override it.
+
 `doctor.ps1` reports structured checks for configuration paths, SQLite state,
 WSL2 distribution and worker Python, Git repository state, Bridge configuration
 and health, and Tunnel readiness. A missing database or log directory before
