@@ -29,8 +29,17 @@ from codemcp_bridge.settings import (
 from codemcp_bridge.worker_manager import AdapterResult
 
 
-def _git(project: Path, *arguments: str) -> None:
-    subprocess.run(["git", *arguments], cwd=project, check=True, capture_output=True)
+def _git(project: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=project,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return result.stdout.strip()
 
 
 def _settings(project: Path) -> BridgeSettings:
@@ -352,7 +361,7 @@ async def test_local_mcp_contract_and_policy_rejections(
                 _,
             ):
                 async with ClientSession(read_stream, write_stream) as client:
-                    initialize = await client.initialize()
+                    initialize = await asyncio.wait_for(client.initialize(), timeout=2.0)
                     assert initialize.serverInfo.name == "codemcp-remote-bridge"
                     tools = await client.list_tools()
                     assert {tool.name for tool in tools.tools} == {

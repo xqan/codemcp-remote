@@ -25,6 +25,7 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
     and only signal EOF after its handler has returned.
     """
 
+    _RESPONDER_STARTED_SCOPE_KEY = "codemcp_bridge.responder_started"
     _RESPONDER_FINISHED_SCOPE_KEY = "codemcp_bridge.responder_finished"
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -40,11 +41,18 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
             metadata = getattr(message, "message_metadata", None)
             request_context = getattr(metadata, "request_context", None)
             request_scope = getattr(request_context, "scope", None)
+            started = (
+                request_scope.get(self._RESPONDER_STARTED_SCOPE_KEY)
+                if isinstance(request_scope, dict)
+                else None
+            )
             finished = (
                 request_scope.get(self._RESPONDER_FINISHED_SCOPE_KEY)
                 if isinstance(request_scope, dict)
                 else None
             )
+            if started is not None:
+                started.set()
             try:
                 await original_handle_message(
                     message,
@@ -71,7 +79,9 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
             security_settings=self.security_settings,
         )
         server_finished = anyio.Event()
+        responder_started = anyio.Event()
         responder_finished = anyio.Event()
+        scope[self._RESPONDER_STARTED_SCOPE_KEY] = responder_started
         scope[self._RESPONDER_FINISHED_SCOPE_KEY] = responder_finished
 
         async def run_stateless_server(
@@ -104,13 +114,13 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
                 await http_transport.handle_request(scope, receive, send)
 
                 # The HTTP response may be routed before RequestResponder.__exit__
-                # completes. Wait for the tracked handler to leave that context
-                # before signalling EOF to Server.run.
-                # A tool response can be queued before the responder task has
-                # actually returned. Do not use a fixed grace timeout here:
-                # slower mutations would otherwise be cancelled by transport EOF.
-                # Backend operations already enforce their own bounded timeouts.
-                await responder_finished.wait()
+                # completes. Only requests dispatched through Server._handle_message
+                # need this extra wait. InitializeRequest can be completed directly
+                # by ServerSession._received_request and never enters _handle_message.
+                # For normal requests, producing a response requires the handler to
+                # have started, so responder_started is already set before this point.
+                if responder_started.is_set():
+                    await responder_finished.wait()
 
                 # Let the tracked _handle_message task return to its task group
                 # before the receive loop observes EOF.
