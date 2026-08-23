@@ -695,6 +695,82 @@ async def test_file_write_requires_matching_sha256(git_project: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_directory_create_is_git_trackable_idempotent_and_safe(
+    git_project: Path,
+) -> None:
+    adapter = WriteAdapter()
+    service = create_app(_settings(git_project), adapter=adapter)[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    existing_description = "reject existing directory"
+    existing = await service.directory_create(
+        None,
+        "demo",
+        session.session_id,
+        "src",
+        existing_description,
+        "directory-existing-1",
+        request_hash(_directory_create_input("src", existing_description)),
+    )
+    assert existing["error"]["code"] == "CONFLICT"
+
+    missing_parent_description = "reject missing parent"
+    missing_parent = await service.directory_create(
+        None,
+        "demo",
+        session.session_id,
+        "missing/child",
+        missing_parent_description,
+        "directory-missing-parent-1",
+        request_hash(
+            _directory_create_input("missing/child", missing_parent_description),
+        ),
+    )
+    assert missing_parent["error"]["code"] == "FILE_NOT_FOUND"
+
+    sensitive_description = "reject sensitive directory"
+    sensitive = await service.directory_create(
+        None,
+        "demo",
+        session.session_id,
+        "secrets",
+        sensitive_description,
+        "directory-sensitive-1",
+        request_hash(_directory_create_input("secrets", sensitive_description)),
+    )
+    assert sensitive["error"]["code"] == "SENSITIVE_PATH"
+
+    description = "create a git trackable source directory"
+    operation_input = _directory_create_input("src/generated", description)
+    arguments = (
+        None,
+        "demo",
+        session.session_id,
+        "src/generated",
+        description,
+        "directory-create-1",
+        request_hash(operation_input),
+    )
+    first = await service.directory_create(*arguments)
+    second = await service.directory_create(*arguments)
+
+    marker = git_project / "src" / "generated" / ".gitkeep"
+    assert first == second
+    assert first["status"] == "succeeded"
+    assert first["data"]["path"] == "src/generated"
+    assert first["data"]["marker_path"] == "src/generated/.gitkeep"
+    assert first["changed_files"] == ["src/generated/.gitkeep"]
+    assert first["data"]["checkpoint"]["after"]["changed_files"] == [
+        "src/generated/.gitkeep"
+    ]
+    assert marker.is_file()
+    assert marker.read_text(encoding="utf-8") == ""
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_static_zero_request_id_does_not_conflict_for_read_operations(
     git_project: Path,
 ) -> None:

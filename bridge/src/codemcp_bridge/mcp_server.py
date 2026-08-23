@@ -912,7 +912,10 @@ class BridgeService:
         async def operation(operation_id: str) -> _Outcome:
             await self._require_session(project_id, session_id)
             if not description or len(description) > 500:
-                raise BridgeError("INVALID_REQUEST", "description must be 1-500 characters")
+                raise BridgeError(
+                    "INVALID_REQUEST",
+                    "description must be 1-500 characters",
+                )
             project, target, normalized = self.registry.resolve_path(project_id, path)
             parent = target.parent
             if not parent.exists() or not parent.is_dir():
@@ -1115,6 +1118,11 @@ class BridgeService:
             raise BridgeError(
                 "BACKEND_UNAVAILABLE",
                 "codemcp rejected RunCommand",
+                {
+                    "command_id": command.command_id,
+                    "output": result.text,
+                    "truncated": result.truncated,
+                },
                 status="failed",
             )
         checkpoint_data = await self._finish_mutation(project, checkpoint)
@@ -1863,10 +1871,10 @@ def create_server(
     @asynccontextmanager
     async def lifespan(_: FastMCP):
         await service.start()
-        # Stateless HTTP starts one MCP Server.run() per request. Closing the
-        # backend here would destroy the project worker after every tool call.
-        # Process shutdown is handled by main.py via service.close().
-        yield
+        try:
+            yield
+        finally:
+            await service.close_backend()
 
     server = FastMCP(
         "codemcp-remote-bridge",
@@ -2006,7 +2014,7 @@ def create_server(
         )
 
     @server.tool(
-        description="Create one new Git-trackable directory with a .gitkeep marker."
+        description="Create one new Git-trackable directory with a .gitkeep marker.",
     )
     async def directory_create(
         project_id: str,
