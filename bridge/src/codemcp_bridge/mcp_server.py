@@ -899,6 +899,149 @@ class BridgeService:
             supplied_request_hash=request_hash,
         )
 
+    async def directory_create(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        path: str,
+        description: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        async def operation(operation_id: str) -> _Outcome:
+            await self._require_session(project_id, session_id)
+            if not description or len(description) > 500:
+                raise BridgeError("INVALID_REQUEST", "description must be 1-500 characters")
+            project, target, normalized = self.registry.resolve_path(project_id, path)
+            parent = target.parent
+            if not parent.exists() or not parent.is_dir():
+                raise BridgeError(
+                    "FILE_NOT_FOUND",
+                    "parent directory does not exist",
+                    {"path": normalized},
+                )
+
+            async with self._mutation_lock(project_id):
+                if target.exists():
+                    raise BridgeError(
+                        "CONFLICT",
+                        "path already exists",
+                        {"path": normalized},
+                    )
+                checkpoint = await self._begin_mutation(
+                    project,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                )
+                if target.exists():
+                    raise BridgeError(
+                        "CONFLICT",
+                        "path appeared after the mutation baseline was recorded",
+                        {"path": normalized},
+                    )
+
+                try:
+                    target.mkdir()
+                except FileExistsError as exc:
+                    raise BridgeError(
+                        "CONFLICT",
+                        "path already exists",
+                        {"path": normalized},
+                    ) from exc
+                except OSError as exc:
+                    raise BridgeError(
+                        "BACKEND_UNAVAILABLE",
+                        "directory could not be created",
+                        {"path": normalized},
+                        status="failed",
+                    ) from exc
+
+                marker = target / ".gitkeep"
+                try:
+                    result = await self.adapter.call(
+                        project,
+                        "WriteFile",
+                        {
+                            "path": marker,
+                            "content": "",
+                            "description": f"{description} (directory marker)",
+                            "chat_id": session_id,
+                        },
+                        mutation=True,
+                    )
+                except asyncio.CancelledError:
+                    if not marker.exists():
+                        try:
+                            target.rmdir()
+                        except OSError:
+                            pass
+                    raise
+                except Exception as exc:
+                    if not marker.exists():
+                        try:
+                            target.rmdir()
+                        except OSError as cleanup_exc:
+                            raise BridgeError(
+                                "UNKNOWN_SIDE_EFFECT",
+                                "directory creation outcome is unknown and requires reconciliation",
+                                {"path": normalized},
+                                status="unknown",
+                            ) from cleanup_exc
+                    raise exc
+
+                if _is_codemcp_error(result):
+                    if marker.exists():
+                        raise BridgeError(
+                            "UNKNOWN_SIDE_EFFECT",
+                            "directory marker may have been written despite backend rejection",
+                            {"path": normalized},
+                            status="unknown",
+                        )
+                    try:
+                        target.rmdir()
+                    except OSError as exc:
+                        raise BridgeError(
+                            "UNKNOWN_SIDE_EFFECT",
+                            "directory creation failed but cleanup could not be confirmed",
+                            {"path": normalized},
+                            status="unknown",
+                        ) from exc
+                    raise BridgeError(
+                        "CONFLICT",
+                        "codemcp rejected WriteFile",
+                        {"path": normalized},
+                        status="failed",
+                    )
+
+            checkpoint_data = await self._finish_mutation(project, checkpoint)
+            marker_path = self.registry.relative_path(project, marker)
+            return _Outcome(
+                {
+                    "path": normalized,
+                    "marker_path": marker_path,
+                    "text": result.text,
+                    "checkpoint": checkpoint_data,
+                },
+                list(checkpoint_data["after"]["changed_files"]),
+                result.truncated,
+            )
+
+        return await self._execute(
+            ctx,
+            project_id=project_id,
+            session_id=session_id,
+            operation=operation,
+            operation_kind="directory_create",
+            operation_input={
+                "path": path,
+                "description": description,
+            },
+            mutation=True,
+            client_request_id=client_request_id,
+            supplied_request_hash=request_hash,
+        )
+
     async def _run_registered_command(
         self,
         ctx: Context | None,
