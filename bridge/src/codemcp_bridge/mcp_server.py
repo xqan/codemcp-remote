@@ -2066,7 +2066,12 @@ def create_server(
             request_hash,
         )
 
-    @server.tool(description="Run one command from the registered project command catalog.")
+    @server.tool(
+        description=(
+            "Execute one fixed pre-registered project workflow by command ID. "
+            "Arbitrary shell, executable paths, argv, and runtime parameters are not accepted."
+        )
+    )
     async def registered_command_run(
         project_id: str,
         session_id: str,
