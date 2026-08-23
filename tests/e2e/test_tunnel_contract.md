@@ -44,10 +44,13 @@ tool discovery. Then perform these calls against the registered project:
 3. `file_move` for one tracked file into a non-existing destination; confirm the
    source disappears, the destination preserves the content, both paths appear
    in the checkpoint diff, and replaying the same idempotency key does not move twice.
-4. `registered_command_run` using a registered command ID; confirm unregistered
+4. `file_delete` for one tracked regular file; confirm the path appears in the
+   checkpoint diff, the file disappears, and replaying the same idempotency key
+   does not delete anything else.
+5. `registered_command_run` using a registered command ID; confirm unregistered
    command IDs are rejected. `test_run` and `format_run` remain compatibility wrappers.
-5. `git_diff` and `operation_status`.
-6. After user approval, `checkpoint_create` and, if needed,
+6. `git_diff` and `operation_status`.
+7. After user approval, `checkpoint_create` and, if needed,
    `checkpoint_restore` with the observed expected HEAD.
 
 For every call record:

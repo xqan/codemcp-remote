@@ -293,6 +293,13 @@ def _file_move_input(
     }
 
 
+def _file_delete_input(path: str, description: str) -> dict[str, str]:
+    return {
+        "path": path,
+        "description": description,
+    }
+
+
 def _directory_create_input(path: str, description: str) -> dict[str, str]:
     return {
         "path": path,
@@ -356,6 +363,7 @@ async def test_local_mcp_contract_and_policy_rejections(
                         "file_create",
                         "file_write",
                         "file_move",
+                        "file_delete",
                         "directory_create",
                         "registered_command_run",
                         "format_run",
@@ -888,6 +896,84 @@ async def test_file_move_is_idempotent_no_clobber_and_safe(git_project: Path) ->
     assert first["data"]["checkpoint"]["after"]["head"] == first["data"]["head"]
     assert not (git_project / "src" / "hello.txt").exists()
     assert (git_project / "src" / "moved.txt").read_text(encoding="utf-8") == "hello\n"
+    assert _git(git_project, "status", "--porcelain") == ""
+
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_file_delete_is_idempotent_tracked_only_and_safe(git_project: Path) -> None:
+    service = create_app(_settings(git_project), adapter=WriteAdapter())[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    missing_description = "reject a missing delete target"
+    missing = await service.file_delete(
+        None,
+        "demo",
+        session.session_id,
+        "src/missing.txt",
+        missing_description,
+        "delete-missing-1",
+        request_hash(_file_delete_input("src/missing.txt", missing_description)),
+    )
+    assert missing["error"]["code"] == "FILE_NOT_FOUND"
+
+    sensitive_description = "reject a sensitive delete target"
+    sensitive = await service.file_delete(
+        None,
+        "demo",
+        session.session_id,
+        "local.env",
+        sensitive_description,
+        "delete-sensitive-1",
+        request_hash(_file_delete_input("local.env", sensitive_description)),
+    )
+    assert sensitive["error"]["code"] == "SENSITIVE_PATH"
+
+    (git_project / ".gitignore").write_text("src/ignored.tmp\n", encoding="utf-8")
+    _git(git_project, "add", ".gitignore")
+    _git(git_project, "commit", "-m", "test: ignore untracked delete source")
+    ignored = git_project / "src" / "ignored.tmp"
+    ignored.write_text("ignored\n", encoding="utf-8")
+    assert _git(git_project, "status", "--porcelain") == ""
+
+    untracked_description = "reject an ignored untracked delete source"
+    untracked = await service.file_delete(
+        None,
+        "demo",
+        session.session_id,
+        "src/ignored.tmp",
+        untracked_description,
+        "delete-untracked-1",
+        request_hash(_file_delete_input("src/ignored.tmp", untracked_description)),
+    )
+    assert untracked["error"]["code"] == "CONFLICT"
+    assert ignored.is_file()
+
+    description = "delete one tracked file through the Bridge"
+    operation_input = _file_delete_input("src/hello.txt", description)
+    arguments = (
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        description,
+        "delete-file-1",
+        request_hash(operation_input),
+    )
+    before_head = _git(git_project, "rev-parse", "HEAD")
+    first = await service.file_delete(*arguments)
+    second = await service.file_delete(*arguments)
+
+    assert first == second
+    assert first["status"] == "succeeded"
+    assert first["changed_files"] == ["src/hello.txt"]
+    assert first["data"]["checkpoint"]["after"]["changed_files"] == ["src/hello.txt"]
+    assert first["data"]["path"] == "src/hello.txt"
+    assert first["data"]["head"] != before_head
+    assert first["data"]["checkpoint"]["after"]["head"] == first["data"]["head"]
+    assert not (git_project / "src" / "hello.txt").exists()
     assert _git(git_project, "status", "--porcelain") == ""
 
     await service.close()

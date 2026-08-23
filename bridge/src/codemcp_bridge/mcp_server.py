@@ -1010,6 +1010,74 @@ class BridgeService:
             supplied_request_hash=request_hash,
         )
 
+    async def file_delete(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        path: str,
+        description: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        async def operation(operation_id: str) -> _Outcome:
+            await self._require_session(project_id, session_id)
+            if not description or len(description) > 500:
+                raise BridgeError(
+                    "INVALID_REQUEST",
+                    "description must be 1-500 characters",
+                )
+
+            project, target, normalized = self.registry.resolve_path(project_id, path)
+            self.policy.require_regular_file(target)
+
+            async with self._mutation_lock(project_id):
+                checkpoint = await self._begin_mutation(
+                    project,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                )
+                tracked_files = checkpoint.before_data.get("file_hashes", {})
+                if not isinstance(tracked_files, dict) or normalized not in tracked_files:
+                    raise BridgeError(
+                        "CONFLICT",
+                        "file must be tracked by the checkpoint HEAD before deletion",
+                        {"path": normalized},
+                    )
+
+                _, target, normalized = self.registry.resolve_path(project_id, path)
+                self.policy.require_regular_file(target)
+                new_head = await self.git.delete_tracked_file(
+                    project.root,
+                    path=normalized,
+                    expected_head=checkpoint.head,
+                )
+
+            checkpoint_data = await self._finish_mutation(project, checkpoint)
+            return _Outcome(
+                {
+                    "path": normalized,
+                    "head": new_head,
+                    "checkpoint": checkpoint_data,
+                },
+                list(checkpoint_data["after"]["changed_files"]),
+            )
+
+        return await self._execute(
+            ctx,
+            project_id=project_id,
+            session_id=session_id,
+            operation=operation,
+            operation_kind="file_delete",
+            operation_input={
+                "path": path,
+                "description": description,
+            },
+            mutation=True,
+            client_request_id=client_request_id,
+            supplied_request_hash=request_hash,
+        )
+
     async def directory_create(
         self,
         ctx: Context | None,
@@ -2177,6 +2245,28 @@ def create_server(
             session_id,
             source_path,
             destination_path,
+            description,
+            client_request_id,
+            request_hash,
+        )
+
+    @server.tool(
+        description="Delete one tracked file from the registered project.",
+    )
+    async def file_delete(
+        project_id: str,
+        session_id: str,
+        path: str,
+        description: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.file_delete(
+            ctx,
+            project_id,
+            session_id,
+            path,
             description,
             client_request_id,
             request_hash,
