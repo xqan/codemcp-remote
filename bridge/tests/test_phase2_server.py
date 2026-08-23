@@ -15,7 +15,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from codemcp_bridge.errors import BridgeError, error_payload
-from codemcp_bridge.mcp_server import create_app
+from codemcp_bridge.mcp_server import create_app, create_server
 from codemcp_bridge.operation_service import request_hash
 from codemcp_bridge.settings import (
     BridgeSettings,

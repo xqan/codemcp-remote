@@ -12,18 +12,52 @@ from starlette.types import Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
+_RESPONDER_DRAIN_TIMEOUT_SECONDS = 0.25
 _GRACEFUL_CLOSE_TIMEOUT_SECONDS = 1.0
 
 
 class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
     """Avoid MCP 1.x cancel-scope races when closing stateless requests.
 
-    MCP 1.x terminates a stateless transport from the HTTP request task while
-    the low-level server is still unwinding its per-request responder task.
-    Closing the transport's input side first lets ``Server.run()`` finish its
-    receive loop and unwind in the task that owns its cancel scopes. The full
-    transport termination remains a bounded fallback for a stuck server task.
+    MCP 1.x can finish routing the HTTP response before the low-level
+    ``RequestResponder`` has exited its AnyIO cancel scope. Closing the
+    transport input in that window makes ``Server.run()`` cancel the handler
+    task while the responder is still unwinding. Track the responder directly
+    and only signal EOF after its handler has returned.
     """
+
+    _RESPONDER_FINISHED_SCOPE_KEY = "codemcp_bridge.responder_finished"
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        original_handle_message = self.app._handle_message  # noqa: SLF001
+
+        async def tracked_handle_message(
+            message: object,
+            session: object,
+            lifespan_context: object,
+            raise_exceptions: bool = False,
+        ) -> None:
+            metadata = getattr(message, "message_metadata", None)
+            request_context = getattr(metadata, "request_context", None)
+            request_scope = getattr(request_context, "scope", None)
+            finished = (
+                request_scope.get(self._RESPONDER_FINISHED_SCOPE_KEY)
+                if isinstance(request_scope, dict)
+                else None
+            )
+            try:
+                await original_handle_message(
+                    message,
+                    session,
+                    lifespan_context,
+                    raise_exceptions,
+                )
+            finally:
+                if finished is not None:
+                    finished.set()
+
+        self.app._handle_message = tracked_handle_message  # type: ignore[method-assign]  # noqa: SLF001
 
     async def _handle_stateless_request(
         self,
@@ -38,6 +72,8 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
             security_settings=self.security_settings,
         )
         server_finished = anyio.Event()
+        responder_finished = anyio.Event()
+        scope[self._RESPONDER_FINISHED_SCOPE_KEY] = responder_finished
 
         async def run_stateless_server(
             *, task_status: TaskStatus[None] = anyio.TASK_STATUS_IGNORED
@@ -67,13 +103,20 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
             # scope in the server task, which crashes the stateless session.
             with anyio.CancelScope(shield=True):
                 await http_transport.handle_request(scope, receive, send)
-                # The JSON response is routed immediately before
-                # RequestResponder.__exit__. Give the server task a scheduling
-                # checkpoint to leave that scope before signalling EOF.
-                await anyio.sleep(0)
 
-                # Signal EOF to Server.run without cancelling its responder task.
-                # The transport context owns the remaining stream cleanup.
+                # The HTTP response may be routed before RequestResponder.__exit__
+                # completes. Wait for the tracked handler to leave that context
+                # before signalling EOF to Server.run.
+                with anyio.move_on_after(_RESPONDER_DRAIN_TIMEOUT_SECONDS) as responder_scope:
+                    await responder_finished.wait()
+                if responder_scope.cancel_called:
+                    logger.warning("Timed out waiting for stateless MCP responder cleanup")
+                else:
+                    # Let the tracked _handle_message task return to its task group
+                    # before the receive loop observes EOF.
+                    await anyio.sleep(0)
+
+                # Signal EOF to Server.run only after responder cleanup.
                 if http_transport._read_stream_writer is not None:  # noqa: SLF001
                     await http_transport._read_stream_writer.aclose()  # noqa: SLF001
 
