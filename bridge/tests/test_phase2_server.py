@@ -41,13 +41,20 @@ def _settings(project: Path) -> BridgeSettings:
         timeout_seconds=30,
         approval="required",
     )
+    build_command = CommandSpec(
+        command_id="build",
+        kind="build",
+        argv=("python", "-c", "print('build')"),
+        timeout_seconds=30,
+        approval="not-required",
+    )
     spec = ProjectSpec(
         project_id="demo",
         root=project,
         allowed_branches=("main",),
         require_clean_workspace=True,
         codemcp_config=project / "codemcp.toml",
-        commands={"format": format_command},
+        commands={"format": format_command, "build": build_command},
     )
     return BridgeSettings(
         repository_root=project.parent,
@@ -290,7 +297,9 @@ def git_project(tmp_path: Path) -> Path:
     (project / "src" / "binary.bin").write_bytes(b"header\x00binary\n")
     (project / "src" / "large.txt").write_text("x" * 1025, encoding="utf-8")
     (project / "codemcp.toml").write_text(
-        '[commands.format]\ncommand = ["python", "-c", "print(\'format\')"]\n',
+        '[commands.format]\ncommand = ["python", "-c", "print(\'format\')"]\n'
+        '\n'
+        '[commands.build]\ncommand = ["python", "-c", "print(\'build\')"]\n',
         encoding="utf-8",
     )
     _git(project, "init", "-b", "main")
@@ -335,6 +344,7 @@ async def test_local_mcp_contract_and_policy_rejections(
                         "file_create",
                         "file_write",
                         "directory_create",
+                        "registered_command_run",
                         "format_run",
                         "test_run",
                         "git_status",
@@ -408,6 +418,37 @@ async def test_local_mcp_contract_and_policy_rejections(
                         await client.call_tool("project_open", {"project_id": "unknown"})
                     )
                     assert unknown["error"]["code"] == "PROJECT_NOT_ALLOWED"
+
+                    registered_build = _payload(
+                        await client.call_tool(
+                            "registered_command_run",
+                            {
+                                "project_id": "demo",
+                                "session_id": session_id,
+                                "command_id": "build",
+                                "client_request_id": "registered-command-build-1",
+                                "request_hash": request_hash({"command_id": "build"}),
+                            },
+                        )
+                    )
+                    assert registered_build["status"] == "succeeded"
+                    assert registered_build["data"]["command_id"] == "build"
+                    assert registered_build["changed_files"] == []
+                    assert adapter.calls[-1][0] == "RunCommand"
+
+                    unregistered_command = _payload(
+                        await client.call_tool(
+                            "registered_command_run",
+                            {
+                                "project_id": "demo",
+                                "session_id": session_id,
+                                "command_id": "missing",
+                                "client_request_id": "registered-command-missing-1",
+                                "request_hash": request_hash({"command_id": "missing"}),
+                            },
+                        )
+                    )
+                    assert unregistered_command["error"]["code"] == "COMMAND_NOT_ALLOWED"
 
                     approval = _payload(
                         await client.call_tool(
@@ -838,15 +879,13 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
 
                     approval = _payload(
                         await client.call_tool(
-                            "format_run",
+                            "registered_command_run",
                             {
                                 "project_id": "demo",
                                 "session_id": session_id,
                                 "command_id": "format",
-                                "client_request_id": "format-approval-1",
-                                "request_hash": request_hash(
-                                    {"command_id": "format", "expected_kind": "format"}
-                                ),
+                                "client_request_id": "registered-command-approval-1",
+                                "request_hash": request_hash({"command_id": "format"}),
                             },
                         )
                     )

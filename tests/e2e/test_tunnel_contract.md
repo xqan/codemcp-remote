@@ -41,7 +41,8 @@ tool discovery. Then perform these calls against the registered project:
 
 1. `project_open`, `file_read`, and `code_search` for a read-only path.
 2. `file_edit` with a deterministic replacement and explicit request hash.
-3. `test_run` or `format_run` using a registered command ID.
+3. `registered_command_run` using a registered command ID; confirm unregistered
+   command IDs are rejected. `test_run` and `format_run` remain compatibility wrappers.
 4. `git_diff` and `operation_status`.
 5. After user approval, `checkpoint_create` and, if needed,
    `checkpoint_restore` with the observed expected HEAD.

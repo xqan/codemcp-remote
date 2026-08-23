@@ -1051,18 +1051,21 @@ class BridgeService:
         project_id: str,
         session_id: str,
         command_id: str,
-        expected_kind: str,
+        expected_kind: str | None,
         client_request_id: str | None,
         request_hash: str | None,
     ) -> dict[str, Any]:
         prepared: dict[str, Any] = {}
 
+        def resolve_command(project: ProjectSpec) -> CommandSpec:
+            if expected_kind is None:
+                return self.policy.registered_command(project, command_id, require_approval=False)
+            return self.policy.command(project, command_id, expected_kind, require_approval=False)
+
         async def approval_check() -> bool:
             await self._require_session(project_id, session_id)
             project = self.registry.get(project_id)
-            command = self.policy.command(
-                project, command_id, expected_kind, require_approval=False
-            )
+            command = resolve_command(project)
             prepared["project"] = project
             prepared["command"] = command
             return command.approval == "required"
@@ -1072,25 +1075,29 @@ class BridgeService:
             project = prepared.get("project") or self.registry.get(project_id)
             command = prepared.get("command")
             if not isinstance(command, CommandSpec):
-                command = self.policy.command(
-                    project, command_id, expected_kind, require_approval=False
-                )
+                command = resolve_command(project)
             return await self._run_command_body(project, command, session_id, operation_id)
 
+        operation_kind = (
+            "registered_command_run" if expected_kind is None else f"{expected_kind}_run"
+        )
+        operation_input: dict[str, Any] = {"command_id": command_id}
+        if expected_kind is not None:
+            operation_input["expected_kind"] = expected_kind
+        approval_action = (
+            f"command:{command_id}" if expected_kind is None else f"{expected_kind}:{command_id}"
+        )
         return await self._execute(
             ctx,
             project_id=project_id,
             session_id=session_id,
             operation=operation,
-            operation_kind=f"{expected_kind}_run",
-            operation_input={
-                "command_id": command_id,
-                "expected_kind": expected_kind,
-            },
+            operation_kind=operation_kind,
+            operation_input=operation_input,
             mutation=True,
             client_request_id=client_request_id,
             supplied_request_hash=request_hash,
-            approval_action=f"{expected_kind}:{command_id}",
+            approval_action=approval_action,
             approval_check=approval_check,
         )
 
@@ -1135,6 +1142,25 @@ class BridgeService:
             checkpoint_data["after"]["changed_files"],
             result.truncated,
             "succeeded",
+        )
+
+    async def registered_command_run(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        command_id: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        return await self._run_registered_command(
+            ctx,
+            project_id,
+            session_id,
+            command_id,
+            None,
+            client_request_id,
+            request_hash,
         )
 
     async def format_run(
@@ -1662,12 +1688,17 @@ class BridgeService:
         input_data = operation.input_data
         command_id = input_data.get("command_id")
         expected_kind = input_data.get("expected_kind")
-        if not isinstance(command_id, str) or not isinstance(expected_kind, str):
+        if not isinstance(command_id, str):
             raise BridgeError("INVALID_REQUEST", "stored command operation is malformed")
         project = self.registry.get(operation.project_id)
-        command = self.policy.command(
-            project, command_id, expected_kind, require_approval=False
-        )
+        if expected_kind is None and operation.kind == "registered_command_run":
+            command = self.policy.registered_command(project, command_id, require_approval=False)
+        elif isinstance(expected_kind, str):
+            command = self.policy.command(
+                project, command_id, expected_kind, require_approval=False
+            )
+        else:
+            raise BridgeError("INVALID_REQUEST", "stored command operation is malformed")
         if operation.session_id is None:
             raise BridgeError("SESSION_REQUIRED", "approved operation has no session")
         return await self._run_command_body(
@@ -2031,6 +2062,24 @@ def create_server(
             session_id,
             path,
             description,
+            client_request_id,
+            request_hash,
+        )
+
+    @server.tool(description="Run one command from the registered project command catalog.")
+    async def registered_command_run(
+        project_id: str,
+        session_id: str,
+        command_id: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.registered_command_run(
+            ctx,
+            project_id,
+            session_id,
+            command_id,
             client_request_id,
             request_hash,
         )

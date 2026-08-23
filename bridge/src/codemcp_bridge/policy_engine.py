@@ -61,6 +61,31 @@ class PolicyEngine:
         status = await self.inspect_project(project, enforce_branch=enforce_branch)
         return self.require_clean_workspace(project, status)
 
+    def registered_command(
+        self,
+        project: ProjectSpec,
+        command_id: str,
+        *,
+        require_approval: bool = True,
+    ) -> CommandSpec:
+        if self._settings.policy.allow_arbitrary_commands:
+            raise BridgeError("COMMAND_NOT_ALLOWED", "arbitrary commands are disabled by policy")
+        command = project.commands.get(command_id)
+        if command is None:
+            raise BridgeError(
+                "COMMAND_NOT_ALLOWED",
+                "command_id is not registered for this project",
+                {"command_id": command_id},
+            )
+        if require_approval and command.approval == "required":
+            raise BridgeError(
+                "APPROVAL_REQUIRED",
+                "the registered command requires explicit approval",
+                {"command_id": command_id},
+            )
+        self._verify_codemcp_command(project, command)
+        return command
+
     def command(
         self,
         project: ProjectSpec,
