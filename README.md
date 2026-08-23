@@ -8,9 +8,9 @@ ChatGPT（唯一推理） → Secure MCP Tunnel → 本机 MCP Bridge → codemc
 
 ## 当前状态
 
-- 当前阶段：Phase 5（Secure MCP Tunnel 集成）
+- 当前阶段：Phase 6（Windows 11 运维化和开发者体验）
 - 当前实现：loopback MCP Bridge、SQLite 生命周期、幂等 operation、一次性审批、审计、Bridge-owned Git checkpoint/CAS rollback、WSL2 codemcp worker，以及受限的 tunnel-client 启动/诊断包装
-- 当前远程验收：真实 Tunnel 工具发现、主合同和失败恢复矩阵已通过；Phase 6 尚未开始；Windows 原生 Git mutation 仍不支持
+- 当前远程验收：真实 Tunnel 工具发现、主合同和失败恢复矩阵已通过；Phase 6 已完成一键启动/停止首个原子任务；Windows 原生 Git mutation 仍不支持
 - 平台决策：codemcp mutation worker 运行在 WSL2；Windows 原生 Git-backed
   mutation 不支持，详见 [docs/codemcp-compatibility-matrix.md](docs/codemcp-compatibility-matrix.md)
 
@@ -40,10 +40,14 @@ Phase 1 已固定并安装 `codemcp==0.3.0`；WSL2 路径已通过 Git-backed �
 
 ~~~text
 Copy-Item config/tunnel-profile.example.env config/tunnel-profile.local.env
-pwsh -File .\scripts\start-bridge.ps1
-pwsh -File .\scripts\start-tunnel.ps1 -Initialize
+pwsh -File .\scripts\start-all.ps1 -Initialize
 pwsh -File .\scripts\doctor.ps1
 ~~~
+
+后续启动可直接运行 `pwsh -File .\scripts\start-all.ps1`；停止使用
+`pwsh -File .\scripts\stop-all.ps1`。`start-all.ps1` 会先等待 Bridge
+健康，再等待 Tunnel `readyz`；只有确认进程属于本仓库和 Tunnel profile
+时才会复用已健康的本机服务。
 
 ## 关键约束
 

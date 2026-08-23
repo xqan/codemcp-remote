@@ -21,12 +21,32 @@ The Phase 0 doctor should report:
 
 ## Phase 6 local lifecycle control
 
-Start the Bridge first and keep it running before starting the Tunnel:
+Use the one-click launcher after the Tunnel profile has been initialized:
+
+~~~text
+pwsh -File .\scripts\start-all.ps1
+pwsh -File .\scripts\doctor.ps1
+~~~
+
+On the first run, initialize the local Tunnel profile explicitly:
+
+~~~text
+pwsh -File .\scripts\start-all.ps1 -Initialize
+~~~
+
+`start-all.ps1` starts Bridge first, waits for its loopback health endpoint,
+then starts tunnel-client and waits for Tunnel `readyz`. If either endpoint is
+already healthy and its process command line belongs to this repository/profile,
+the existing service is reused. An unknown process occupying a health endpoint
+is rejected. The codemcp WSL2 worker is started on demand by the Bridge when a
+registered project operation requires it.
+
+For isolated troubleshooting, the underlying foreground scripts remain
+available:
 
 ~~~text
 pwsh -File .\scripts\start-bridge.ps1
 pwsh -File .\scripts\start-tunnel.ps1
-pwsh -File .\scripts\doctor.ps1
 ~~~
 
 Preview the process trees that Phase 6 will stop:
