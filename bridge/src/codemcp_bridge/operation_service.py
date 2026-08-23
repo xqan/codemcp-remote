@@ -71,6 +71,13 @@ class OperationService:
             raise BridgeError("INVALID_REQUEST", "client_request_id has an invalid format")
         if not REQUEST_HASH_PATTERN.fullmatch(supplied_request_hash):
             raise BridgeError("INVALID_REQUEST", "request_hash must be a SHA-256 hex digest")
+        canonical_request_hash = request_hash(input_data)
+        if supplied_request_hash.lower() != canonical_request_hash:
+            raise BridgeError(
+                "INVALID_REQUEST",
+                "request_hash does not match the canonical operation input",
+                {"field": "request_hash"},
+            )
         try:
             record, existing = self._database.create_operation(
                 operation_id=operation_id,
@@ -78,7 +85,7 @@ class OperationService:
                 session_id=session_id,
                 owner_id="local-policy",
                 client_request_id=client_request_id,
-                request_hash=supplied_request_hash.lower(),
+                request_hash=canonical_request_hash,
                 kind=kind,
                 mutation=mutation,
                 input_data=input_data,
@@ -93,7 +100,7 @@ class OperationService:
                 },
             ) from exc
         if existing:
-            if record.request_hash != supplied_request_hash.lower():
+            if record.request_hash != canonical_request_hash:
                 raise BridgeError(
                     "IDEMPOTENCY_CONFLICT",
                     "client_request_id was already used with a different request_hash",

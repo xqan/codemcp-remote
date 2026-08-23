@@ -61,6 +61,27 @@ def test_schema_migrations_are_idempotent(tmp_path: Path) -> None:
     database.close()
 
 
+def test_request_hash_is_bound_to_canonical_input(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    operations = OperationService(database)
+
+    with pytest.raises(BridgeError) as mismatch:
+        operations.start(
+            operation_id="op-mismatch",
+            project_id="demo",
+            session_id="session-1",
+            kind="file_edit",
+            mutation=True,
+            client_request_id="edit-mismatch-1",
+            supplied_request_hash=request_hash({"new_string": "unexpected"}),
+            input_data={"new_string": "canonical"},
+        )
+
+    assert mismatch.value.code == "INVALID_REQUEST"
+    assert database.get_operation("op-mismatch") is None
+    database.close()
+
+
 def test_idempotency_replays_without_repeating_and_detects_hash_conflict(
     tmp_path: Path,
 ) -> None:
@@ -84,7 +105,7 @@ def test_idempotency_replays_without_repeating_and_detects_hash_conflict(
         mutation=True,
         client_request_id="edit-1",
         supplied_request_hash=request_hash({"operation_id": "op-1", "project_id": "demo"}),
-        input_data={"operation_id": "op-retry", "project_id": "demo"},
+        input_data={"operation_id": "op-1", "project_id": "demo"},
     )
     assert replay.is_replay
     assert replay.replay_payload == payload
@@ -98,7 +119,7 @@ def test_idempotency_replays_without_repeating_and_detects_hash_conflict(
             kind="file_edit",
             mutation=True,
             client_request_id="edit-1",
-            supplied_request_hash="0" * 64,
+            supplied_request_hash=request_hash({"different": True}),
             input_data={"different": True},
         )
     assert conflict.value.code == "IDEMPOTENCY_CONFLICT"

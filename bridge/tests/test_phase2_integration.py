@@ -37,6 +37,17 @@ def _payload(result: Any) -> dict[str, Any]:
     return json.loads("\n".join(text_blocks))
 
 
+def _file_edit_input(
+    path: str, old_string: str, new_string: str, description: str
+) -> dict[str, str]:
+    return {
+        "path": path,
+        "description": description,
+        "old_string_digest": request_hash(old_string),
+        "new_string_digest": request_hash(new_string),
+    }
+
+
 def _settings(project: Path, data_dir: Path) -> BridgeSettings:
     format_command = CommandSpec(
         command_id="format",
@@ -214,13 +225,21 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                                 "description": "test the real Bridge edit path",
                                 "client_request_id": "edit-1",
                                 "request_hash": request_hash(
-                                    {"path": "src/hello file.txt", "new_string": "edited codemcp"}
+                                    _file_edit_input(
+                                        "src/hello file.txt",
+                                        "hello codemcp",
+                                        "edited codemcp",
+                                        "test the real Bridge edit path",
+                                    )
                                 ),
                             },
                         )
                     )
                     assert edited["status"] == "succeeded"
-                    assert edited["changed_files"] == ["src/hello file.txt"]
+                    assert "src/hello file.txt" in edited["changed_files"]
+                    assert edited["changed_files"] == edited["data"]["checkpoint"][
+                        "after"
+                    ]["changed_files"]
                     assert "edited codemcp" in (
                         git_project / "src" / "hello file.txt"
                     ).read_text(encoding="utf-8")
@@ -233,7 +252,9 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                                 "session_id": session_id,
                                 "command_id": "format",
                                 "client_request_id": "format-1",
-                                "request_hash": request_hash({"command_id": "format"}),
+                                "request_hash": request_hash(
+                                    {"command_id": "format", "expected_kind": "format"}
+                                ),
                             },
                         )
                     )
@@ -248,7 +269,9 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                                 "session_id": session_id,
                                 "command_id": "test",
                                 "client_request_id": "test-1",
-                                "request_hash": request_hash({"command_id": "test"}),
+                                "request_hash": request_hash(
+                                    {"command_id": "test", "expected_kind": "test"}
+                                ),
                             },
                         )
                     )

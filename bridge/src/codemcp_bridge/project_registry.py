@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import stat
 from pathlib import Path, PurePosixPath
@@ -22,6 +23,11 @@ SENSITIVE_NAMES = {
     "token",
 }
 SENSITIVE_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".crt", ".cer"}
+SENSITIVE_GLOBS = tuple(
+    SENSITIVE_NAMES
+    | {"*.env", "*.env.*"}
+    | {f"*{suffix}" for suffix in SENSITIVE_SUFFIXES}
+)
 
 
 def _is_reparse_point(path: Path) -> bool:
@@ -52,9 +58,7 @@ def _is_sensitive(relative_path: str) -> bool:
     parts = PurePosixPath(relative_path).parts
     for part in parts:
         lower = part.lower()
-        if lower in SENSITIVE_NAMES or lower.endswith(tuple(SENSITIVE_SUFFIXES)):
-            return True
-        if lower == ".env" or lower.startswith(".env."):
+        if any(fnmatch.fnmatchcase(lower, pattern) for pattern in SENSITIVE_GLOBS):
             return True
     return False
 
@@ -122,6 +126,57 @@ class ProjectRegistry:
         if os.name == "nt" and self._settings.codemcp.worker_mode == "wsl2":
             return to_wsl_path(path)
         return str(path)
+
+    def safe_search_paths(self, project: ProjectSpec, target: Path) -> list[Path]:
+        """Return search roots that cannot recursively include sensitive paths.
+
+        codemcp's Grep accepts one include pathspec but no exclude pathspec. Split
+        only directories that contain an excluded descendant, keeping the normal
+        one-call path for projects without sensitive files.
+        """
+
+        try:
+            if not target.is_dir():
+                return [target]
+        except OSError:
+            return []
+        paths, excluded = self._safe_search_paths(project, target)
+        return paths if excluded else [target]
+
+    def _safe_search_paths(
+        self, project: ProjectSpec, target: Path
+    ) -> tuple[list[Path], bool]:
+        try:
+            entries = sorted(target.iterdir(), key=lambda item: item.name.lower())
+        except OSError:
+            return [], True
+
+        safe_children: list[Path] = []
+        excluded = False
+        for entry in entries:
+            relative = entry.relative_to(project.root).as_posix()
+            # Git never searches its own metadata directory, so it need not
+            # force every otherwise-safe project directory into file-level calls.
+            if entry.name.lower() == ".git":
+                continue
+            if _is_reparse_point(entry) or is_sensitive_relative_path(relative):
+                excluded = True
+                continue
+            try:
+                if entry.is_dir():
+                    child_paths, child_excluded = self._safe_search_paths(project, entry)
+                    safe_children.extend(child_paths)
+                    excluded = excluded or child_excluded
+                elif entry.is_file():
+                    safe_children.append(entry)
+                else:
+                    excluded = True
+            except OSError:
+                excluded = True
+
+        if not excluded:
+            return [target], False
+        return safe_children, True
 
     @staticmethod
     def relative_path(project: ProjectSpec, path: Path) -> str:

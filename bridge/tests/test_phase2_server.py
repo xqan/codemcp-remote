@@ -90,11 +90,89 @@ class FakeAdapter:
         return None
 
 
+class SearchAdapter(FakeAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.search_paths: list[Path] = []
+
+    async def call(
+        self,
+        project: ProjectSpec,
+        subtool: str,
+        arguments: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        mutation: bool = False,
+    ) -> AdapterResult:
+        if subtool == "Grep":
+            self.search_paths.append(Path(arguments["path"]))
+            return AdapterResult(
+                "\n".join(
+                    [
+                        "Found 3 files",
+                        str(project.root / "src" / "hello.txt"),
+                        str(project.root / "secrets" / "private.key"),
+                        str(project.root / "local.env"),
+                    ]
+                ),
+                False,
+            )
+        return await super().call(
+            project,
+            subtool,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            mutation=mutation,
+        )
+
+
+class MultiFileEditAdapter(FakeAdapter):
+    async def call(
+        self,
+        project: ProjectSpec,
+        subtool: str,
+        arguments: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        mutation: bool = False,
+    ) -> AdapterResult:
+        if subtool == "EditFile":
+            target = Path(arguments["path"])
+            target.write_text(
+                target.read_text(encoding="utf-8").replace(
+                    arguments["old_string"], arguments["new_string"], 1
+                ),
+                encoding="utf-8",
+            )
+            (project.root / "src" / "notes.txt").write_text(
+                "unexpected side effect\n", encoding="utf-8"
+            )
+            return AdapterResult("fake EditFile", False)
+        return await super().call(
+            project,
+            subtool,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            mutation=mutation,
+        )
+
+
 def _payload(result: Any) -> dict[str, Any]:
     if result.structuredContent:
         return result.structuredContent
     text_blocks = [block.text for block in result.content if hasattr(block, "text")]
     return json.loads("\n".join(text_blocks))
+
+
+def _file_edit_input(
+    path: str, old_string: str, new_string: str, description: str
+) -> dict[str, str]:
+    return {
+        "path": path,
+        "description": description,
+        "old_string_digest": request_hash(old_string),
+        "new_string_digest": request_hash(new_string),
+    }
 
 
 @pytest.fixture
@@ -225,7 +303,9 @@ async def test_local_mcp_contract_and_policy_rejections(git_project: Path) -> No
                                 "session_id": session_id,
                                 "command_id": "format",
                                 "client_request_id": "format-1",
-                                "request_hash": request_hash({"command_id": "format"}),
+                                "request_hash": request_hash(
+                                    {"command_id": "format", "expected_kind": "format"}
+                                ),
                             },
                         )
                     )
@@ -259,13 +339,84 @@ async def test_local_mcp_contract_and_policy_rejections(git_project: Path) -> No
                                 "description": "test edit",
                                 "client_request_id": "edit-1",
                                 "request_hash": request_hash(
-                                    {"path": "src/hello.txt", "new_string": "changed"}
+                                    _file_edit_input(
+                                        "src/hello.txt", "dirty", "changed", "test edit"
+                                    )
                                 ),
                             },
                         )
                     )
                     assert dirty["error"]["code"] == "WORKSPACE_DIRTY"
 
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_code_search_excludes_sensitive_paths_before_and_after_grep(
+    git_project: Path,
+) -> None:
+    (git_project / "local.env").write_text("TOKEN=do-not-return\n", encoding="utf-8")
+    (git_project / "secrets").mkdir()
+    (git_project / "secrets" / "private.key").write_text(
+        "private material\n", encoding="utf-8"
+    )
+    adapter = SearchAdapter()
+    service = create_app(_settings(git_project), adapter=adapter)[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    result = await service.code_search(
+        None,
+        "demo",
+        session.session_id,
+        "private",
+        None,
+        None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert "hello.txt" in result["data"]["text"]
+    assert "private.key" not in result["data"]["text"]
+    assert "local.env" not in result["data"]["text"]
+    assert all(path.name not in {"local.env", "secrets"} for path in adapter.search_paths)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_file_edit_reports_all_checkpoint_changed_files(git_project: Path) -> None:
+    notes = git_project / "src" / "notes.txt"
+    notes.write_text("baseline notes\n", encoding="utf-8")
+    _git(git_project, "add", "src/notes.txt")
+    _git(git_project, "commit", "-m", "test: add side effect target")
+
+    adapter = MultiFileEditAdapter()
+    service = create_app(_settings(git_project), adapter=adapter)[1]
+    await service.start()
+    session = service.sessions.create("demo")
+    operation_input = {
+        "path": "src/hello.txt",
+        "description": "report side effects",
+        "old_string_digest": request_hash("hello"),
+        "new_string_digest": request_hash("changed"),
+    }
+
+    result = await service.file_edit(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "hello",
+        "changed",
+        "report side effects",
+        "edit-with-side-effect-1",
+        request_hash(operation_input),
+    )
+
+    assert result["status"] == "succeeded"
+    assert set(result["changed_files"]) == {"src/hello.txt", "src/notes.txt"}
+    assert set(result["data"]["checkpoint"]["after"]["changed_files"]) == set(
+        result["changed_files"]
+    )
     await service.close()
 
 
@@ -323,7 +474,9 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
                         "description": "idempotent edit",
                         "client_request_id": "edit-replay-1",
                         "request_hash": request_hash(
-                            {"path": "src/hello.txt", "new_string": "changed"}
+                            _file_edit_input(
+                                "src/hello.txt", "hello", "changed", "idempotent edit"
+                            )
                         ),
                     }
                     first_edit = _payload(
@@ -343,7 +496,9 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
                                 "session_id": session_id,
                                 "command_id": "format",
                                 "client_request_id": "format-approval-1",
-                                "request_hash": request_hash({"command_id": "format"}),
+                                "request_hash": request_hash(
+                                    {"command_id": "format", "expected_kind": "format"}
+                                ),
                             },
                         )
                     )
@@ -369,7 +524,10 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
                                 "approval_token": token,
                                 "client_request_id": "approval-confirm-1",
                                 "request_hash": request_hash(
-                                    {"operation_id": operation_id}
+                                    {
+                                        "operation_id": operation_id,
+                                        "approval_token_digest": request_hash(token),
+                                    }
                                 ),
                             },
                         )
@@ -427,19 +585,55 @@ async def test_phase3_reconcile_unknown_mutation_releases_project_lock(
     )
     service.operations.finish(started.record.operation_id, state="unknown", payload=unknown)
 
+    other_session = service.sessions.create("demo")
+    foreign_status = await service.operation_status(
+        None, started.record.operation_id, other_session.session_id
+    )
+    assert foreign_status["error"]["code"] == "OPERATION_NOT_FOUND"
+    foreign_reconcile = await service.operation_reconcile(
+        None,
+        started.record.operation_id,
+        other_session.session_id,
+        "failed",
+        "foreign session must not reconcile",
+        "foreign-reconcile-1",
+        request_hash(
+            {
+                "operation_id": started.record.operation_id,
+                "decision": "failed",
+                "evidence_digest": request_hash("foreign session must not reconcile"),
+            }
+        ),
+    )
+    assert foreign_reconcile["error"]["code"] == "OPERATION_NOT_FOUND"
+    assert service.operations.operation(started.record.operation_id).state == "unknown"
+
+    evidence = "backend confirmed that no mutation was applied"
     reconciled = await service.operation_reconcile(
         None,
         started.record.operation_id,
         session.session_id,
         "failed",
-        "backend confirmed that no mutation was applied",
+        evidence,
         "reconcile-unknown-1",
-        request_hash({"operation_id": started.record.operation_id, "decision": "failed"}),
+        request_hash(
+            {
+                "operation_id": started.record.operation_id,
+                "decision": "failed",
+                "evidence_digest": request_hash(evidence),
+            }
+        ),
     )
     assert reconciled["status"] == "failed"
     assert reconciled["data"]["reconciled_operation"]["error"]["details"]["reconciled"]
     assert service.operations.operation(started.record.operation_id).state == "failed"
 
+    edit_input = {
+        "path": "src/hello.txt",
+        "description": "post-reconcile edit",
+        "old_string_digest": request_hash("hello"),
+        "new_string_digest": request_hash("changed"),
+    }
     edit = await service.file_edit(
         None,
         "demo",
@@ -449,7 +643,7 @@ async def test_phase3_reconcile_unknown_mutation_releases_project_lock(
         "changed",
         "post-reconcile edit",
         "post-reconcile-edit-1",
-        request_hash({"path": "src/hello.txt", "new_string": "changed"}),
+        request_hash(edit_input),
     )
     assert edit["status"] == "succeeded"
     await service.close()

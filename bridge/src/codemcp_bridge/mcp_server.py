@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import logging
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, Protocol
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -24,7 +27,7 @@ from .git_guard import GitGuard
 from .operation_service import OperationService
 from .operation_service import request_hash as calculate_request_hash
 from .policy_engine import PolicyEngine
-from .project_registry import ProjectRegistry
+from .project_registry import ProjectRegistry, is_sensitive_relative_path
 from .session_service import SessionService
 from .settings import BridgeSettings, CommandSpec, ProjectSpec
 
@@ -60,6 +63,62 @@ Operation = Callable[[str], Awaitable[_Outcome]]
 
 def _is_codemcp_error(result: Any) -> bool:
     return bool(result.is_error) or result.text.lstrip().lower().startswith("error")
+
+
+_GREP_HEADER_PATTERN = re.compile(r"^Found \d+ files?$")
+
+
+def _is_sensitive_grep_line(
+    line: str,
+    *,
+    project: ProjectSpec,
+    registry: ProjectRegistry,
+) -> bool:
+    candidate = line.strip().replace("\\", "/")
+    if not candidate:
+        return False
+    roots = {
+        str(project.root.resolve(strict=False)).replace("\\", "/").rstrip("/"),
+        registry.worker_path(project.root).replace("\\", "/").rstrip("/"),
+    }
+    candidate_casefold = candidate.casefold()
+    for root in roots:
+        root_casefold = root.casefold()
+        if candidate_casefold.startswith(root_casefold + "/"):
+            relative = candidate[len(root) + 1 :]
+            return is_sensitive_relative_path(relative)
+    return is_sensitive_relative_path(candidate)
+
+
+def _filter_sensitive_grep_result(
+    text: str,
+    *,
+    project: ProjectSpec,
+    registry: ProjectRegistry,
+) -> str:
+    """Remove sensitive filenames from codemcp's formatted Grep response."""
+
+    lines = text.splitlines()
+    if not lines:
+        return text
+    header = lines[0].strip()
+    if _GREP_HEADER_PATTERN.fullmatch(header):
+        matches = [
+            line
+            for line in lines[1:]
+            if line.strip()
+            and not line.strip().startswith("(")
+            and not _is_sensitive_grep_line(line, project=project, registry=registry)
+        ]
+        if not matches:
+            return "No files found"
+        result = f"Found {len(matches)} file{'s' if len(matches) != 1 else ''}\n"
+        return result + "\n".join(matches)
+    return "\n".join(
+        line
+        for line in lines
+        if not _is_sensitive_grep_line(line, project=project, registry=registry)
+    )
 
 
 class BridgeService:
@@ -242,6 +301,19 @@ class BridgeService:
     async def _require_session(self, project_id: str, session_id: str | None) -> SessionRecord:
         return self.sessions.require_active(project_id, session_id)
 
+    def require_operation_for_session(
+        self, operation_id: str, session_id: str
+    ) -> OperationRecord:
+        record = self.operations.operation(operation_id)
+        if record.owner_id != self.sessions.owner_id or record.session_id != session_id:
+            raise BridgeError(
+                "OPERATION_NOT_FOUND",
+                "operation_id is not available to this session",
+                {"operation_id": operation_id},
+            )
+        self.sessions.require_active(record.project_id, session_id)
+        return record
+
     async def _begin_mutation(
         self,
         project: ProjectSpec,
@@ -403,17 +475,46 @@ class BridgeService:
             await self._require_session(project_id, session_id)
             self.policy.validate_pattern(pattern)
             project, target, _ = self.registry.resolve_path(project_id, path, allow_root=True)
-            result = await self.adapter.call(
-                project,
-                "Grep",
-                {"pattern": pattern, "path": target, "include": include, "chat_id": session_id},
-            )
-            if _is_codemcp_error(result):
-                raise BridgeError("BACKEND_UNAVAILABLE", "codemcp rejected Grep", status="failed")
+            search_paths = self.registry.safe_search_paths(project, target)
+            results: list[str] = []
+            truncated = False
+            for search_path in search_paths:
+                if search_path != target and include:
+                    relative = self.registry.relative_path(project, search_path)
+                    if not (
+                        fnmatch.fnmatchcase(PurePosixPath(relative).name, include)
+                        or fnmatch.fnmatchcase(relative, include)
+                    ):
+                        continue
+                result = await self.adapter.call(
+                    project,
+                    "Grep",
+                    {
+                        "pattern": pattern,
+                        "path": search_path,
+                        "include": include,
+                        "chat_id": session_id,
+                    },
+                )
+                if _is_codemcp_error(result):
+                    raise BridgeError(
+                        "BACKEND_UNAVAILABLE", "codemcp rejected Grep", status="failed"
+                    )
+                filtered = _filter_sensitive_grep_result(
+                    result.text,
+                    project=project,
+                    registry=self.registry,
+                )
+                if filtered and filtered != "No files found":
+                    results.append(filtered)
+                truncated = truncated or result.truncated
             return _Outcome(
-                {"path": self.registry.relative_path(project, target), "text": result.text},
+                {
+                    "path": self.registry.relative_path(project, target),
+                    "text": "\n".join(results) if results else "No files found",
+                },
                 [],
-                result.truncated,
+                truncated,
             )
 
         return await self._execute(
@@ -479,7 +580,7 @@ class BridgeService:
                 raise BridgeError("FILE_TOO_LARGE", "old_string exceeds the configured size limit")
             if len(new_string.encode("utf-8")) > self.settings.policy.max_file_bytes:
                 raise BridgeError("FILE_TOO_LARGE", "new_string exceeds the configured size limit")
-            project, target, relative = self.registry.resolve_path(project_id, path)
+            project, target, _ = self.registry.resolve_path(project_id, path)
             self.policy.require_regular_file(target)
             self.policy.validate_file_size(target)
             async with self._mutation_lock(project_id):
@@ -507,7 +608,7 @@ class BridgeService:
             checkpoint_data = await self._finish_mutation(project, checkpoint)
             return _Outcome(
                 {"text": result.text, "checkpoint": checkpoint_data},
-                [relative],
+                list(checkpoint_data["after"]["changed_files"]),
                 result.truncated,
             )
 
@@ -997,12 +1098,7 @@ class BridgeService:
         await self.start()
         request_id = self._request_id(ctx)
         try:
-            record = self.operations.operation(operation_id)
-            self.sessions.require_active(record.project_id, session_id)
-            if record.owner_id != self.sessions.owner_id:
-                raise BridgeError(
-                    "OPERATION_NOT_FOUND", "operation_id is not owned by this profile"
-                )
+            record = self.require_operation_for_session(operation_id, session_id)
             return success_payload(
                 request_id=request_id,
                 session_id=session_id,
@@ -1043,7 +1139,7 @@ class BridgeService:
     ) -> dict[str, Any]:
         await self.start()
         try:
-            original = self.operations.operation(operation_id)
+            original = self.require_operation_for_session(operation_id, session_id)
         except BridgeError as exc:
             return error_payload(
                 request_id=self._request_id(ctx),
@@ -1054,13 +1150,7 @@ class BridgeService:
             )
 
         async def operation(_operation_id: str) -> _Outcome:
-            self.sessions.require_active(original.project_id, session_id)
-            if original.session_id != session_id:
-                raise BridgeError(
-                    "SESSION_NOT_FOUND",
-                    "approval belongs to a different session",
-                    {"operation_id": operation_id},
-                )
+            self.require_operation_for_session(operation_id, session_id)
             if original.state != "awaiting_approval":
                 raise BridgeError(
                     "OPERATION_NOT_CANCELABLE",
@@ -1176,7 +1266,7 @@ class BridgeService:
     ) -> dict[str, Any]:
         await self.start()
         try:
-            original = self.operations.operation(operation_id)
+            original = self.require_operation_for_session(operation_id, session_id)
         except BridgeError as exc:
             return error_payload(
                 request_id=self._request_id(ctx),
@@ -1187,9 +1277,7 @@ class BridgeService:
             )
 
         async def operation(_operation_id: str) -> _Outcome:
-            self.sessions.require_active(original.project_id, session_id)
-            if original.session_id != session_id:
-                raise BridgeError("SESSION_NOT_FOUND", "operation belongs to a different session")
+            self.require_operation_for_session(operation_id, session_id)
             if original.state != "awaiting_approval":
                 raise BridgeError(
                     "OPERATION_NOT_CANCELABLE",
@@ -1231,7 +1319,7 @@ class BridgeService:
     ) -> dict[str, Any]:
         await self.start()
         try:
-            original = self.operations.operation(operation_id)
+            original = self.require_operation_for_session(operation_id, session_id)
         except BridgeError as exc:
             return error_payload(
                 request_id=self._request_id(ctx),
@@ -1242,7 +1330,7 @@ class BridgeService:
             )
 
         async def operation(_operation_id: str) -> _Outcome:
-            self.sessions.require_active(original.project_id, session_id)
+            self.require_operation_for_session(operation_id, session_id)
             if decision != "failed":
                 raise BridgeError(
                     "RECONCILE_REQUIRED",
@@ -1277,7 +1365,11 @@ class BridgeService:
             session_id=session_id,
             operation=operation,
             operation_kind="operation_reconcile",
-            operation_input={"operation_id": operation_id, "decision": decision},
+            operation_input={
+                "operation_id": operation_id,
+                "decision": decision,
+                "evidence_digest": calculate_request_hash(evidence),
+            },
             client_request_id=client_request_id,
             supplied_request_hash=request_hash,
         )

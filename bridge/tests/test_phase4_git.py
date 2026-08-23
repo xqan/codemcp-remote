@@ -164,7 +164,12 @@ async def test_checkpoint_mcp_approval_diff_and_cas_restore(
         session.session_id,
         token,
         "checkpoint-approval-1",
-        request_hash({"operation_id": checkpoint_id}),
+        request_hash(
+            {
+                "operation_id": checkpoint_id,
+                "approval_token_digest": request_hash(token),
+            }
+        ),
     )
     assert created["status"] == "succeeded"
     checkpoint = created["data"]["approved_operation"]["data"]["checkpoint"]
@@ -229,7 +234,12 @@ async def test_checkpoint_mcp_approval_diff_and_cas_restore(
         session.session_id,
         restore_token,
         "restore-cas-confirm-1",
-        request_hash({"operation_id": restore_operation_id}),
+        request_hash(
+            {
+                "operation_id": restore_operation_id,
+                "approval_token_digest": request_hash(restore_token),
+            }
+        ),
     )
     assert conflicted["data"]["approved_operation"]["error"]["code"] == (
         "CHECKPOINT_CONFLICT"
@@ -258,7 +268,12 @@ async def test_checkpoint_mcp_approval_diff_and_cas_restore(
         restore_pending_2["error"]["details"]["approval_token"],
         "restore-cas-confirm-2",
         request_hash(
-            {"operation_id": restore_pending_2["error"]["details"]["operation_id"]}
+            {
+                "operation_id": restore_pending_2["error"]["details"]["operation_id"],
+                "approval_token_digest": request_hash(
+                    restore_pending_2["error"]["details"]["approval_token"]
+                ),
+            }
         ),
     )
     assert restored["status"] == "succeeded"

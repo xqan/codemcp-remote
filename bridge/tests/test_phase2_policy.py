@@ -95,10 +95,16 @@ def test_registry_rejects_unregistered_escape_and_sensitive_paths(git_project: P
         registry.resolve_path("demo", "../outside.txt")
     assert _error_code(escaped) == "PATH_ESCAPE"
 
-    (git_project / ".env").write_text("TOKEN=not-for-chatgpt\n", encoding="utf-8")
-    with pytest.raises(BridgeError) as sensitive:
-        registry.resolve_path("demo", ".env")
-    assert _error_code(sensitive) == "SENSITIVE_PATH"
+    for sensitive_path in (
+        ".env",
+        "local.env",
+        "prod.env",
+        "config/tunnel-profile.local.env",
+        "secrets/private.key",
+    ):
+        with pytest.raises(BridgeError) as sensitive:
+            registry.resolve_path("demo", sensitive_path)
+        assert _error_code(sensitive) == "SENSITIVE_PATH"
 
 
 def test_registry_rejects_symlink_components(git_project: Path) -> None:
