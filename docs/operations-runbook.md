@@ -64,6 +64,17 @@ fields; the worker receives a restricted environment without runtime API keys.
 Logs remain local sensitive state and must not be committed to Git or sent to
 ChatGPT as unrestricted source context.
 
+On Windows PowerShell, follow a worker log with explicit UTF-8 decoding:
+
+~~~powershell
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Get-Content -LiteralPath .local/logs/workers/codemcp-remote.stderr.log -Encoding UTF8 -Tail 50 -Wait
+~~~
+
+The Bridge normalizes WSL launcher diagnostics and Python worker stderr to UTF-8
+when a worker starts. Restart the Bridge once after upgrading so an old mixed
+encoding log is rotated automatically.
+
 For isolated troubleshooting, the underlying foreground scripts remain
 available:
 

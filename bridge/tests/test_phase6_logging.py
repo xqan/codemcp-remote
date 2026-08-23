@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -72,6 +73,32 @@ def test_worker_stderr_is_unified_and_project_scoped(tmp_path: Path) -> None:
     assert (tmp_path / "workers" / "sample_project.stderr.log").read_text(
         encoding="utf-8"
     ) == "worker diagnostic\n"
+
+
+def test_worker_stderr_normalizes_wsl_utf16_and_python_utf8(
+    tmp_path: Path,
+) -> None:
+    legacy_log = tmp_path / "workers" / "sample_project.stderr.log"
+    legacy_log.parent.mkdir(parents=True)
+    legacy_log.write_bytes("wsl: legacy warning\r\n".encode("utf-16-le"))
+
+    stream = open_worker_stderr(
+        tmp_path,
+        "sample_project",
+        normalize_subprocess_output=True,
+    )
+    try:
+        os.write(stream.fileno(), "wsl: localhost proxy warning\r\n".encode("utf-16-le"))
+        os.write(stream.fileno(), b"worker diagnostic\n")
+    finally:
+        stream.close()
+
+    assert (tmp_path / "workers" / "sample_project.stderr.log").read_text(
+        encoding="utf-8"
+    ) == "wsl: localhost proxy warning\nworker diagnostic\n"
+    assert (tmp_path / "workers" / "sample_project.stderr.log.1").read_bytes() == (
+        "wsl: legacy warning\r\n".encode("utf-16-le")
+    )
 
 
 def test_worker_stderr_rotates_when_size_limit_is_reached(tmp_path: Path) -> None:

@@ -71,7 +71,12 @@ class _CodemcpWorker:
             key: os.environ[key] for key in SAFE_ENVIRONMENT if os.environ.get(key) is not None
         }
         environment["PYTHONIOENCODING"] = "utf-8"
-        self._stderr = open_worker_stderr(self._settings.storage.log_dir, self._project.project_id)
+        normalize_stderr = self._settings.codemcp.worker_mode == "wsl2" and os.name == "nt"
+        self._stderr = open_worker_stderr(
+            self._settings.storage.log_dir,
+            self._project.project_id,
+            normalize_subprocess_output=normalize_stderr,
+        )
 
         if self._settings.codemcp.worker_mode == "wsl2" and os.name == "nt":
             python = self._settings.codemcp.wsl_python or to_wsl_path(
