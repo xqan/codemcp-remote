@@ -41,6 +41,15 @@ the existing service is reused. An unknown process occupying a health endpoint
 is rejected. The codemcp WSL2 worker is started on demand by the Bridge when a
 registered project operation requires it.
 
+`doctor.ps1` reports structured checks for configuration paths, SQLite state,
+WSL2 distribution and worker Python, Git repository state, Bridge configuration
+and health, and Tunnel readiness. A missing database or log directory before
+first initialization is reported as `not_initialized`; a missing configuration,
+database parent, WSL2 distribution, or worker Python returns a failing status.
+Use `-SkipTunnel` when diagnosing the local Bridge without Tunnel credentials.
+For a non-default Bridge configuration, pass `-BridgeConfig` and
+`-ProjectsConfig` to both `start-all.ps1` and `doctor.ps1`.
+
 For isolated troubleshooting, the underlying foreground scripts remain
 available:
 
