@@ -24,6 +24,7 @@ from .codemcp_adapter import CodemcpAdapter
 from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
 from .git_guard import GitGuard
+from .mcp_transport import BridgeStreamableHTTPSessionManager
 from .operation_service import OperationService
 from .operation_service import request_hash as calculate_request_hash
 from .policy_engine import PolicyEngine
@@ -1425,6 +1426,17 @@ def create_server(
         stateless_http=True,
         json_response=True,
         lifespan=lifespan,
+    )
+    # MCP 1.x closes stateless transports from the HTTP request task. Use the
+    # local compatibility manager so responder cancel scopes unwind cleanly.
+    server._session_manager = BridgeStreamableHTTPSessionManager(  # noqa: SLF001
+        app=server._mcp_server,  # noqa: SLF001
+        event_store=server._event_store,  # noqa: SLF001
+        retry_interval=server._retry_interval,  # noqa: SLF001
+        json_response=server.settings.json_response,
+        stateless=server.settings.stateless_http,
+        security_settings=server.settings.transport_security,
+        max_request_body_size=server.settings.max_request_body_size,
     )
 
     @server.custom_route("/healthz", methods=["GET"], include_in_schema=False)

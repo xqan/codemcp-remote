@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -196,7 +197,10 @@ def git_project(tmp_path: Path) -> Path:
 
 
 @pytest.mark.asyncio
-async def test_local_mcp_contract_and_policy_rejections(git_project: Path) -> None:
+async def test_local_mcp_contract_and_policy_rejections(
+    git_project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
     adapter = FakeAdapter()
     app, service = create_app(_settings(git_project), adapter=adapter)
     async with app.router.lifespan_context(app):
@@ -349,6 +353,9 @@ async def test_local_mcp_contract_and_policy_rejections(git_project: Path) -> No
                     assert dirty["error"]["code"] == "WORKSPACE_DIRTY"
 
     await service.close()
+    assert not any(
+        record.getMessage() == "Stateless session crashed" for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio
