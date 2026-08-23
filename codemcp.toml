@@ -1,0 +1,23 @@
+project_prompt = "Review for correctness, security, data consistency, compatibility, and maintainability. Prefer read-only inspection and report concrete findings with file and line references."
+
+[commands.test]
+command = [
+    "/mnt/d/Documents/CodexProject/codemcp-remote/.local/bridge-venv-wsl/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "bridge/tests",
+    "tests/integration",
+]
+doc = "Run the Bridge and codemcp integration test suites."
+
+[commands.format]
+command = [
+    "/mnt/d/Documents/CodexProject/codemcp-remote/.local/bridge-venv-wsl/bin/ruff",
+    "format",
+    "--check",
+    "bridge/src",
+    "bridge/tests",
+    "tests/integration",
+]
+doc = "Check Python formatting without modifying files."

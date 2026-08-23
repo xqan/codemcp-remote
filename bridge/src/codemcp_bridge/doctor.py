@@ -102,11 +102,24 @@ def _validate_configuration() -> list[str]:
         errors.append("policy.require_clean_workspace must be true")
 
     projects = _load_toml(PROJECT_CONFIG)
-    pet_manage = projects.get("projects", {}).get("sample_project", {})
-    if not pet_manage.get("root"):
-        errors.append("projects.example.toml must define projects.sample_project.root")
-    if not pet_manage.get("commands", {}).get("test", {}).get("argv"):
-        errors.append("projects.example.toml must define a test command")
+    registered_projects = projects.get("projects", {})
+    if not isinstance(registered_projects, dict) or not registered_projects:
+        errors.append("projects.example.toml must define at least one project")
+    else:
+        has_project_root = any(
+            isinstance(project, dict) and project.get("root")
+            for project in registered_projects.values()
+        )
+        if not has_project_root:
+            errors.append("projects.example.toml must define a project root")
+        has_test_command = any(
+            isinstance(project, dict)
+            and isinstance(project.get("commands"), dict)
+            and project["commands"].get("test", {}).get("argv")
+            for project in registered_projects.values()
+        )
+        if not has_test_command:
+            errors.append("projects.example.toml must define a test command")
 
     baseline = _load_toml(CODEMCP_BASELINE).get("upstream", {})
     if baseline.get("release") != "0.3.0":
