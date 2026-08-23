@@ -281,6 +281,36 @@ class BridgeService:
             terminal_state = "unknown" if exc.status == "unknown" else "failed"
             self.operations.finish(operation_id, state=terminal_state, payload=payload)
             return payload
+        except asyncio.CancelledError:
+            if mutation:
+                error = BridgeError(
+                    "UNKNOWN_SIDE_EFFECT",
+                    "mutation request was cancelled while the backend outcome may be unknown",
+                    {"operation_id": operation_id, "cause": "client_request_cancelled"},
+                    status="unknown",
+                )
+                terminal_state = "unknown"
+            else:
+                error = BridgeError(
+                    "CLIENT_REQUEST_CANCELLED",
+                    "request was cancelled before a result could be returned",
+                    {"operation_id": operation_id},
+                    retryable=True,
+                    status="failed",
+                )
+                terminal_state = "failed"
+            payload = error_payload(
+                request_id=request_id,
+                session_id=session_id,
+                project_id=project_id,
+                operation_id=operation_id,
+                error=error,
+            )
+            try:
+                self.operations.finish(operation_id, state=terminal_state, payload=payload)
+            except Exception:
+                logger.exception("failed to persist cancelled Bridge operation state")
+            raise
         except Exception:
             logger.exception("unexpected Bridge operation failure")
             error = BridgeError(
@@ -314,6 +344,42 @@ class BridgeService:
                 {"operation_id": operation_id},
             )
         self.sessions.require_active(record.project_id, session_id)
+        return record
+
+    def require_operation_for_reconcile(
+        self, operation_id: str, session_id: str
+    ) -> OperationRecord:
+        record = self.operations.operation(operation_id)
+        if record.owner_id != self.sessions.owner_id:
+            raise BridgeError(
+                "OPERATION_NOT_FOUND",
+                "operation_id is not available to this session",
+                {"operation_id": operation_id},
+            )
+        if record.session_id == session_id:
+            self.sessions.require_active(record.project_id, session_id)
+            return record
+
+        successor = self.sessions.require_active(record.project_id, session_id)
+        if record.state != "unknown" or record.session_id is None:
+            raise BridgeError(
+                "OPERATION_NOT_FOUND",
+                "operation_id is not available to this session",
+                {"operation_id": operation_id},
+            )
+        origin = self.database.get_session(record.session_id)
+        if (
+            origin is None
+            or origin.project_id != record.project_id
+            or origin.owner_id != successor.owner_id
+            or origin.status != "blocked"
+            or origin.reason != "bridge_restart"
+        ):
+            raise BridgeError(
+                "OPERATION_NOT_FOUND",
+                "operation_id is not available to this session",
+                {"operation_id": operation_id},
+            )
         return record
 
     async def _begin_mutation(
