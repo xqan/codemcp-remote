@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 from pathlib import Path
 
+from .logging_utils import configure_logging
 from .mcp_server import create_server
 from .settings import SettingsError, load_settings
 
@@ -50,6 +52,8 @@ def main() -> int:
         )
         return 0
 
+    configure_logging(settings.storage.log_dir)
+    logging.getLogger(__name__).info("Bridge logging initialized")
     server, service = create_server(settings)
     try:
         server.run(transport=settings.server.transport)

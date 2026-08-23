@@ -15,6 +15,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from .errors import BridgeError
+from .logging_utils import open_worker_stderr
 from .settings import BridgeSettings, ProjectSpec, to_wsl_path
 
 logger = logging.getLogger(__name__)
@@ -70,8 +71,7 @@ class _CodemcpWorker:
             key: os.environ[key] for key in SAFE_ENVIRONMENT if os.environ.get(key) is not None
         }
         environment["PYTHONIOENCODING"] = "utf-8"
-        stderr_path = worker_home / "worker.stderr.log"
-        self._stderr = stderr_path.open("w+", encoding="utf-8")
+        self._stderr = open_worker_stderr(self._settings.storage.log_dir, self._project.project_id)
 
         if self._settings.codemcp.worker_mode == "wsl2" and os.name == "nt":
             python = self._settings.codemcp.wsl_python or to_wsl_path(

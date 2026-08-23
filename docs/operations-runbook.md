@@ -50,6 +50,14 @@ Use `-SkipTunnel` when diagnosing the local Bridge without Tunnel credentials.
 For a non-default Bridge configuration, pass `-BridgeConfig` and
 `-ProjectsConfig` to both `start-all.ps1` and `doctor.ps1`.
 
+Bridge runtime logs are written to `.local/logs/bridge.log` with three 5 MB
+backups. Worker stderr is written to
+`.local/logs/workers/<project_id>.stderr.log` and uses the same size-based
+rotation. Bridge log messages redact common API-key, Bearer-token, and token
+fields; the worker receives a restricted environment without runtime API keys.
+Logs remain local sensitive state and must not be committed to Git or sent to
+ChatGPT as unrestricted source context.
+
 For isolated troubleshooting, the underlying foreground scripts remain
 available:
 
