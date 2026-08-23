@@ -465,7 +465,7 @@ class BridgeService:
                     "path": self.registry.relative_path(project, target),
                     "text": result.text,
                     "sha256": after_sha256,
-                    "size_bytes": file_size,
+                    "size_bytes": after_size,
                 },
                 [],
                 result.truncated,
