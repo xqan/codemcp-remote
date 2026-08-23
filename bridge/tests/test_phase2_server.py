@@ -1056,6 +1056,84 @@ async def test_restart_successor_session_can_reconcile_applied_unknown_mutation(
 
 
 @pytest.mark.asyncio
+async def test_stateless_http_waits_for_responder_exit_before_transport_eof(
+    git_project: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    server, service = create_server(_settings(git_project), adapter=FakeAdapter())
+    app = server.streamable_http_app()
+    low_level = server._mcp_server  # noqa: SLF001
+    original_handle_request = low_level._handle_request  # noqa: SLF001
+    response_sent = asyncio.Event()
+    release_handler = asyncio.Event()
+
+    async def delayed_handle_request(
+        message: Any,
+        req: Any,
+        session: Any,
+        lifespan_context: Any,
+        raise_exceptions: bool,
+    ) -> None:
+        await original_handle_request(
+            message,
+            req,
+            session,
+            lifespan_context,
+            raise_exceptions,
+        )
+        response_sent.set()
+        await release_handler.wait()
+
+    low_level._handle_request = delayed_handle_request  # type: ignore[method-assign]  # noqa: SLF001
+    caplog.set_level(logging.ERROR, logger="codemcp_bridge.mcp_transport")
+
+    async with app.router.lifespan_context(app):
+        opened = await service.project_open(None, "demo")
+        session_id = opened["data"]["session_id"]
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:46200",
+        ) as http:
+            request = asyncio.create_task(
+                http.post(
+                    "/mcp",
+                    headers={
+                        "accept": "application/json",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 43,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "file_read",
+                            "arguments": {
+                                "project_id": "demo",
+                                "session_id": session_id,
+                                "path": "src/hello.txt",
+                            },
+                        },
+                    },
+                )
+            )
+            await asyncio.wait_for(response_sent.wait(), timeout=1)
+            await asyncio.sleep(0)
+            assert not request.done()
+
+            release_handler.set()
+            response = await asyncio.wait_for(request, timeout=1)
+            assert response.status_code == 200
+
+    assert not any(
+        record.name == "codemcp_bridge.mcp_transport"
+        and "Stateless session crashed" in record.getMessage()
+        for record in caplog.records
+    )
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_stateless_http_client_cancellation_does_not_crash_responder(
     git_project: Path,
     caplog: pytest.LogCaptureFixture,
