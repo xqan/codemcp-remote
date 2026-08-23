@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -90,6 +91,27 @@ class FakeAdapter:
 
     async def close(self) -> None:
         return None
+
+
+class CancellingEditAdapter(FakeAdapter):
+    async def call(
+        self,
+        project: ProjectSpec,
+        subtool: str,
+        arguments: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        mutation: bool = False,
+    ) -> AdapterResult:
+        if subtool == "EditFile":
+            raise asyncio.CancelledError
+        return await super().call(
+            project,
+            subtool,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            mutation=mutation,
+        )
 
 
 class SearchAdapter(FakeAdapter):
@@ -864,4 +886,49 @@ async def test_phase3_reconcile_unknown_mutation_releases_project_lock(
         request_hash(edit_input),
     )
     assert edit["status"] == "succeeded"
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_mutation_is_persisted_as_unknown(git_project: Path) -> None:
+    adapter = CancellingEditAdapter()
+    service = create_app(_settings(git_project), adapter=adapter)[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    description = "cancelled edit"
+    operation_input = _file_edit_input("src/hello.txt", "hello", "changed", description)
+    with pytest.raises(asyncio.CancelledError):
+        await service.file_edit(
+            None,
+            "demo",
+            session.session_id,
+            "src/hello.txt",
+            "hello",
+            "changed",
+            description,
+            "cancelled-edit-1",
+            request_hash(operation_input),
+        )
+
+    blocked_description = "edit after cancellation"
+    blocked_input = _file_edit_input(
+        "src/hello.txt", "hello", "changed again", blocked_description
+    )
+    blocked = await service.file_edit(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "hello",
+        "changed again",
+        blocked_description,
+        "edit-after-cancel-1",
+        request_hash(blocked_input),
+    )
+    assert blocked["error"]["code"] == "OPERATION_BLOCKED"
+    operation_id = blocked["error"]["details"]["operation_id"]
+    persisted = service.operations.operation(operation_id)
+    assert persisted.state == "unknown"
+    assert persisted.error_data["code"] == "UNKNOWN_SIDE_EFFECT"
     await service.close()

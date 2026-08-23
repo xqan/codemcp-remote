@@ -1589,7 +1589,7 @@ class BridgeService:
     ) -> dict[str, Any]:
         await self.start()
         try:
-            original = self.require_operation_for_session(operation_id, session_id)
+            original = self.require_operation_for_reconcile(operation_id, session_id)
         except BridgeError as exc:
             return error_payload(
                 request_id=self._request_id(ctx),
@@ -1600,7 +1600,7 @@ class BridgeService:
             )
 
         async def operation(_operation_id: str) -> _Outcome:
-            self.require_operation_for_session(operation_id, session_id)
+            self.require_operation_for_reconcile(operation_id, session_id)
             if decision != "failed":
                 raise BridgeError(
                     "RECONCILE_REQUIRED",
