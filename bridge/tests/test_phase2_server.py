@@ -281,6 +281,18 @@ def _file_write_input(
     }
 
 
+def _file_move_input(
+    source_path: str,
+    destination_path: str,
+    description: str,
+) -> dict[str, str]:
+    return {
+        "source_path": source_path,
+        "destination_path": destination_path,
+        "description": description,
+    }
+
+
 def _directory_create_input(path: str, description: str) -> dict[str, str]:
     return {
         "path": path,
@@ -343,6 +355,7 @@ async def test_local_mcp_contract_and_policy_rejections(
                         "file_edit",
                         "file_create",
                         "file_write",
+                        "file_move",
                         "directory_create",
                         "registered_command_run",
                         "format_run",
@@ -732,6 +745,151 @@ async def test_file_write_requires_matching_sha256(git_project: Path) -> None:
     assert success["data"]["checkpoint"]["after"]["changed_files"] == ["src/hello.txt"]
     assert (git_project / "src" / "hello.txt").read_text(encoding="utf-8") == replacement
     assert [name for name, _ in adapter.calls].count("WriteFile") == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_file_move_is_idempotent_no_clobber_and_safe(git_project: Path) -> None:
+    service = create_app(_settings(git_project), adapter=WriteAdapter())[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    same_description = "reject a no-op move"
+    same = await service.file_move(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "src/hello.txt",
+        same_description,
+        "move-same-1",
+        request_hash(
+            _file_move_input(
+                "src/hello.txt",
+                "src/hello.txt",
+                same_description,
+            )
+        ),
+    )
+    assert same["error"]["code"] == "INVALID_REQUEST"
+
+    conflict_description = "never overwrite an existing destination"
+    conflict = await service.file_move(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "src/large.txt",
+        conflict_description,
+        "move-conflict-1",
+        request_hash(
+            _file_move_input(
+                "src/hello.txt",
+                "src/large.txt",
+                conflict_description,
+            )
+        ),
+    )
+    assert conflict["error"]["code"] == "CONFLICT"
+    assert (git_project / "src" / "hello.txt").read_text(encoding="utf-8") == "hello\n"
+    assert (git_project / "src" / "large.txt").read_text(encoding="utf-8") == "x" * 1025
+
+    sensitive_description = "reject a sensitive destination"
+    sensitive = await service.file_move(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "local.env",
+        sensitive_description,
+        "move-sensitive-1",
+        request_hash(
+            _file_move_input(
+                "src/hello.txt",
+                "local.env",
+                sensitive_description,
+            )
+        ),
+    )
+    assert sensitive["error"]["code"] == "SENSITIVE_PATH"
+
+    missing_parent_description = "reject a missing destination parent"
+    missing_parent = await service.file_move(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "missing/moved.txt",
+        missing_parent_description,
+        "move-missing-parent-1",
+        request_hash(
+            _file_move_input(
+                "src/hello.txt",
+                "missing/moved.txt",
+                missing_parent_description,
+            )
+        ),
+    )
+    assert missing_parent["error"]["code"] == "FILE_NOT_FOUND"
+
+    (git_project / ".gitignore").write_text("src/ignored.tmp\n", encoding="utf-8")
+    _git(git_project, "add", ".gitignore")
+    _git(git_project, "commit", "-m", "test: ignore untracked move source")
+    ignored = git_project / "src" / "ignored.tmp"
+    ignored.write_text("ignored\n", encoding="utf-8")
+    assert _git(git_project, "status", "--porcelain") == ""
+
+    untracked_description = "reject an ignored untracked source"
+    untracked = await service.file_move(
+        None,
+        "demo",
+        session.session_id,
+        "src/ignored.tmp",
+        "src/ignored-moved.tmp",
+        untracked_description,
+        "move-untracked-1",
+        request_hash(
+            _file_move_input(
+                "src/ignored.tmp",
+                "src/ignored-moved.tmp",
+                untracked_description,
+            )
+        ),
+    )
+    assert untracked["error"]["code"] == "CONFLICT"
+    assert ignored.is_file()
+
+    description = "move a tracked source file without overwriting"
+    operation_input = _file_move_input("src/hello.txt", "src/moved.txt", description)
+    arguments = (
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "src/moved.txt",
+        description,
+        "move-file-1",
+        request_hash(operation_input),
+    )
+    before_head = _git(git_project, "rev-parse", "HEAD")
+    first = await service.file_move(*arguments)
+    second = await service.file_move(*arguments)
+
+    assert first == second
+    assert first["status"] == "succeeded"
+    assert set(first["changed_files"]) == {"src/hello.txt", "src/moved.txt"}
+    assert set(first["data"]["checkpoint"]["after"]["changed_files"]) == {
+        "src/hello.txt",
+        "src/moved.txt",
+    }
+    assert first["data"]["source_path"] == "src/hello.txt"
+    assert first["data"]["destination_path"] == "src/moved.txt"
+    assert first["data"]["head"] != before_head
+    assert first["data"]["checkpoint"]["after"]["head"] == first["data"]["head"]
+    assert not (git_project / "src" / "hello.txt").exists()
+    assert (git_project / "src" / "moved.txt").read_text(encoding="utf-8") == "hello\n"
+    assert _git(git_project, "status", "--porcelain") == ""
+
     await service.close()
 
 

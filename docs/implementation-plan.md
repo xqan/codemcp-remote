@@ -119,6 +119,7 @@ Bridge 不把原始 shell 直接暴露给 ChatGPT。第一版建议工具：
 | code_search | 在项目范围内搜索代码 | 否 | 忽略 .git、构建目录和敏感文件 |
 | file_list | 列出允许范围内的目录 | 否 | 禁止越过项目根目录 |
 | file_edit | 调用 codemcp EditFile 或 WriteFile | 是 | 需要 session 和基线 |
+| file_move | 移动一个已跟踪文件 | 是 | 同项目、禁止覆盖、需要 clean checkpoint |
 | registered_command_run | 执行任意已登记命令 | 可能 | 仅允许命令 ID，不接受任意 argv |
 | format_run | 执行登记的格式化命令 | 可能 | 兼容入口，仅允许命令 ID |
 | test_run | 执行登记的测试命令 | 可能 | 兼容入口，仅允许命令 ID |

@@ -259,6 +259,89 @@ class GitGuard:
         self._require_checkpoint_ref(ref_name)
         await self._run(project_root, "reset", "--hard", ref_name)
 
+    async def move_tracked_file(
+        self,
+        project_root: Path,
+        *,
+        source: str,
+        destination: str,
+        expected_head: str,
+    ) -> str:
+        """Move one tracked file and amend only that path pair into HEAD."""
+
+        self._require_head(expected_head)
+        before = await self.status(project_root)
+        if before.head.lower() != expected_head.lower():
+            raise BridgeError(
+                "CONFLICT",
+                "Git HEAD changed before the file move started",
+                {"expected_head": expected_head, "actual_head": before.head},
+            )
+        if before.dirty:
+            raise BridgeError(
+                "WORKSPACE_DIRTY",
+                "file move requires a clean workspace",
+                {"changed_files": list(before.changed_files)},
+            )
+
+        try:
+            await self._run(project_root, "mv", "--", source, destination)
+        except BridgeError as exc:
+            raise BridgeError(
+                "CONFLICT",
+                "Git could not move the tracked source file",
+                {"source_path": source, "destination_path": destination},
+                status="failed",
+            ) from exc
+
+        try:
+            staged = await self.status(project_root)
+            expected_paths = {source, destination}
+            unexpected_paths = sorted(set(staged.changed_files) - expected_paths)
+            if staged.head.lower() != expected_head.lower() or unexpected_paths:
+                raise BridgeError(
+                    "CONFLICT",
+                    "Git state changed concurrently while moving the file",
+                    {
+                        "expected_head": expected_head,
+                        "actual_head": staged.head,
+                        "unexpected_changed_files": unexpected_paths,
+                    },
+                )
+            await self._run(
+                project_root,
+                "commit",
+                "--amend",
+                "--no-edit",
+                "--only",
+                "--",
+                source,
+                destination,
+            )
+            final = await self.status(project_root)
+            if final.dirty or final.head.lower() == expected_head.lower():
+                raise BridgeError(
+                    "CONFLICT",
+                    "file move did not finalize to a new clean Git baseline",
+                    {
+                        "expected_previous_head": expected_head,
+                        "actual_head": final.head,
+                        "changed_files": list(final.changed_files),
+                    },
+                )
+            return final.head
+        except BridgeError as exc:
+            raise BridgeError(
+                "UNKNOWN_SIDE_EFFECT",
+                "file move changed the worktree but could not be safely finalized",
+                {
+                    "source_path": source,
+                    "destination_path": destination,
+                    "cause": exc.code,
+                },
+                status="unknown",
+            ) from exc
+
     async def diff(self, project_root: Path) -> tuple[str, bool]:
         status = await self.status(project_root)
         self._reject_sensitive_names(status.changed_files)

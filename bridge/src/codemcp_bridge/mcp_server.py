@@ -899,6 +899,117 @@ class BridgeService:
             supplied_request_hash=request_hash,
         )
 
+    async def file_move(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        source_path: str,
+        destination_path: str,
+        description: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        async def operation(operation_id: str) -> _Outcome:
+            await self._require_session(project_id, session_id)
+            if not description or len(description) > 500:
+                raise BridgeError(
+                    "INVALID_REQUEST",
+                    "description must be 1-500 characters",
+                )
+
+            project, source, normalized_source = self.registry.resolve_path(project_id, source_path)
+            _, destination, normalized_destination = self.registry.resolve_path(
+                project_id, destination_path
+            )
+            if source == destination or normalized_source == normalized_destination:
+                raise BridgeError(
+                    "INVALID_REQUEST",
+                    "source_path and destination_path must be different",
+                )
+            self.policy.require_regular_file(source)
+            destination_parent = destination.parent
+            if not destination_parent.exists() or not destination_parent.is_dir():
+                raise BridgeError(
+                    "FILE_NOT_FOUND",
+                    "destination parent directory does not exist",
+                    {"path": normalized_destination},
+                )
+
+            async with self._mutation_lock(project_id):
+                if destination.exists():
+                    raise BridgeError(
+                        "CONFLICT",
+                        "destination file already exists",
+                        {"path": normalized_destination},
+                    )
+
+                checkpoint = await self._begin_mutation(
+                    project,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                )
+                tracked_files = checkpoint.before_data.get("file_hashes", {})
+                if not isinstance(tracked_files, dict) or normalized_source not in tracked_files:
+                    raise BridgeError(
+                        "CONFLICT",
+                        "source file must be tracked by the checkpoint HEAD",
+                        {"path": normalized_source},
+                    )
+
+                _, source, normalized_source = self.registry.resolve_path(project_id, source_path)
+                _, destination, normalized_destination = self.registry.resolve_path(
+                    project_id, destination_path
+                )
+                self.policy.require_regular_file(source)
+                destination_parent = destination.parent
+                if not destination_parent.exists() or not destination_parent.is_dir():
+                    raise BridgeError(
+                        "FILE_NOT_FOUND",
+                        "destination parent directory does not exist",
+                        {"path": normalized_destination},
+                    )
+                if destination.exists():
+                    raise BridgeError(
+                        "CONFLICT",
+                        "destination file appeared after the mutation baseline was recorded",
+                        {"path": normalized_destination},
+                    )
+
+                new_head = await self.git.move_tracked_file(
+                    project.root,
+                    source=normalized_source,
+                    destination=normalized_destination,
+                    expected_head=checkpoint.head,
+                )
+
+            checkpoint_data = await self._finish_mutation(project, checkpoint)
+            return _Outcome(
+                {
+                    "source_path": normalized_source,
+                    "destination_path": normalized_destination,
+                    "head": new_head,
+                    "checkpoint": checkpoint_data,
+                },
+                list(checkpoint_data["after"]["changed_files"]),
+            )
+
+        return await self._execute(
+            ctx,
+            project_id=project_id,
+            session_id=session_id,
+            operation=operation,
+            operation_kind="file_move",
+            operation_input={
+                "source_path": source_path,
+                "destination_path": destination_path,
+                "description": description,
+            },
+            mutation=True,
+            client_request_id=client_request_id,
+            supplied_request_hash=request_hash,
+        )
+
     async def directory_create(
         self,
         ctx: Context | None,
@@ -2039,6 +2150,33 @@ def create_server(
             path,
             content,
             expected_sha256,
+            description,
+            client_request_id,
+            request_hash,
+        )
+
+    @server.tool(
+        description=(
+            "Move one tracked file within the registered project without overwriting "
+            "an existing destination."
+        ),
+    )
+    async def file_move(
+        project_id: str,
+        session_id: str,
+        source_path: str,
+        destination_path: str,
+        description: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.file_move(
+            ctx,
+            project_id,
+            session_id,
+            source_path,
+            destination_path,
             description,
             client_request_id,
             request_hash,
