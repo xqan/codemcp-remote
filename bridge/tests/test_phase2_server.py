@@ -1200,7 +1200,9 @@ async def test_stateless_http_waits_for_responder_exit_before_transport_eof(
                 )
             )
             await asyncio.wait_for(response_sent.wait(), timeout=1)
-            await asyncio.sleep(0)
+            # The previous transport closed Server.run after 250ms even though
+            # the responder was still executing, which cancelled slow mutations.
+            await asyncio.sleep(0.35)
             assert not request.done()
 
             release_handler.set()

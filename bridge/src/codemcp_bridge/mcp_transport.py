@@ -12,7 +12,6 @@ from starlette.types import Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
-_RESPONDER_DRAIN_TIMEOUT_SECONDS = 0.25
 _GRACEFUL_CLOSE_TIMEOUT_SECONDS = 1.0
 
 
@@ -107,14 +106,15 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
                 # The HTTP response may be routed before RequestResponder.__exit__
                 # completes. Wait for the tracked handler to leave that context
                 # before signalling EOF to Server.run.
-                with anyio.move_on_after(_RESPONDER_DRAIN_TIMEOUT_SECONDS) as responder_scope:
-                    await responder_finished.wait()
-                if responder_scope.cancel_called:
-                    logger.warning("Timed out waiting for stateless MCP responder cleanup")
-                else:
-                    # Let the tracked _handle_message task return to its task group
-                    # before the receive loop observes EOF.
-                    await anyio.sleep(0)
+                # A tool response can be queued before the responder task has
+                # actually returned. Do not use a fixed grace timeout here:
+                # slower mutations would otherwise be cancelled by transport EOF.
+                # Backend operations already enforce their own bounded timeouts.
+                await responder_finished.wait()
+
+                # Let the tracked _handle_message task return to its task group
+                # before the receive loop observes EOF.
+                await anyio.sleep(0)
 
                 # Signal EOF to Server.run only after responder cleanup.
                 if http_transport._read_stream_writer is not None:  # noqa: SLF001
