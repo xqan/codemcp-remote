@@ -61,21 +61,33 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
         await self._task_group.start(run_stateless_server)
 
         try:
-            await http_transport.handle_request(scope, receive, send)
-            # The HTTP response can be delivered one scheduling checkpoint
-            # before RequestResponder.__exit__ finishes in the MCP task.
+            # Keep MCP request processing and responder cleanup shielded from an
+            # outer HTTP-task cancellation. Without this, a client disconnect can
+            # call terminate() while RequestResponder still owns an AnyIO cancel
+            # scope in the server task, which crashes the stateless session.
+            with anyio.CancelScope(shield=True):
+                await http_transport.handle_request(scope, receive, send)
+                # The JSON response is routed immediately before
+                # RequestResponder.__exit__. Give the server task a scheduling
+                # checkpoint to leave that scope before signalling EOF.
+                await anyio.sleep(0)
+
+                # Signal EOF to Server.run without cancelling its responder task.
+                # The transport context owns the remaining stream cleanup.
+                if http_transport._read_stream_writer is not None:  # noqa: SLF001
+                    await http_transport._read_stream_writer.aclose()  # noqa: SLF001
+
+                with anyio.move_on_after(_GRACEFUL_CLOSE_TIMEOUT_SECONDS) as close_scope:
+                    await server_finished.wait()
+                if close_scope.cancel_called:
+                    logger.warning("Timed out waiting for stateless MCP session cleanup")
+                    await http_transport.terminate()
+
+            # Re-deliver any cancellation that arrived while cleanup was shielded.
             await anyio.sleep(0)
-
-            # Signal EOF to Server.run without cancelling its responder task.
-            # The transport context owns the remaining stream cleanup.
-            if http_transport._read_stream_writer is not None:  # noqa: SLF001
-                await http_transport._read_stream_writer.aclose()  # noqa: SLF001
-
-            with anyio.move_on_after(_GRACEFUL_CLOSE_TIMEOUT_SECONDS) as close_scope:
-                await server_finished.wait()
-            if close_scope.cancel_called:
-                logger.warning("Timed out waiting for stateless MCP session cleanup")
-                await http_transport.terminate()
         except BaseException:
-            await http_transport.terminate()
+            # Cleanup may itself run under cancellation; shield it so transport
+            # resources are not abandoned halfway through teardown.
+            with anyio.CancelScope(shield=True):
+                await http_transport.terminate()
             raise

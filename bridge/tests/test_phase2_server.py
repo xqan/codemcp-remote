@@ -114,6 +114,32 @@ class CancellingEditAdapter(FakeAdapter):
         )
 
 
+class SlowReadAdapter(FakeAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+
+    async def call(
+        self,
+        project: ProjectSpec,
+        subtool: str,
+        arguments: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        mutation: bool = False,
+    ) -> AdapterResult:
+        if subtool == "ReadFile":
+            self.started.set()
+            await asyncio.sleep(0.05)
+        return await super().call(
+            project,
+            subtool,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            mutation=mutation,
+        )
+
+
 class SearchAdapter(FakeAdapter):
     def __init__(self) -> None:
         super().__init__()
@@ -1025,5 +1051,55 @@ async def test_restart_successor_session_can_reconcile_applied_unknown_mutation(
         probe.record.operation_id,
         state="failed",
         payload={"status": "failed", "error": None},
+    )
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_stateless_http_client_cancellation_does_not_crash_responder(
+    git_project: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter = SlowReadAdapter()
+    app, service = create_app(_settings(git_project), adapter=adapter)
+    caplog.set_level(logging.ERROR, logger="codemcp_bridge.mcp_transport")
+
+    async with app.router.lifespan_context(app):
+        opened = await service.project_open(None, "demo")
+        session_id = opened["data"]["session_id"]
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:46200",
+        ) as http:
+            request = asyncio.create_task(
+                http.post(
+                    "/mcp",
+                    headers={"accept": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 42,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "file_read",
+                            "arguments": {
+                                "project_id": "demo",
+                                "session_id": session_id,
+                                "path": "src/hello.txt",
+                            },
+                        },
+                    },
+                )
+            )
+            await asyncio.wait_for(adapter.started.wait(), timeout=1)
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+            await asyncio.sleep(0.1)
+
+    assert not any(
+        record.name == "codemcp_bridge.mcp_transport"
+        and "Stateless session crashed" in record.getMessage()
+        for record in caplog.records
     )
     await service.close()
