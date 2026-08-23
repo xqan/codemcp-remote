@@ -130,9 +130,7 @@ def _parse_command(command_id: str, raw: Any) -> CommandSpec:
         raise SettingsError(f"commands.{command_id}.kind must be a non-empty string")
     approval = raw.get("approval", "not-required")
     if approval not in {"not-required", "required"}:
-        raise SettingsError(
-            f"commands.{command_id}.approval must be 'not-required' or 'required'"
-        )
+        raise SettingsError(f"commands.{command_id}.approval must be 'not-required' or 'required'")
     timeout_seconds = raw.get("timeout_seconds", 60)
     if not isinstance(timeout_seconds, int | float) or timeout_seconds <= 0:
         raise SettingsError(f"commands.{command_id}.timeout_seconds must be positive")
@@ -154,8 +152,10 @@ def _parse_projects(path: Path, base: Path) -> dict[str, ProjectSpec]:
         raw = _as_mapping(raw_value, f"projects.{project_id}")
         root = _resolve_path(base, raw.get("root"), f"projects.{project_id}.root")
         raw_branches = raw.get("allowed_branches", ["*"])
-        if not isinstance(raw_branches, list) or not raw_branches or not all(
-            isinstance(item, str) and item for item in raw_branches
+        if (
+            not isinstance(raw_branches, list)
+            or not raw_branches
+            or not all(isinstance(item, str) and item for item in raw_branches)
         ):
             raise SettingsError(
                 f"projects.{project_id}.allowed_branches must be a non-empty string list"

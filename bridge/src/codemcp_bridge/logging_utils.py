@@ -57,9 +57,7 @@ def configure_logging(log_dir: Path) -> Path:
         encoding="utf-8",
         delay=True,
     )
-    handler.setFormatter(
-        RedactingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
+    handler.setFormatter(RedactingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
     return log_path
@@ -86,7 +84,7 @@ def _contains_utf16le_output(path: Path) -> bool:
     """Identify a legacy mixed-encoding worker log before appending to it."""
 
     try:
-        sample = path.read_bytes()[:64 * 1024]
+        sample = path.read_bytes()[: 64 * 1024]
     except OSError:
         return False
     return b"\x00" in sample and (b"\n\x00" in sample or b"\r\x00" in sample)

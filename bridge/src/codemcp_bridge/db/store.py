@@ -776,8 +776,7 @@ class Database:
                 raise PersistenceError("checkpoint not found")
             now = utc_now()
             connection.execute(
-                "UPDATE checkpoints SET status='restored', updated_at=? "
-                "WHERE checkpoint_id=?",
+                "UPDATE checkpoints SET status='restored', updated_at=? WHERE checkpoint_id=?",
                 (now, checkpoint_id),
             )
             self._audit(
@@ -936,9 +935,7 @@ class Database:
                 details={"approval_id": approval_id, "action": action, "expires_at": expires_at},
             )
 
-    def consume_approval(
-        self, operation_id: str, token_hash: str, *, now: str
-    ) -> OperationRecord:
+    def consume_approval(self, operation_id: str, token_hash: str, *, now: str) -> OperationRecord:
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT a.*, o.* FROM approvals a "

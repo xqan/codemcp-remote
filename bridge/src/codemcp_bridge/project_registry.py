@@ -24,9 +24,7 @@ SENSITIVE_NAMES = {
 }
 SENSITIVE_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".crt", ".cer"}
 SENSITIVE_GLOBS = tuple(
-    SENSITIVE_NAMES
-    | {"*.env", "*.env.*"}
-    | {f"*{suffix}" for suffix in SENSITIVE_SUFFIXES}
+    SENSITIVE_NAMES | {"*.env", "*.env.*"} | {f"*{suffix}" for suffix in SENSITIVE_SUFFIXES}
 )
 
 
@@ -116,8 +114,7 @@ class ProjectRegistry:
         if root != resolved and root not in resolved.parents:
             raise BridgeError("PATH_ESCAPE", "path escapes the registered project root")
         if any(
-            _is_reparse_point(item)
-            for item in _iter_existing_components(project.root, candidate)
+            _is_reparse_point(item) for item in _iter_existing_components(project.root, candidate)
         ):
             raise BridgeError("PATH_ESCAPE", "symlink or reparse-point paths are denied")
         return project, candidate, normalized
@@ -143,9 +140,7 @@ class ProjectRegistry:
         paths, excluded = self._safe_search_paths(project, target)
         return paths if excluded else [target]
 
-    def _safe_search_paths(
-        self, project: ProjectSpec, target: Path
-    ) -> tuple[list[Path], bool]:
+    def _safe_search_paths(self, project: ProjectSpec, target: Path) -> tuple[list[Path], bool]:
         try:
             entries = sorted(target.iterdir(), key=lambda item: item.name.lower())
         except OSError:

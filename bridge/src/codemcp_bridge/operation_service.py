@@ -132,9 +132,7 @@ class OperationService:
             operation_id, "running", expected_state=record.state
         )
 
-    def await_approval(
-        self, operation_id: str, *, error_data: dict[str, Any]
-    ) -> OperationRecord:
+    def await_approval(self, operation_id: str, *, error_data: dict[str, Any]) -> OperationRecord:
         safe_error = _persistable_payload({"error": error_data}).get("error", {})
         return self._database.transition_operation(
             operation_id,
@@ -152,9 +150,7 @@ class OperationService:
     ) -> OperationRecord:
         error = payload.get("error")
         safe_error = (
-            _persistable_payload({"error": error}).get("error")
-            if isinstance(error, dict)
-            else None
+            _persistable_payload({"error": error}).get("error") if isinstance(error, dict) else None
         )
         return self._database.transition_operation(
             operation_id,

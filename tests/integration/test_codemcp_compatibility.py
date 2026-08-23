@@ -77,19 +77,19 @@ def git_project(tmp_path: Path) -> Path:
         "Path('command-output.txt').write_text('command output\\n', encoding='utf-8')"
     )
     (project / "codemcp.toml").write_text(
-        "project_prompt = \"PHASE1_PROJECT_PROMPT\"\n"
+        'project_prompt = "PHASE1_PROJECT_PROMPT"\n'
         "\n"
         "[commands.format]\n"
-        "command = [\"git\", \"--version\"]\n"
-        "doc = \"show the Git version\"\n"
+        'command = ["git", "--version"]\n'
+        'doc = "show the Git version"\n'
         "\n"
         "[commands.mutate]\n"
-        f"command = [{command_python}, \"-c\", {command_script}]\n"
-        "doc = \"write a controlled marker\"\n"
+        f'command = [{command_python}, "-c", {command_script}]\n'
+        'doc = "write a controlled marker"\n'
         "\n"
         "[commands.fail]\n"
-        "command = [\"git\", \"--definitely-not-a-codemcp-option\"]\n"
-        "doc = \"return a deterministic failure\"\n",
+        'command = ["git", "--definitely-not-a-codemcp-option"]\n'
+        'doc = "return a deterministic failure"\n',
         encoding="utf-8",
     )
 
@@ -237,7 +237,9 @@ async def test_subtools_commands_and_git_behavior(
         assert "codemcp-id: " + chat_id in _git(git_project, "log", "-1", "--pretty=%B")
         assert _git_status(git_project) == ""
 
-        ls_result = await connection.call_subtool("LS", path=str(git_project), chat_id=chat_id)
+        ls_result = await connection.call_subtool(
+            "LS", path=str(git_project), chat_id=chat_id
+        )
         assert not ls_result.isError
         assert "codemcp.toml" in result_text(ls_result)
 

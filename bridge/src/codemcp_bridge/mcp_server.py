@@ -176,8 +176,8 @@ class BridgeService:
         await self.start()
         request_id = self._request_id(ctx)
         input_data = operation_input or {}
-        request_hash_value = (
-            supplied_request_hash or ("" if mutation else calculate_request_hash(input_data))
+        request_hash_value = supplied_request_hash or (
+            "" if mutation else calculate_request_hash(input_data)
         )
         operation_id = uuid.uuid4().hex
         if client_request_id:
@@ -333,9 +333,7 @@ class BridgeService:
     async def _require_session(self, project_id: str, session_id: str | None) -> SessionRecord:
         return self.sessions.require_active(project_id, session_id)
 
-    def require_operation_for_session(
-        self, operation_id: str, session_id: str
-    ) -> OperationRecord:
+    def require_operation_for_session(self, operation_id: str, session_id: str) -> OperationRecord:
         record = self.operations.operation(operation_id)
         if record.owner_id != self.sessions.owner_id or record.session_id != session_id:
             raise BridgeError(
@@ -1473,9 +1471,7 @@ class BridgeService:
             [],
         )
 
-    async def _run_checkpoint_create_for_operation(
-        self, operation: OperationRecord
-    ) -> _Outcome:
+    async def _run_checkpoint_create_for_operation(self, operation: OperationRecord) -> _Outcome:
         if operation.session_id is None:
             raise BridgeError("SESSION_REQUIRED", "checkpoint operation has no session")
         return await self._create_checkpoint_for_operation(
@@ -1618,9 +1614,7 @@ class BridgeService:
             safety.after_data.get("changed_files", []) if safety.after_data else [],
         )
 
-    async def _run_checkpoint_restore_for_operation(
-        self, operation: OperationRecord
-    ) -> _Outcome:
+    async def _run_checkpoint_restore_for_operation(self, operation: OperationRecord) -> _Outcome:
         if operation.session_id is None:
             raise BridgeError("SESSION_REQUIRED", "rollback operation has no session")
         input_data = operation.input_data

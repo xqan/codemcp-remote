@@ -241,9 +241,7 @@ async def test_checkpoint_mcp_approval_diff_and_cas_restore(
             }
         ),
     )
-    assert conflicted["data"]["approved_operation"]["error"]["code"] == (
-        "CHECKPOINT_CONFLICT"
-    )
+    assert conflicted["data"]["approved_operation"]["error"]["code"] == ("CHECKPOINT_CONFLICT")
     assert _git(git_project, "rev-parse", "HEAD") == raced_head
 
     restore_request_2 = {

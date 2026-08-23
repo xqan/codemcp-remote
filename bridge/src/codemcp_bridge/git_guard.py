@@ -41,9 +41,7 @@ class GitSnapshot:
         }
 
 
-_CHECKPOINT_REF_PATTERN = re.compile(
-    r"^refs/codemcp-remote/checkpoints/[0-9a-f]{32}$"
-)
+_CHECKPOINT_REF_PATTERN = re.compile(r"^refs/codemcp-remote/checkpoints/[0-9a-f]{32}$")
 _HEAD_PATTERN = re.compile(r"^[0-9a-fA-F]{40,64}$")
 
 

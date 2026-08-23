@@ -41,15 +41,12 @@ def test_configure_logging_writes_bounded_redacted_file(tmp_path: Path) -> None:
         file_handler = next(
             item
             for item in root_logger.handlers
-            if isinstance(item, RotatingFileHandler)
-            and item.baseFilename.endswith("bridge.log")
+            if isinstance(item, RotatingFileHandler) and item.baseFilename.endswith("bridge.log")
         )
         assert file_handler.maxBytes == LOG_MAX_BYTES
         assert file_handler.backupCount == LOG_BACKUP_COUNT
 
-        logging.getLogger("phase6-test").warning(
-            "API_KEY=%s", "sk-test-file-secret"
-        )
+        logging.getLogger("phase6-test").warning("API_KEY=%s", "sk-test-file-secret")
         file_handler.flush()
         content = (tmp_path / "bridge.log").read_text(encoding="utf-8")
         assert "sk-test-file-secret" not in content

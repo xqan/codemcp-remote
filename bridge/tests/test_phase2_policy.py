@@ -139,9 +139,7 @@ async def test_policy_rejects_dirty_workspace_and_command_drift(git_project: Pat
         projects={
             "demo": replace(
                 project,
-                commands={
-                    "format": replace(command, argv=("python", "-c", "print('untrusted')"))
-                },
+                commands={"format": replace(command, argv=("python", "-c", "print('untrusted')"))},
             )
         },
     )

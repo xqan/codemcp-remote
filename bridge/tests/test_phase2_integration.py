@@ -136,16 +136,16 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
             transport=transport,
             base_url="http://127.0.0.1:46200",
         ) as http:
-            async with streamable_http_client(
-                "http://127.0.0.1:46200/mcp", http_client=http
-            ) as (read_stream, write_stream, _):
+            async with streamable_http_client("http://127.0.0.1:46200/mcp", http_client=http) as (
+                read_stream,
+                write_stream,
+                _,
+            ):
                 async with ClientSession(read_stream, write_stream) as client:
                     await client.initialize()
 
                     opened = _payload(
-                        await client.call_tool(
-                            "project_open", {"project_id": "integration"}
-                        )
+                        await client.call_tool("project_open", {"project_id": "integration"})
                     )
                     assert opened["status"] == "succeeded"
                     session_id = opened["data"]["session_id"]
@@ -237,12 +237,13 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                     )
                     assert edited["status"] == "succeeded"
                     assert "src/hello file.txt" in edited["changed_files"]
-                    assert edited["changed_files"] == edited["data"]["checkpoint"][
-                        "after"
-                    ]["changed_files"]
-                    assert "edited codemcp" in (
-                        git_project / "src" / "hello file.txt"
-                    ).read_text(encoding="utf-8")
+                    assert (
+                        edited["changed_files"]
+                        == edited["data"]["checkpoint"]["after"]["changed_files"]
+                    )
+                    assert "edited codemcp" in (git_project / "src" / "hello file.txt").read_text(
+                        encoding="utf-8"
+                    )
 
                     formatted = _payload(
                         await client.call_tool(

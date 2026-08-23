@@ -317,7 +317,7 @@ def git_project(tmp_path: Path) -> Path:
     (project / "src" / "large.txt").write_text("x" * 1025, encoding="utf-8")
     (project / "codemcp.toml").write_text(
         '[commands.format]\ncommand = ["python", "-c", "print(\'format\')"]\n'
-        '\n'
+        "\n"
         '[commands.build]\ncommand = ["python", "-c", "print(\'build\')"]\n',
         encoding="utf-8",
     )
@@ -346,9 +346,11 @@ async def test_local_mcp_contract_and_policy_rejections(
             assert health.status_code == 200
             assert health.json()["status"] == "ok"
 
-            async with streamable_http_client(
-                "http://127.0.0.1:46200/mcp", http_client=http
-            ) as (read_stream, write_stream, _):
+            async with streamable_http_client("http://127.0.0.1:46200/mcp", http_client=http) as (
+                read_stream,
+                write_stream,
+                _,
+            ):
                 async with ClientSession(read_stream, write_stream) as client:
                     initialize = await client.initialize()
                     assert initialize.serverInfo.name == "codemcp-remote-bridge"
@@ -525,9 +527,7 @@ async def test_local_mcp_contract_and_policy_rejections(
                     assert dirty["error"]["code"] == "WORKSPACE_DIRTY"
 
     await service.close()
-    assert not any(
-        record.getMessage() == "Stateless session crashed" for record in caplog.records
-    )
+    assert not any(record.getMessage() == "Stateless session crashed" for record in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -536,9 +536,7 @@ async def test_code_search_excludes_sensitive_paths_before_and_after_grep(
 ) -> None:
     (git_project / "local.env").write_text("TOKEN=do-not-return\n", encoding="utf-8")
     (git_project / "secrets").mkdir()
-    (git_project / "secrets" / "private.key").write_text(
-        "private material\n", encoding="utf-8"
-    )
+    (git_project / "secrets" / "private.key").write_text("private material\n", encoding="utf-8")
     adapter = SearchAdapter()
     service = create_app(_settings(git_project), adapter=adapter)[1]
     await service.start()
@@ -1088,9 +1086,11 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
             transport=transport,
             base_url="http://127.0.0.1:46200",
         ) as http:
-            async with streamable_http_client(
-                "http://127.0.0.1:46200/mcp", http_client=http
-            ) as (read_stream, write_stream, _):
+            async with streamable_http_client("http://127.0.0.1:46200/mcp", http_client=http) as (
+                read_stream,
+                write_stream,
+                _,
+            ):
                 async with ClientSession(read_stream, write_stream) as client:
                     await client.initialize()
                     opened = _payload(
@@ -1107,17 +1107,11 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
                         "description": "idempotent edit",
                         "client_request_id": "edit-replay-1",
                         "request_hash": request_hash(
-                            _file_edit_input(
-                                "src/hello.txt", "hello", "changed", "idempotent edit"
-                            )
+                            _file_edit_input("src/hello.txt", "hello", "changed", "idempotent edit")
                         ),
                     }
-                    first_edit = _payload(
-                        await client.call_tool("file_edit", edit_arguments)
-                    )
-                    second_edit = _payload(
-                        await client.call_tool("file_edit", edit_arguments)
-                    )
+                    first_edit = _payload(await client.call_tool("file_edit", edit_arguments))
+                    second_edit = _payload(await client.call_tool("file_edit", edit_arguments))
                     assert first_edit == second_edit
                     assert [name for name, _ in adapter.calls].count("EditFile") == 1
 
@@ -1303,9 +1297,7 @@ async def test_cancelled_mutation_is_persisted_as_unknown(git_project: Path) -> 
         )
 
     blocked_description = "edit after cancellation"
-    blocked_input = _file_edit_input(
-        "src/hello.txt", "hello", "changed again", blocked_description
-    )
+    blocked_input = _file_edit_input("src/hello.txt", "hello", "changed again", blocked_description)
     blocked = await service.file_edit(
         None,
         "demo",
