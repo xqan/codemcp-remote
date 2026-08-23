@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -127,6 +128,33 @@ class SearchAdapter(FakeAdapter):
         )
 
 
+class WriteAdapter(FakeAdapter):
+    async def call(
+        self,
+        project: ProjectSpec,
+        subtool: str,
+        arguments: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        mutation: bool = False,
+    ) -> AdapterResult:
+        if subtool == "WriteFile":
+            self.calls.append((subtool, arguments))
+            target = Path(arguments["path"])
+            target.write_text(arguments["content"], encoding="utf-8")
+            relative = target.relative_to(project.root).as_posix()
+            _git(project.root, "add", relative)
+            _git(project.root, "commit", "--amend", "--no-edit")
+            return AdapterResult("fake WriteFile", False)
+        return await super().call(
+            project,
+            subtool,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            mutation=mutation,
+        )
+
+
 class MultiFileEditAdapter(FakeAdapter):
     async def call(
         self,
@@ -173,6 +201,28 @@ def _file_edit_input(
         "description": description,
         "old_string_digest": request_hash(old_string),
         "new_string_digest": request_hash(new_string),
+    }
+
+
+def _file_create_input(path: str, content: str, description: str) -> dict[str, str]:
+    return {
+        "path": path,
+        "description": description,
+        "content_digest": request_hash(content),
+    }
+
+
+def _file_write_input(
+    path: str,
+    content: str,
+    expected_sha256: str,
+    description: str,
+) -> dict[str, str]:
+    return {
+        "path": path,
+        "description": description,
+        "expected_sha256": expected_sha256.lower(),
+        "content_digest": request_hash(content),
     }
 
 
@@ -227,6 +277,8 @@ async def test_local_mcp_contract_and_policy_rejections(
                         "code_search",
                         "file_list",
                         "file_edit",
+                        "file_create",
+                        "file_write",
                         "format_run",
                         "test_run",
                         "git_status",
@@ -256,6 +308,8 @@ async def test_local_mcp_contract_and_policy_rejections(
                         )
                     )
                     assert read["data"]["text"] == "fake read: hello.txt"
+                    assert read["data"]["sha256"] == hashlib.sha256(b"hello\n").hexdigest()
+                    assert read["data"]["size_bytes"] == len(b"hello\n")
                     assert adapter.calls[-1][0] == "ReadFile"
 
                     binary = _payload(
@@ -424,6 +478,163 @@ async def test_file_edit_reports_all_checkpoint_changed_files(git_project: Path)
     assert set(result["data"]["checkpoint"]["after"]["changed_files"]) == set(
         result["changed_files"]
     )
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_file_create_is_idempotent_and_never_overwrites(git_project: Path) -> None:
+    adapter = WriteAdapter()
+    service = create_app(_settings(git_project), adapter=adapter)[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    existing_content = "must not overwrite\n"
+    existing_description = "reject existing target"
+    existing = await service.file_create(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        existing_content,
+        existing_description,
+        "create-existing-1",
+        request_hash(
+            _file_create_input(
+                "src/hello.txt",
+                existing_content,
+                existing_description,
+            )
+        ),
+    )
+    assert existing["error"]["code"] == "CONFLICT"
+    assert (git_project / "src" / "hello.txt").read_text(encoding="utf-8") == "hello\n"
+
+    sensitive_content = "TOKEN=secret\n"
+    sensitive_description = "reject sensitive target"
+    sensitive = await service.file_create(
+        None,
+        "demo",
+        session.session_id,
+        "local.env",
+        sensitive_content,
+        sensitive_description,
+        "create-sensitive-1",
+        request_hash(
+            _file_create_input(
+                "local.env",
+                sensitive_content,
+                sensitive_description,
+            )
+        ),
+    )
+    assert sensitive["error"]["code"] == "SENSITIVE_PATH"
+
+    content = "created through bridge\n"
+    description = "create a new source file"
+    operation_input = _file_create_input("src/created.txt", content, description)
+    arguments = (
+        None,
+        "demo",
+        session.session_id,
+        "src/created.txt",
+        content,
+        description,
+        "create-file-1",
+        request_hash(operation_input),
+    )
+    first = await service.file_create(*arguments)
+    second = await service.file_create(*arguments)
+
+    assert first == second
+    assert first["status"] == "succeeded"
+    assert first["changed_files"] == ["src/created.txt"]
+    assert first["data"]["checkpoint"]["after"]["changed_files"] == ["src/created.txt"]
+    assert (git_project / "src" / "created.txt").read_text(encoding="utf-8") == content
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_file_write_requires_matching_sha256(git_project: Path) -> None:
+    adapter = WriteAdapter()
+    service = create_app(_settings(git_project), adapter=adapter)[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    replacement = "whole file replacement\n"
+    mismatch_description = "reject stale file baseline"
+    mismatch_sha256 = "0" * 64
+    mismatch = await service.file_write(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        replacement,
+        mismatch_sha256,
+        mismatch_description,
+        "write-stale-1",
+        request_hash(
+            _file_write_input(
+                "src/hello.txt",
+                replacement,
+                mismatch_sha256,
+                mismatch_description,
+            )
+        ),
+    )
+    assert mismatch["error"]["code"] == "CONFLICT"
+    assert mismatch["error"]["details"]["actual_sha256"] == hashlib.sha256(b"hello\n").hexdigest()
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 0
+
+    invalid_description = "reject malformed digest"
+    invalid_sha256 = "not-a-digest"
+    invalid = await service.file_write(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        replacement,
+        invalid_sha256,
+        invalid_description,
+        "write-invalid-digest-1",
+        request_hash(
+            _file_write_input(
+                "src/hello.txt",
+                replacement,
+                invalid_sha256,
+                invalid_description,
+            )
+        ),
+    )
+    assert invalid["error"]["code"] == "INVALID_REQUEST"
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 0
+
+    expected_sha256 = hashlib.sha256(b"hello\n").hexdigest()
+    description = "replace the complete file"
+    success = await service.file_write(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        replacement,
+        expected_sha256,
+        description,
+        "write-file-1",
+        request_hash(
+            _file_write_input(
+                "src/hello.txt",
+                replacement,
+                expected_sha256,
+                description,
+            )
+        ),
+    )
+
+    assert success["status"] == "succeeded"
+    assert success["changed_files"] == ["src/hello.txt"]
+    assert success["data"]["checkpoint"]["after"]["changed_files"] == ["src/hello.txt"]
+    assert (git_project / "src" / "hello.txt").read_text(encoding="utf-8") == replacement
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 1
     await service.close()
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import hashlib
 import logging
 import re
 import uuid
@@ -430,8 +431,12 @@ class BridgeService:
                 raise BridgeError("INVALID_REQUEST", "limit must be between 0 and 10000")
             project, target, _ = self.registry.resolve_path(project_id, path)
             self.policy.require_regular_file(target)
-            self.policy.validate_file_size(target)
+            file_size = self.policy.validate_file_size(target)
             self.policy.require_text_file(target)
+            try:
+                before_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+            except OSError as exc:
+                raise BridgeError("FILE_NOT_FOUND", "file cannot be read") from exc
             result = await self.adapter.call(
                 project,
                 "ReadFile",
@@ -444,8 +449,24 @@ class BridgeService:
                     {"subtool": "ReadFile"},
                     status="failed",
                 )
+            after_size = self.policy.validate_file_size(target)
+            try:
+                after_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+            except OSError as exc:
+                raise BridgeError("FILE_NOT_FOUND", "file cannot be read") from exc
+            if after_sha256 != before_sha256:
+                raise BridgeError(
+                    "CONFLICT",
+                    "file content changed while it was being read",
+                    {"path": self.registry.relative_path(project, target)},
+                )
             return _Outcome(
-                {"path": self.registry.relative_path(project, target), "text": result.text},
+                {
+                    "path": self.registry.relative_path(project, target),
+                    "text": result.text,
+                    "sha256": after_sha256,
+                    "size_bytes": file_size,
+                },
                 [],
                 result.truncated,
             )
@@ -624,6 +645,188 @@ class BridgeService:
                 "description": description,
                 "old_string_digest": calculate_request_hash(old_string),
                 "new_string_digest": calculate_request_hash(new_string),
+            },
+            mutation=True,
+            client_request_id=client_request_id,
+            supplied_request_hash=request_hash,
+        )
+
+    async def file_create(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        path: str,
+        content: str,
+        description: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        async def operation(operation_id: str) -> _Outcome:
+            await self._require_session(project_id, session_id)
+            if not description or len(description) > 500:
+                raise BridgeError("INVALID_REQUEST", "description must be 1-500 characters")
+            encoded = content.encode("utf-8")
+            if len(encoded) > self.settings.policy.max_file_bytes:
+                raise BridgeError("FILE_TOO_LARGE", "content exceeds the configured size limit")
+            if "\x00" in content:
+                raise BridgeError("BINARY_FILE", "binary content is not exposed by the Bridge")
+            project, target, normalized = self.registry.resolve_path(project_id, path)
+            parent = target.parent
+            if not parent.exists() or not parent.is_dir():
+                raise BridgeError(
+                    "FILE_NOT_FOUND",
+                    "parent directory does not exist",
+                    {"path": normalized},
+                )
+            async with self._mutation_lock(project_id):
+                if target.exists():
+                    raise BridgeError(
+                        "CONFLICT",
+                        "file already exists",
+                        {"path": normalized},
+                    )
+                checkpoint = await self._begin_mutation(
+                    project,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                )
+                if target.exists():
+                    raise BridgeError(
+                        "CONFLICT",
+                        "file appeared after the mutation baseline was recorded",
+                        {"path": normalized},
+                    )
+                result = await self.adapter.call(
+                    project,
+                    "WriteFile",
+                    {
+                        "path": target,
+                        "content": content,
+                        "description": description,
+                        "chat_id": session_id,
+                    },
+                    mutation=True,
+                )
+            if _is_codemcp_error(result):
+                raise BridgeError("CONFLICT", "codemcp rejected WriteFile", status="failed")
+            checkpoint_data = await self._finish_mutation(project, checkpoint)
+            return _Outcome(
+                {
+                    "path": normalized,
+                    "text": result.text,
+                    "checkpoint": checkpoint_data,
+                },
+                list(checkpoint_data["after"]["changed_files"]),
+                result.truncated,
+            )
+
+        return await self._execute(
+            ctx,
+            project_id=project_id,
+            session_id=session_id,
+            operation=operation,
+            operation_kind="file_create",
+            operation_input={
+                "path": path,
+                "description": description,
+                "content_digest": calculate_request_hash(content),
+            },
+            mutation=True,
+            client_request_id=client_request_id,
+            supplied_request_hash=request_hash,
+        )
+
+    async def file_write(
+        self,
+        ctx: Context | None,
+        project_id: str,
+        session_id: str,
+        path: str,
+        content: str,
+        expected_sha256: str,
+        description: str,
+        client_request_id: str | None,
+        request_hash: str | None,
+    ) -> dict[str, Any]:
+        normalized_expected = expected_sha256.lower()
+
+        async def operation(operation_id: str) -> _Outcome:
+            await self._require_session(project_id, session_id)
+            if not description or len(description) > 500:
+                raise BridgeError("INVALID_REQUEST", "description must be 1-500 characters")
+            if re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256) is None:
+                raise BridgeError(
+                    "INVALID_REQUEST",
+                    "expected_sha256 must be a SHA-256 hex digest",
+                )
+            encoded = content.encode("utf-8")
+            if len(encoded) > self.settings.policy.max_file_bytes:
+                raise BridgeError("FILE_TOO_LARGE", "content exceeds the configured size limit")
+            if "\x00" in content:
+                raise BridgeError("BINARY_FILE", "binary content is not exposed by the Bridge")
+            project, target, normalized = self.registry.resolve_path(project_id, path)
+            self.policy.require_regular_file(target)
+            self.policy.validate_file_size(target)
+            self.policy.require_text_file(target)
+            async with self._mutation_lock(project_id):
+                checkpoint = await self._begin_mutation(
+                    project,
+                    session_id=session_id,
+                    operation_id=operation_id,
+                )
+                self.policy.require_regular_file(target)
+                self.policy.validate_file_size(target)
+                self.policy.require_text_file(target)
+                try:
+                    actual_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+                except OSError as exc:
+                    raise BridgeError("FILE_NOT_FOUND", "file cannot be read") from exc
+                if actual_sha256 != normalized_expected:
+                    raise BridgeError(
+                        "CONFLICT",
+                        "file content changed since it was read",
+                        {
+                            "path": normalized,
+                            "expected_sha256": normalized_expected,
+                            "actual_sha256": actual_sha256,
+                        },
+                    )
+                result = await self.adapter.call(
+                    project,
+                    "WriteFile",
+                    {
+                        "path": target,
+                        "content": content,
+                        "description": description,
+                        "chat_id": session_id,
+                    },
+                    mutation=True,
+                )
+            if _is_codemcp_error(result):
+                raise BridgeError("CONFLICT", "codemcp rejected WriteFile", status="failed")
+            checkpoint_data = await self._finish_mutation(project, checkpoint)
+            return _Outcome(
+                {
+                    "path": normalized,
+                    "text": result.text,
+                    "checkpoint": checkpoint_data,
+                },
+                list(checkpoint_data["after"]["changed_files"]),
+                result.truncated,
+            )
+
+        return await self._execute(
+            ctx,
+            project_id=project_id,
+            session_id=session_id,
+            operation=operation,
+            operation_kind="file_write",
+            operation_input={
+                "path": path,
+                "description": description,
+                "expected_sha256": normalized_expected,
+                "content_digest": calculate_request_hash(content),
             },
             mutation=True,
             client_request_id=client_request_id,
@@ -1503,6 +1706,52 @@ def create_server(
             path,
             old_string,
             new_string,
+            description,
+            client_request_id,
+            request_hash,
+        )
+
+    @server.tool(description="Create one new UTF-8 text file through codemcp WriteFile.")
+    async def file_create(
+        project_id: str,
+        session_id: str,
+        path: str,
+        content: str,
+        description: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.file_create(
+            ctx,
+            project_id,
+            session_id,
+            path,
+            content,
+            description,
+            client_request_id,
+            request_hash,
+        )
+
+    @server.tool(description="Replace one existing UTF-8 text file when its SHA-256 still matches.")
+    async def file_write(
+        project_id: str,
+        session_id: str,
+        path: str,
+        content: str,
+        expected_sha256: str,
+        description: str,
+        client_request_id: str,
+        request_hash: str,
+        ctx: Context | None = None,
+    ) -> dict[str, Any]:
+        return await service.file_write(
+            ctx,
+            project_id,
+            session_id,
+            path,
+            content,
+            expected_sha256,
             description,
             client_request_id,
             request_hash,
