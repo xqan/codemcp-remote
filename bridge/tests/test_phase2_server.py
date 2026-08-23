@@ -761,9 +761,7 @@ async def test_directory_create_is_git_trackable_idempotent_and_safe(
     assert first["data"]["path"] == "src/generated"
     assert first["data"]["marker_path"] == "src/generated/.gitkeep"
     assert first["changed_files"] == ["src/generated/.gitkeep"]
-    assert first["data"]["checkpoint"]["after"]["changed_files"] == [
-        "src/generated/.gitkeep"
-    ]
+    assert first["data"]["checkpoint"]["after"]["changed_files"] == ["src/generated/.gitkeep"]
     assert marker.is_file()
     assert marker.read_text(encoding="utf-8") == ""
     assert [name for name, _ in adapter.calls].count("WriteFile") == 1
