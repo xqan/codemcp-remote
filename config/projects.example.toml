@@ -1,31 +1,23 @@
-[projects."codemcp-remote"]
-root = "D:/Documents/CodexProject/codemcp-remote"
-allowed_branches = ["master", "main", "develop", "feature/*", "codex/*"]
+[projects.sample_project]
+root = "D:/workspace/example-project"
+allowed_branches = ["main", "develop", "feature/*"]
 require_clean_workspace = true
 codemcp_config = "codemcp.toml"
 
-[projects."codemcp-remote".commands.test]
+[projects.sample_project.commands.test]
 kind = "test"
-argv = [
-    "/mnt/d/Documents/CodexProject/codemcp-remote/.local/bridge-venv-wsl/bin/python",
-    "-m",
-    "pytest",
-    "-q",
-    "bridge/tests",
-    "tests/integration",
-]
+argv = ["mvn", "-q", "test"]
 timeout_seconds = 900
 approval = "not-required"
 
-[projects."codemcp-remote".commands.format]
+[projects.sample_project.commands.format]
 kind = "format"
-argv = [
-    "/mnt/d/Documents/CodexProject/codemcp-remote/.local/bridge-venv-wsl/bin/ruff",
-    "format",
-    "--check",
-    "bridge/src",
-    "bridge/tests",
-    "tests/integration",
-]
+argv = ["mvn", "-q", "spotless:apply"]
 timeout_seconds = 300
 approval = "not-required"
+
+[projects.sample_project.commands.build]
+kind = "build"
+argv = ["mvn", "-q", "-DskipTests", "package"]
+timeout_seconds = 900
+approval = "required"

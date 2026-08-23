@@ -14,7 +14,9 @@ from .settings import SettingsError, load_settings
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_BRIDGE_CONFIG = REPOSITORY_ROOT / "config" / "bridge.example.toml"
-DEFAULT_PROJECTS_CONFIG = REPOSITORY_ROOT / "config" / "projects.example.toml"
+DEFAULT_PROJECTS_CONFIG = REPOSITORY_ROOT / "config" / "projects.toml"
+if not DEFAULT_PROJECTS_CONFIG.is_file():
+    DEFAULT_PROJECTS_CONFIG = REPOSITORY_ROOT / "config" / "projects.example.toml"
 
 
 def _parse_args() -> argparse.Namespace:

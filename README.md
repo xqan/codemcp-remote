@@ -44,6 +44,14 @@ pwsh -File .\scripts\start-all.ps1 -Initialize
 pwsh -File .\scripts\doctor.ps1
 ~~~
 
+项目注册信息写入本地的 `config/projects.toml`；该文件已被 Git 忽略。
+`config/projects.example.toml` 仅作为模板保留，不要把真实项目路径写回 example：
+
+~~~powershell
+Copy-Item config/projects.example.toml config/projects.toml
+# 编辑 config/projects.toml 后再启动 Bridge
+~~~
+
 后续启动可直接运行 `pwsh -File .\scripts\start-all.ps1`；停止使用
 `pwsh -File .\scripts\stop-all.ps1`。`start-all.ps1` 会先等待 Bridge
 健康，再等待 Tunnel `readyz`；只有确认进程属于本仓库和 Tunnel profile

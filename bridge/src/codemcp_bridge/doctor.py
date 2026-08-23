@@ -15,7 +15,9 @@ from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 BRIDGE_CONFIG = REPOSITORY_ROOT / "config" / "bridge.example.toml"
-PROJECT_CONFIG = REPOSITORY_ROOT / "config" / "projects.example.toml"
+PROJECT_CONFIG = REPOSITORY_ROOT / "config" / "projects.toml"
+if not PROJECT_CONFIG.is_file():
+    PROJECT_CONFIG = REPOSITORY_ROOT / "config" / "projects.example.toml"
 CODEMCP_BASELINE = REPOSITORY_ROOT / "config" / "codemcp-baseline.toml"
 
 
@@ -104,14 +106,14 @@ def _validate_configuration() -> list[str]:
     projects = _load_toml(PROJECT_CONFIG)
     registered_projects = projects.get("projects", {})
     if not isinstance(registered_projects, dict) or not registered_projects:
-        errors.append("projects.example.toml must define at least one project")
+        errors.append(f"{PROJECT_CONFIG.name} must define at least one project")
     else:
         has_project_root = any(
             isinstance(project, dict) and project.get("root")
             for project in registered_projects.values()
         )
         if not has_project_root:
-            errors.append("projects.example.toml must define a project root")
+            errors.append(f"{PROJECT_CONFIG.name} must define a project root")
         has_test_command = any(
             isinstance(project, dict)
             and isinstance(project.get("commands"), dict)
@@ -119,7 +121,7 @@ def _validate_configuration() -> list[str]:
             for project in registered_projects.values()
         )
         if not has_test_command:
-            errors.append("projects.example.toml must define a test command")
+            errors.append(f"{PROJECT_CONFIG.name} must define a test command")
 
     baseline = _load_toml(CODEMCP_BASELINE).get("upstream", {})
     if baseline.get("release") != "0.3.0":

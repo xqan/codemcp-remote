@@ -34,6 +34,14 @@ On the first run, initialize the local Tunnel profile explicitly:
 pwsh -File .\scripts\start-all.ps1 -Initialize
 ~~~
 
+Project registrations belong in the Git-ignored `config/projects.toml`.
+Keep `config/projects.example.toml` as the shareable template. On a fresh
+checkout, create the local file first:
+
+~~~powershell
+Copy-Item config/projects.example.toml config/projects.toml
+~~~
+
 `start-all.ps1` starts Bridge first, waits for its loopback health endpoint,
 then starts tunnel-client and waits for Tunnel `readyz`. If either endpoint is
 already healthy and its process command line belongs to this repository/profile,

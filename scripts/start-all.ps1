@@ -53,7 +53,10 @@ if (-not (Test-Path -LiteralPath $bridgeConfigPath -PathType Leaf)) {
 
 $projectsConfigValue = $ProjectsConfig
 if ([string]::IsNullOrWhiteSpace($projectsConfigValue)) {
-    $projectsConfigValue = "config\projects.example.toml"
+    $projectsConfigValue = Join-Path $repositoryRoot "config\projects.toml"
+    if (-not (Test-Path -LiteralPath $projectsConfigValue -PathType Leaf)) {
+        $projectsConfigValue = Join-Path $repositoryRoot "config\projects.example.toml"
+    }
 }
 $projectsConfigPath = Resolve-Phase5Path -RepositoryRoot $repositoryRoot -Value $projectsConfigValue
 if (-not (Test-Path -LiteralPath $projectsConfigPath -PathType Leaf)) {
