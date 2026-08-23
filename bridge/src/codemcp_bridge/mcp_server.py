@@ -1601,10 +1601,10 @@ class BridgeService:
 
         async def operation(_operation_id: str) -> _Outcome:
             self.require_operation_for_reconcile(operation_id, session_id)
-            if decision != "failed":
+            if decision not in {"failed", "succeeded"}:
                 raise BridgeError(
                     "RECONCILE_REQUIRED",
-                    "only an explicit failed reconciliation can clear unknown state",
+                    "decision must explicitly confirm whether the unknown mutation failed or succeeded",
                 )
             if not evidence or len(evidence) > 1000:
                 raise BridgeError("INVALID_REQUEST", "evidence must be 1-1000 characters")
@@ -1614,20 +1614,59 @@ class BridgeService:
                     "only unknown operations require reconciliation",
                     {"state": original.state},
                 )
-            final = error_payload(
-                request_id=self._request_id(ctx),
-                session_id=session_id,
-                project_id=original.project_id,
-                operation_id=operation_id,
-                error=BridgeError(
-                    "BRIDGE_RESTARTED",
-                    "operation was reconciled as not executed",
-                    {"evidence": evidence, "reconciled": True},
-                    status="failed",
-                ),
-            )
-            self.operations.finish(operation_id, state="failed", payload=final)
-            return _Outcome({"reconciled_operation": final}, [], status="failed")
+            if decision == "failed":
+                final = error_payload(
+                    request_id=self._request_id(ctx),
+                    session_id=session_id,
+                    project_id=original.project_id,
+                    operation_id=operation_id,
+                    error=BridgeError(
+                        "BRIDGE_RESTARTED",
+                        "operation was reconciled as not executed",
+                        {"evidence": evidence, "reconciled": True},
+                        status="failed",
+                    ),
+                )
+                self.operations.finish(operation_id, state="failed", payload=final)
+                return _Outcome({"reconciled_operation": final}, [], status="failed")
+
+            project = self.registry.get(original.project_id)
+            async with self._mutation_lock(project.project_id):
+                checkpoints = self.database.list_checkpoints(operation_id=operation_id)
+                mutation_checkpoints = [
+                    checkpoint for checkpoint in checkpoints if checkpoint.kind == "mutation"
+                ]
+                if len(mutation_checkpoints) != 1:
+                    raise BridgeError(
+                        "RECONCILE_REQUIRED",
+                        "successful reconciliation requires exactly one mutation checkpoint",
+                        {"checkpoint_count": len(mutation_checkpoints)},
+                    )
+                checkpoint = mutation_checkpoints[0]
+                if checkpoint.after_data is not None:
+                    raise BridgeError(
+                        "RECONCILE_REQUIRED",
+                        "successful reconciliation requires an unfinished mutation checkpoint",
+                        {"checkpoint_id": checkpoint.checkpoint_id},
+                    )
+                await self.checkpoints.verify_ref(project, checkpoint)
+                finalized = await self.checkpoints.finalize(project, checkpoint)
+                checkpoint_data = self.checkpoints.summary(finalized)
+                changed_files = list(checkpoint_data.get("after", {}).get("changed_files", []))
+                final = success_payload(
+                    request_id=self._request_id(ctx),
+                    session_id=session_id,
+                    project_id=original.project_id,
+                    operation_id=operation_id,
+                    data={
+                        "reconciled": True,
+                        "evidence": evidence,
+                        "checkpoint": checkpoint_data,
+                    },
+                    changed_files=changed_files,
+                )
+                self.operations.finish(operation_id, state="succeeded", payload=final)
+            return _Outcome({"reconciled_operation": final}, changed_files)
 
         return await self._execute(
             ctx,

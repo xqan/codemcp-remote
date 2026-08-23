@@ -52,7 +52,7 @@ OPERATION_TRANSITIONS = {
     "succeeded": set(),
     "failed": set(),
     "cancelled": set(),
-    "unknown": {"failed"},
+    "unknown": {"failed", "succeeded"},
 }
 
 

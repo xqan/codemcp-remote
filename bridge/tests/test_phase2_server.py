@@ -932,3 +932,98 @@ async def test_cancelled_mutation_is_persisted_as_unknown(git_project: Path) -> 
     assert persisted.state == "unknown"
     assert persisted.error_data["code"] == "UNKNOWN_SIDE_EFFECT"
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_restart_successor_session_can_reconcile_applied_unknown_mutation(
+    git_project: Path,
+) -> None:
+    service = create_app(_settings(git_project), adapter=FakeAdapter())[1]
+    await service.start()
+    origin = service.sessions.create("demo")
+    input_data = {"path": "src/hello.txt", "new_string_digest": "digest"}
+    started = service.operations.start(
+        operation_id="restart-unknown-operation",
+        project_id="demo",
+        session_id=origin.session_id,
+        kind="file_edit",
+        mutation=True,
+        client_request_id="restart-unknown-edit-1",
+        supplied_request_hash=request_hash(input_data),
+        input_data=input_data,
+    )
+    service.operations.dispatch(started.record.operation_id)
+    project = service.registry.get("demo")
+    checkpoint = await service.checkpoints.create(
+        project,
+        session_id=origin.session_id,
+        operation_id=started.record.operation_id,
+        kind="mutation",
+    )
+
+    target = git_project / "src" / "hello.txt"
+    target.write_text("changed\n", encoding="utf-8")
+    _git(git_project, "add", "src/hello.txt")
+    _git(git_project, "commit", "--amend", "--no-edit")
+    unknown = error_payload(
+        request_id="restart-unknown-request",
+        session_id=origin.session_id,
+        project_id="demo",
+        operation_id=started.record.operation_id,
+        error=BridgeError(
+            "UNKNOWN_SIDE_EFFECT",
+            "mutation completed but response was lost",
+            status="unknown",
+        ),
+    )
+    service.operations.finish(started.record.operation_id, state="unknown", payload=unknown)
+    service.database.transition_session(
+        origin.session_id,
+        "blocked",
+        reason="bridge_restart",
+    )
+    successor = service.sessions.create("demo")
+    evidence = "operator verified the committed Git mutation after the response was lost"
+    reconciled = await service.operation_reconcile(
+        None,
+        started.record.operation_id,
+        successor.session_id,
+        "succeeded",
+        evidence,
+        "restart-success-reconcile-1",
+        request_hash(
+            {
+                "operation_id": started.record.operation_id,
+                "decision": "succeeded",
+                "evidence_digest": request_hash(evidence),
+            }
+        ),
+    )
+
+    assert reconciled["status"] == "succeeded"
+    original = service.operations.operation(started.record.operation_id)
+    assert original.state == "succeeded"
+    assert original.result_data["changed_files"] == ["src/hello.txt"]
+    finalized = service.database.get_checkpoint(checkpoint.checkpoint_id)
+    assert finalized is not None
+    assert finalized.after_data is not None
+    assert finalized.after_data["changed_files"] == ["src/hello.txt"]
+
+    probe_input = {"operation_id": "post-reconcile-probe", "project_id": "demo"}
+    probe = service.operations.start(
+        operation_id="post-reconcile-probe",
+        project_id="demo",
+        session_id=successor.session_id,
+        kind="file_edit",
+        mutation=True,
+        client_request_id="post-reconcile-probe-1",
+        supplied_request_hash=request_hash(probe_input),
+        input_data=probe_input,
+    )
+    assert probe.record.state == "validated"
+    service.operations.finish(
+        probe.record.operation_id,
+        state="failed",
+        payload={"status": "failed", "error": None},
+    )
+    await service.close()
