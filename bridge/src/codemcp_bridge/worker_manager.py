@@ -274,7 +274,8 @@ class WorkerManager:
             ) from exc
 
     def is_active(self, project_id: str) -> bool:
-        return project_id in self._workers
+        worker = self._workers.get(project_id)
+        return worker is not None and worker.is_active()
 
     async def close(self) -> None:
         async with self._workers_lock:
