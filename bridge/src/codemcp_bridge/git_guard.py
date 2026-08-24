@@ -918,6 +918,32 @@ class GitGuard:
         self._reject_sensitive_names(names)
         return names
 
+    async def diff_names_between(
+        self,
+        project_root: Path,
+        *,
+        ref_name: str,
+        head: str,
+    ) -> tuple[str, ...]:
+        """Return changed paths between a checkpoint ref and a fixed commit."""
+
+        self._require_checkpoint_ref(ref_name)
+        self._require_head(head)
+        changed_names = await self._run(
+            project_root,
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            ref_name,
+            head,
+            "--",
+        )
+        names = tuple(name for name in changed_names.split("\0") if name)
+        self._reject_sensitive_names(names)
+        return names
+
     async def diff_from(self, project_root: Path, ref_name: str) -> tuple[str, bool]:
         self._require_checkpoint_ref(ref_name)
         await self.diff_names_from(project_root, ref_name)
@@ -928,6 +954,30 @@ class GitGuard:
             "--no-renames",
             "--unified=3",
             ref_name,
+            "--",
+        )
+        return _truncate_text(output, self._max_output_bytes)
+
+    async def diff_between(
+        self,
+        project_root: Path,
+        *,
+        ref_name: str,
+        head: str,
+    ) -> tuple[str, bool]:
+        """Return a bounded diff between a checkpoint ref and a fixed commit."""
+
+        self._require_checkpoint_ref(ref_name)
+        self._require_head(head)
+        await self.diff_names_between(project_root, ref_name=ref_name, head=head)
+        output = await self._run(
+            project_root,
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--unified=3",
+            ref_name,
+            head,
             "--",
         )
         return _truncate_text(output, self._max_output_bytes)

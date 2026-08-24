@@ -91,8 +91,11 @@ that was created before the mutation. This is why a sequence of operations can
 have one branch-visible WIP commit and still retain one recoverable checkpoint
 per operation. A no-op mutation finalizes with unchanged HEAD and cannot
 establish ownership. Git side effect, expected after-HEAD/branch verification,
-and checkpoint finalization stay inside the same project lock; a mismatch is
-persisted as `UNKNOWN_SIDE_EFFECT` without after-state ownership evidence.
+and checkpoint finalization stay inside the same project lock. For mutation
+checkpoints, the audit diff is computed between the fixed checkpoint ref and
+the returned expected after-commit, followed by a terminal HEAD/branch CAS.
+A mismatch is persisted as `UNKNOWN_SIDE_EFFECT` without after-state ownership
+evidence.
 After restart, the original session is blocked; a successor can reconcile an
 unknown operation, but its next mutation starts a new WIP ownership chain.
 

@@ -1135,6 +1135,39 @@ uv run --project bridge ruff check bridge/src bridge/tests/test_phase2_server.py
 - 目标测试、Ruff、`git diff --check` 和 status 已检查；仅提交本 Phase 文件。
 - 完成后停止，不自动进入 Phase 3。
 
+### Phase 2.5.1：finalize terminal CAS
+
+#### Goal
+
+封住 `CheckpointService.finalize()` 内部首次 CAS 通过后、diff 计算完成前的最后
+一个外部 Git 窗口，确保 checkpoint 的 `after.head`、`changed_files` 和 `diff_hash`
+来自同一个固定 commit 状态。
+
+#### Changes
+
+1. expected-after finalize 使用固定的 `checkpoint_ref -> expected_after_head` commit
+   diff，不再依赖 finalize 期间的当前 worktree 生成 mutation 审计 diff。
+2. 固定 commit diff 完成后再次读取并校验 HEAD/branch；终态不一致时不写入
+   `checkpoint.after_data`，继续进入 `UNKNOWN_SIDE_EFFECT` reconciliation 路径。
+3. 增加首次 snapshot 后、diff 前外部 amend 的回归测试；不改变 schema、MCP 参数、
+   依赖或既有非 mutation checkpoint diff 行为。
+
+#### Validation
+
+~~~powershell
+uv run --project bridge pytest -q bridge/tests/test_phase2_server.py bridge/tests/test_phase4_git.py
+uv run --project bridge ruff check bridge/src bridge/tests/test_phase2_server.py bridge/tests/test_phase4_git.py
+~~~
+
+#### Acceptance Criteria
+
+- finalize 内部终态 HEAD/branch 变化不会写入相互矛盾的 checkpoint 审计数据。
+- 外部 amend 在首次 snapshot 后、diff/SQLite finalize 前发生时，operation 为
+  `unknown` 且 `checkpoint.after_data` 为空。
+- 固定 commit diff 不改变正常六类 mutation、checkpoint diff/restore 和幂等行为。
+- 目标测试、`git diff --check` 和 status 已检查；仅提交本 Phase 文件。
+- 完成后停止，不自动进入 Phase 3。
+
 ### Phase 3：恢复回归、文档和完整验收
 
 #### Goal

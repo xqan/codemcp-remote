@@ -45,6 +45,11 @@ used for its operation's diff or restore. Checkpoint retention is unchanged;
 there is no automatic ref cleanup or database migration in the session WIP
 rollout.
 
+For mutation finalization, the checkpoint audit diff compares that fixed ref
+with the returned after-commit. GitGuard then performs a terminal HEAD/branch
+read before SQLite finalization; a mismatch leaves the checkpoint unfinished and
+the operation unknown.
+
 This is a local observability guarantee, not a remote publication proof. A
 remote may contain a commit before its tracking ref is updated locally. Active
 session WIP commits must therefore not be manually pushed until the session's

@@ -115,8 +115,40 @@ class CheckpointService:
                     "actual_after_head": after.head,
                 },
             )
-        changed_files = await self._git.diff_names_from(project.root, checkpoint.ref_name)
-        diff, truncated = await self._git.diff_from(project.root, checkpoint.ref_name)
+        if expected_after_head is None:
+            changed_files = await self._git.diff_names_from(project.root, checkpoint.ref_name)
+            diff, truncated = await self._git.diff_from(project.root, checkpoint.ref_name)
+        else:
+            changed_files = await self._git.diff_names_between(
+                project.root,
+                ref_name=checkpoint.ref_name,
+                head=expected_after_head,
+            )
+            diff, truncated = await self._git.diff_between(
+                project.root,
+                ref_name=checkpoint.ref_name,
+                head=expected_after_head,
+            )
+            confirmed = await self._git.snapshot(project.root)
+            if (
+                confirmed.head.lower() != expected_after_head.lower()
+                or (
+                    expected_after_branch is not None
+                    and confirmed.branch != expected_after_branch
+                )
+            ):
+                raise BridgeError(
+                    "CHECKPOINT_CONFLICT",
+                    "Git state changed during checkpoint finalization",
+                    {
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "expected_after_branch": expected_after_branch,
+                        "actual_after_branch": confirmed.branch,
+                        "expected_after_head": expected_after_head,
+                        "actual_after_head": confirmed.head,
+                    },
+                )
+            after = confirmed
         after_data = after.as_data()
         after_data["changed_files"] = list(changed_files)
         after_data["diff_truncated"] = truncated

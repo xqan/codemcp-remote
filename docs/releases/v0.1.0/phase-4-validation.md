@@ -21,6 +21,9 @@ deferred to Phase 5.
   only after SQLite, checkpoint, branch, HEAD, clean-worktree, and locally
   observable shared-ref evidence agrees; GitGuard repeats the checks before the
   amend and finalization uses an expected after-HEAD/branch CAS.
+- Mutation checkpoint audit diffs compare the fixed checkpoint ref with the
+  returned after-commit, followed by a terminal HEAD/branch CAS before SQLite
+  finalization.
 - SQLite migration 3 with checkpoint metadata and audit linkage.
 
 ## Validation commands

@@ -647,6 +647,57 @@ async def test_file_edit_finalize_rejects_external_head_race(
 
 
 @pytest.mark.asyncio
+async def test_file_edit_finalize_rejects_head_race_after_fixed_diff(
+    git_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = create_app(_settings(git_project), adapter=FakeAdapter())[1]
+    await service.start()
+    session = service.sessions.create("demo")
+    real_diff_names = service.checkpoints._git.diff_names_between
+    raced = False
+
+    async def race_after_snapshot(
+        project_root: Path,
+        *,
+        ref_name: str,
+        head: str,
+    ) -> tuple[str, ...]:
+        nonlocal raced
+        if not raced:
+            raced = True
+            (git_project / "src" / "external-after-diff.txt").write_text(
+                "external amend after snapshot\n",
+                encoding="utf-8",
+            )
+            _git(git_project, "add", "src/external-after-diff.txt")
+            _git(git_project, "commit", "--amend", "--no-edit")
+        return await real_diff_names(project_root, ref_name=ref_name, head=head)
+
+    monkeypatch.setattr(service.checkpoints._git, "diff_names_between", race_after_snapshot)
+    description = "reject finalize terminal race"
+    result = await service.file_edit(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "hello",
+        "changed",
+        description,
+        "finalize-terminal-race-1",
+        request_hash(_file_edit_input("src/hello.txt", "hello", "changed", description)),
+    )
+
+    assert result["status"] == "unknown"
+    assert result["error"]["code"] == "UNKNOWN_SIDE_EFFECT"
+    checkpoints = service.database.list_checkpoints(operation_id=result["operation_id"])
+    assert len(checkpoints) == 1
+    assert checkpoints[0].after_data is None
+    assert _git(git_project, "status", "--porcelain") == ""
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_file_create_is_idempotent_and_never_overwrites(git_project: Path) -> None:
     adapter = WriteAdapter()
     service = create_app(_settings(git_project), adapter=adapter)[1]
