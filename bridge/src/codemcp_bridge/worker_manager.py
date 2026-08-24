@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import sys
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
