@@ -109,6 +109,28 @@ unrelated process that merely occupies port 46200 or 46201; such a listener is
 reported for manual investigation. Run it with permission to query
 `Win32_Process` when a service was started elevated.
 
+### Phase 6 release validation
+
+Before a stable release, run the repeatable lifecycle gate on the supported
+Windows 11 host:
+
+~~~powershell
+pwsh -File .\scripts\validate-lifecycle.ps1 -Iterations 20
+~~~
+
+On a clean host whose Tunnel profile has not been materialized, add
+`-InitializeFirst`. The validator intentionally does not expose `-Force`.
+Each iteration runs `start-all.ps1`, `doctor.ps1`, and `stop-all.ps1`, then
+stores redacted local evidence under `.local/validation/`. It exits non-zero at
+the first failed lifecycle step and attempts owned-process cleanup.
+
+The 20-cycle runner is only one part of Phase 6. Bridge/Tunnel/worker crashes,
+port conflicts, dependency failures, timeout/process-tree cleanup, secret-log
+canaries, path/encoding cases, and dependency rollback must also be validated.
+The authoritative matrix and current PASS/PENDING state are recorded in
+[docs/phase-6-validation.md](phase-6-validation.md). Do not mark Phase 6 PASS
+from the lifecycle runner alone.
+
 ## Phase 5 local Bridge and Tunnel
 
 The local Bridge can be started for loopback-only validation with:
