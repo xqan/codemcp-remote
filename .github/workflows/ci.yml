@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Core checks (${{ matrix.os }}, Python 3.12)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: bridge/uv.lock
+
+      - name: Sync locked dependencies
+        run: uv sync --project bridge --frozen --all-groups
+
+      - name: Lint
+        run: uv run --project bridge --frozen ruff check bridge/src bridge/tests tests/integration
+
+      - name: Format check
+        run: uv run --project bridge --frozen ruff format --check bridge/src bridge/tests tests/integration
+
+      - name: Test
+        run: uv run --project bridge --frozen pytest -q --basetemp=.local/pytest-ci bridge/tests tests/integration
+
+      - name: Whitespace check
+        run: git diff --check
+
+  package:
+    name: Package and configuration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: bridge/uv.lock
+
+      - name: Sync locked dependencies
+        run: uv sync --project bridge --frozen --all-groups
+
+      - name: Validate example configuration
+        run: uv run --project bridge --frozen codemcp-bridge-server check --bridge-config config/bridge.example.toml --projects-config config/projects.example.toml
+
+      - name: Build package
+        run: uv build --project bridge
+
+      - name: Ensure build did not modify tracked files
+        run: git diff --exit-code
+
+      - name: Whitespace check
+        run: git diff --check
