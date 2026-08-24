@@ -169,7 +169,7 @@ class _CodemcpWorker:
                 if startup_future is None:
                     raise RuntimeError("codemcp worker owner has no startup future")
 
-        await startup_future
+        await asyncio.shield(startup_future)
 
     async def call(
         self,
