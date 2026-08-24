@@ -183,10 +183,29 @@ def _apply_profile_root_command_defaults(
     existing = commands.get("test")
     if existing is None or not _is_regular_file(test_script):
         return
+    try:
+        script = test_script.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    except (OSError, UnicodeError):
+        return
+
+    unittest_command = "python -m unittest discover -s tests -v"
+    lines = tuple(line.strip() for line in script.splitlines())
+    uses_unittest = any(
+        line == unittest_command
+        or (line.startswith("PYTHONPATH=") and line.endswith(f" {unittest_command}"))
+        for line in lines
+    )
+    if uses_unittest:
+        argv = ("python", "-m", "unittest", "discover", "-s", "tests", "-v")
+    elif "\r" not in test_script.read_text(encoding="utf-8", errors="ignore"):
+        argv = ("/bin/sh", "./run_tests.sh")
+    else:
+        return
+
     commands["test"] = CommandSpec(
         command_id="test",
         kind="test",
-        argv=("/bin/sh", "./run_tests.sh"),
+        argv=argv,
         timeout_seconds=existing.timeout_seconds,
         approval=existing.approval,
     )

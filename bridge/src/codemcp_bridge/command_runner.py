@@ -24,6 +24,7 @@ class CommandInvocation:
     executable: str
     arguments: tuple[str, ...]
     cwd: Path | None
+    environment: dict[str, str] | None = None
 
 
 def build_command_invocation(
@@ -36,7 +37,17 @@ def build_command_invocation(
     """Build one exact argv invocation; never route through a shell."""
 
     host_os = os.name if os_name is None else os_name
+    src_path = project.root / "src"
+    python_src_test = (
+        project.profile == "python"
+        and command.command_id == "test"
+        and src_path.is_dir()
+        and not src_path.is_symlink()
+    )
     if settings.codemcp.worker_mode == "wsl2" and host_os == "nt":
+        worker_argv = command.argv
+        if python_src_test:
+            worker_argv = ("/usr/bin/env", "PYTHONPATH=src", *command.argv)
         return CommandInvocation(
             executable="wsl.exe",
             arguments=(
@@ -45,14 +56,26 @@ def build_command_invocation(
                 "--cd",
                 to_wsl_path(project.root),
                 "--",
-                *command.argv,
+                *worker_argv,
             ),
             cwd=None,
+        )
+
+    environment: dict[str, str] | None = None
+    if python_src_test:
+        environment = dict(os.environ)
+        existing_pythonpath = environment.get("PYTHONPATH")
+        src_value = str(src_path)
+        environment["PYTHONPATH"] = (
+            src_value
+            if not existing_pythonpath
+            else f"{src_value}{os.pathsep}{existing_pythonpath}"
         )
     return CommandInvocation(
         executable=command.argv[0],
         arguments=command.argv[1:],
         cwd=project.root,
+        environment=environment,
     )
 
 
@@ -112,6 +135,7 @@ class RegisteredCommandRunner:
                 invocation.executable,
                 *invocation.arguments,
                 cwd=invocation.cwd,
+                env=invocation.environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

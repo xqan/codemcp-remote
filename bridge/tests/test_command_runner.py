@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from codemcp_bridge.command_runner import build_command_invocation
+from codemcp_bridge.settings import (
+    BridgeSettings,
+    CodemcpSettings,
+    CommandSpec,
+    PolicySettings,
+    ProjectSpec,
+    ServerSettings,
+    StorageSettings,
+    to_wsl_path,
+)
+
+
+def _settings(tmp_path: Path, project: ProjectSpec, worker_mode: str) -> BridgeSettings:
+    return BridgeSettings(
+        repository_root=tmp_path,
+        bridge_config_path=tmp_path / "bridge.toml",
+        projects_config_path=tmp_path / "projects.toml",
+        server=ServerSettings("127.0.0.1", 46200, "/mcp", "streamable-http"),
+        storage=StorageSettings(
+            tmp_path / ".local", tmp_path / ".local/db", tmp_path / ".local/logs"
+        ),
+        policy=PolicySettings(False, False, False, True, 4096, 16_384, "per-project"),
+        codemcp=CodemcpSettings(worker_mode, "Ubuntu", None, 30, 60, 5),
+        projects={"demo": project},
+    )
+
+
+def _python_project(tmp_path: Path) -> tuple[ProjectSpec, CommandSpec]:
+    root = tmp_path / "project"
+    (root / "src").mkdir(parents=True)
+    command = CommandSpec(
+        command_id="test",
+        kind="test",
+        argv=("python", "-m", "unittest", "discover", "-s", "tests", "-v"),
+        timeout_seconds=900,
+        approval="not-required",
+    )
+    project = ProjectSpec(
+        project_id="demo",
+        root=root,
+        allowed_branches=("main",),
+        require_clean_workspace=True,
+        codemcp_config=root / "codemcp.toml",
+        commands={"test": command},
+        profile="python",
+        profile_source="detected",
+    )
+    return project, command
+
+
+def test_wsl_python_src_test_uses_fixed_env_prefix_without_shell(tmp_path: Path) -> None:
+    project, command = _python_project(tmp_path)
+    invocation = build_command_invocation(
+        _settings(tmp_path, project, "wsl2"),
+        project,
+        command,
+        os_name="nt",
+    )
+
+    assert invocation.executable == "wsl.exe"
+    assert invocation.cwd is None
+    assert invocation.environment is None
+    assert invocation.arguments == (
+        "--distribution",
+        "Ubuntu",
+        "--cd",
+        to_wsl_path(project.root),
+        "--",
+        "/usr/bin/env",
+        "PYTHONPATH=src",
+        *command.argv,
+    )
+    assert "-c" not in invocation.arguments
+
+
+def test_local_python_src_test_prepends_src_to_pythonpath(tmp_path: Path) -> None:
+    project, command = _python_project(tmp_path)
+    invocation = build_command_invocation(
+        _settings(tmp_path, project, "local"),
+        project,
+        command,
+        os_name="posix",
+    )
+
+    assert invocation.executable == "python"
+    assert invocation.arguments == command.argv[1:]
+    assert invocation.cwd == project.root
+    assert invocation.environment is not None
+    assert invocation.environment["PYTHONPATH"].split(os.pathsep)[0] == str(project.root / "src")
