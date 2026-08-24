@@ -301,3 +301,58 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
     assert service.adapter.is_active("integration") is False
     assert "Stateless session crashed" not in caplog.text
     assert "Attempted to exit a cancel scope" not in caplog.text
+
+@pytest.mark.asyncio
+async def test_real_codemcp_bridge_worker_restarts_after_bridge_shutdown(
+    git_project: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _settings(git_project, git_project.parent / "bridge-data")
+
+    async def read_once() -> str:
+        app, service = create_app(settings)
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://127.0.0.1:46200",
+            ) as http:
+                async with streamable_http_client(
+                    "http://127.0.0.1:46200/mcp",
+                    http_client=http,
+                ) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as client:
+                        await client.initialize()
+                        opened = _payload(
+                            await client.call_tool(
+                                "project_open",
+                                {"project_id": "integration"},
+                            )
+                        )
+                        assert opened["status"] == "succeeded"
+                        session_id = opened["data"]["session_id"]
+                        read = _payload(
+                            await client.call_tool(
+                                "file_read",
+                                {
+                                    "project_id": "integration",
+                                    "session_id": session_id,
+                                    "path": "src/hello file.txt",
+                                },
+                            )
+                        )
+                        assert read["status"] == "succeeded"
+                        assert service.adapter.is_active("integration") is True
+                        text = read["data"]["text"]
+
+        await service.close()
+        assert service.adapter.is_active("integration") is False
+        return text
+
+    first = await read_once()
+    second = await read_once()
+
+    assert "hello codemcp" in first
+    assert "hello codemcp" in second
+    assert "Stateless session crashed" not in caplog.text
+    assert "Attempted to exit a cancel scope" not in caplog.text
