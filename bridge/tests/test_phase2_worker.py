@@ -337,3 +337,73 @@ async def test_cancelled_startup_does_not_cancel_shared_startup_future(
     assert manager.is_active("demo") is False
     await manager.close()
 
+
+@pytest.mark.asyncio
+async def test_manager_close_waits_for_inflight_call_then_closes_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, tmp_path / "data")
+    call_started = asyncio.Event()
+    release_call = asyncio.Event()
+    stdio_exited = asyncio.Event()
+
+    @asynccontextmanager
+    async def fake_stdio_client(*args: Any, **kwargs: Any):
+        del args, kwargs
+        try:
+            yield object(), object()
+        finally:
+            stdio_exited.set()
+
+    class FakeClientSession:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> "FakeClientSession":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: object,
+        ) -> None:
+            del exc_type, exc_val, exc_tb
+
+        async def initialize(self) -> None:
+            return None
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            del name, arguments
+            call_started.set()
+            await release_call.wait()
+            return SimpleNamespace(
+                content=[SimpleNamespace(text="ok")],
+                structuredContent=None,
+                isError=False,
+            )
+
+    monkeypatch.setattr(worker_manager_module, "stdio_client", fake_stdio_client)
+    monkeypatch.setattr(worker_manager_module, "ClientSession", FakeClientSession)
+
+    manager = WorkerManager(settings)
+    call_task = asyncio.create_task(
+        manager.call(settings.projects["demo"], "ReadFile", {})
+    )
+    await asyncio.wait_for(call_started.wait(), timeout=1)
+
+    close_task = asyncio.create_task(manager.close())
+    await asyncio.sleep(0)
+    assert close_task.done() is False
+
+    release_call.set()
+    result = await asyncio.wait_for(call_task, timeout=1)
+    await asyncio.wait_for(close_task, timeout=1)
+
+    assert result.text == "ok"
+    assert stdio_exited.is_set()
+    assert manager.is_active("demo") is False
+
