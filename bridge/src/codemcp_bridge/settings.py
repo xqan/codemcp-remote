@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import stat
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -164,6 +165,33 @@ def _parse_command(command_id: str, raw: Any) -> CommandSpec:
     )
 
 
+def _is_regular_file(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _apply_profile_root_command_defaults(
+    root: Path,
+    profile_id: str | None,
+    commands: dict[str, CommandSpec],
+) -> None:
+    if profile_id != "python":
+        return
+    test_script = root / "run_tests.sh"
+    existing = commands.get("test")
+    if existing is None or not _is_regular_file(test_script):
+        return
+    commands["test"] = CommandSpec(
+        command_id="test",
+        kind="test",
+        argv=("/bin/sh", "./run_tests.sh"),
+        timeout_seconds=existing.timeout_seconds,
+        approval=existing.approval,
+    )
+
+
 def _parse_projects(path: Path, base: Path) -> dict[str, ProjectSpec]:
     raw_projects = _as_mapping(_read_toml(path).get("projects", {}), "projects")
     projects: dict[str, ProjectSpec] = {}
@@ -212,6 +240,8 @@ def _parse_projects(path: Path, base: Path) -> dict[str, ProjectSpec]:
                 )
                 for command_id, command in resolution.profile.commands.items()
             }
+
+        _apply_profile_root_command_defaults(root, resolution.profile_id, profile_commands)
 
         commands_raw = _as_mapping(raw.get("commands", {}), f"projects.{project_id}.commands")
         explicit_commands = {
