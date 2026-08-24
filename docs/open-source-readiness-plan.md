@@ -394,6 +394,10 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 
 **优先级：P1**
 
+**状态：仓库侧实施完成；GitHub hosted 首次运行/规则集激活待仓库托管后验证。**
+
+验证记录：`docs/stage-5-validation.md`
+
 ### 新增文件 / 目录
 
 - `CONTRIBUTING.md`
