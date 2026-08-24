@@ -260,9 +260,7 @@ async def test_cancelled_worker_call_discards_and_closes_worker(
     monkeypatch.setattr(worker_manager_module, "ClientSession", FakeClientSession)
 
     manager = WorkerManager(settings)
-    call_task = asyncio.create_task(
-        manager.call(settings.projects["demo"], "ReadFile", {})
-    )
+    call_task = asyncio.create_task(manager.call(settings.projects["demo"], "ReadFile", {}))
     await asyncio.wait_for(call_started.wait(), timeout=1)
 
     call_task.cancel()
