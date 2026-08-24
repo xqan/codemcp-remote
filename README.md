@@ -10,7 +10,10 @@ ChatGPT
   -> registered local Git project
 ```
 
-> **Pre-release:** the core remote-coding path is implemented and has passed earlier phase validation, but the first stable `v0.1.0` is still blocked on the final Windows operations, security, clean-machine, secrets, and release gates in [`docs/acceptance-test-plan.md`](docs/acceptance-test-plan.md).
+> **Pre-release:** the core remote-coding path is implemented and has passed earlier phase validation, but the first stable `v0.1.0` is still blocked on the final Windows operations, security, clean-machine, secrets, and release gates in [`docs/acceptance/acceptance-test-plan.md`](docs/acceptance/acceptance-test-plan.md).
+
+Browse the [documentation center](docs/README.md) for current architecture,
+operator guides, release gates, plans, and historical validation records.
 
 ## Why codemcp-remote
 
@@ -46,7 +49,7 @@ The Bridge does not contain an agent loop or model provider. Repository content 
 
 Secure MCP Tunnel and ChatGPT developer-mode availability depend on the capabilities enabled for your account/workspace. Tunnel connectivity is transport only; it does not replace Bridge authorization or approvals.
 
-See [`docs/codemcp-compatibility-matrix.md`](docs/codemcp-compatibility-matrix.md) for the tested backend behavior.
+See [`docs/reports/compatibility/codemcp-compatibility-matrix.md`](docs/reports/compatibility/codemcp-compatibility-matrix.md) for the tested backend behavior.
 
 ## Requirements
 
@@ -122,7 +125,7 @@ Only register repositories you intend ChatGPT to access. Treat registered comman
 Copy-Item config/tunnel-profile.example.env config/tunnel-profile.local.env
 ```
 
-Put the Tunnel ID and other non-secret profile settings in the local file as documented in [`docs/tunnel-setup.md`](docs/tunnel-setup.md).
+Put the Tunnel ID and other non-secret profile settings in the local file as documented in [`docs/guides/tunnel-setup.md`](docs/guides/tunnel-setup.md).
 
 Inject `CONTROL_PLANE_API_KEY` into the process from a secret manager or another non-persistent mechanism. The wrapper rejects storing that key in `config/tunnel-profile.local.env`.
 
@@ -156,7 +159,7 @@ pwsh -File .\scripts\stop-all.ps1 -WhatIf
 
 ## Connect from ChatGPT
 
-Follow [`docs/tunnel-setup.md`](docs/tunnel-setup.md):
+Follow [`docs/guides/tunnel-setup.md`](docs/guides/tunnel-setup.md):
 
 1. keep the local Bridge and `tunnel-client` healthy;
 2. create/use a ChatGPT developer-mode app with the supported Tunnel connection;
@@ -186,7 +189,7 @@ Before mutation, the Bridge records a Git baseline and creates a Bridge-owned ch
 
 If the Bridge cannot prove whether a side effect occurred, the operation remains `unknown`; do not blindly retry it. Inspect `operation_status` and use the explicit reconciliation flow.
 
-See [`docs/git-policy.md`](docs/git-policy.md) and [`docs/security-model.md`](docs/security-model.md).
+See [`docs/architecture/git-policy.md`](docs/architecture/git-policy.md) and [`docs/architecture/security-model.md`](docs/architecture/security-model.md).
 
 ## Doctor and operations
 
@@ -199,7 +202,7 @@ pwsh -File .\scripts\start-all.ps1
 pwsh -File .\scripts\stop-all.ps1
 ```
 
-The detailed operator guide is [`docs/operations-runbook.md`](docs/operations-runbook.md).
+The detailed operator guide is [`docs/guides/operations-runbook.md`](docs/guides/operations-runbook.md).
 
 For release validation, the repository also contains a 20-cycle lifecycle runner:
 
@@ -207,16 +210,16 @@ For release validation, the repository also contains a 20-cycle lifecycle runner
 pwsh -File .\scripts\validate-lifecycle.ps1 -Iterations 20
 ```
 
-This is only one release gate. It does not replace the crash, secret-canary, path/encoding, Tunnel-disconnect, and security tests in [`docs/phase-6-validation.md`](docs/phase-6-validation.md).
+This is only one release gate. It does not replace the crash, secret-canary, path/encoding, Tunnel-disconnect, and security tests in [`docs/acceptance/phase-6-validation.md`](docs/acceptance/phase-6-validation.md).
 
 ## Security model
 
 Read these before exposing a local repository through the Bridge:
 
 - [`SECURITY.md`](SECURITY.md) — vulnerability reporting;
-- [`docs/security-model.md`](docs/security-model.md) — trust boundaries and guarantees;
-- [`docs/threat-model.md`](docs/threat-model.md) — threats, mitigations, and residual risks;
-- [`docs/git-policy.md`](docs/git-policy.md) — checkpoint/diff/rollback constraints.
+- [`docs/architecture/security-model.md`](docs/architecture/security-model.md) — trust boundaries and guarantees;
+- [`docs/architecture/threat-model.md`](docs/architecture/threat-model.md) — threats, mitigations, and residual risks;
+- [`docs/architecture/git-policy.md`](docs/architecture/git-policy.md) — checkpoint/diff/rollback constraints.
 
 Important boundaries:
 
@@ -242,9 +245,9 @@ uv run --project bridge pytest -q bridge/tests tests/integration
 
 The final stable release additionally requires the gates in:
 
-- [`docs/open-source-readiness-plan.md`](docs/open-source-readiness-plan.md)
-- [`docs/phase-6-validation.md`](docs/phase-6-validation.md)
-- [`docs/acceptance-test-plan.md`](docs/acceptance-test-plan.md)
+- [`docs/plans/v0.1.0/open-source-readiness-plan.md`](docs/plans/v0.1.0/open-source-readiness-plan.md)
+- [`docs/acceptance/phase-6-validation.md`](docs/acceptance/phase-6-validation.md)
+- [`docs/acceptance/acceptance-test-plan.md`](docs/acceptance/acceptance-test-plan.md)
 
 ## Contributing
 

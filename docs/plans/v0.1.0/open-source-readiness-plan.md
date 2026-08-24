@@ -36,9 +36,9 @@
 
 - 根目录缺少正式 `LICENSE`；
 - 缺少 `SECURITY.md`；
-- 缺少 `docs/security-model.md`；
-- 缺少 `docs/threat-model.md`；
-- 缺少 `docs/acceptance-test-plan.md`；
+- 缺少 `docs/architecture/security-model.md`；
+- 缺少 `docs/architecture/threat-model.md`；
+- 缺少 `docs/acceptance/acceptance-test-plan.md`；
 - README 仍偏内部阶段记录，不是面向首次使用者的产品入口；
 - 缺少 `.github/` 下的 CI、Issue/PR 模板和依赖维护配置；
 - 缺少公开的贡献指南、行为准则、变更日志和版本支持策略；
@@ -123,8 +123,8 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 
 - `LICENSE`
 - `SECURITY.md`
-- `docs/security-model.md`
-- `docs/threat-model.md`
+- `docs/architecture/security-model.md`
+- `docs/architecture/threat-model.md`
 
 ### 任务
 
@@ -197,8 +197,8 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 - [x] 根目录加入完整、未修改的 GNU AGPL v3 `LICENSE` 正文；
 - [x] `bridge/pyproject.toml` 已切换为 `AGPL-3.0-only`；
 - [x] 新增 `SECURITY.md`；
-- [x] 新增 `docs/security-model.md`；
-- [x] 新增 `docs/threat-model.md`；
+- [x] 新增 `docs/architecture/security-model.md`；
+- [x] 新增 `docs/architecture/threat-model.md`；
 - [x] 已将 threat model 每个 P0 威胁映射到现有自动测试或明确的 Phase 6/7 验收项；映射完成不代表验收已 PASS；
 - [ ] Stage 6 dependency audit 时复核全部第三方依赖许可证，并决定是否生成完整 Third-Party Notices。
 
@@ -242,7 +242,7 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 
 ### 产物
 
-- 更新 `docs/operations-runbook.md`；
+- 更新 `docs/guides/operations-runbook.md`；
 - 新增或更新 Phase 6 validation 记录；
 - 必要的回归测试。
 
@@ -262,7 +262,7 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 
 ### 新增文件
 
-- `docs/acceptance-test-plan.md`
+- `docs/acceptance/acceptance-test-plan.md`
 
 ### 目标
 
@@ -396,7 +396,7 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 
 **状态：仓库侧实施完成；GitHub hosted 首次运行/规则集激活待仓库托管后验证。**
 
-验证记录：`docs/stage-5-validation.md`
+验证记录：`docs/reports/testing/stage-5-validation.md`
 
 ### 新增文件 / 目录
 

@@ -11,7 +11,7 @@ Phase 5 adds the Windows local wrapper around OpenAI Secure MCP Tunnel:
 - `scripts/doctor.ps1` reports Bridge configuration, Bridge health, profile
   validity, tunnel-client doctor output, and tunnel `/healthz`/`/readyz`;
 - `config/tunnel-profile.example.env` documents non-secret runtime settings;
-- `docs/tunnel-setup.md` documents setup and operator recovery;
+- `docs/guides/tunnel-setup.md` documents setup and operator recovery;
 - `tests/e2e/test_tunnel_contract.md` defines the account-backed ChatGPT
   developer-mode acceptance contract.
 
@@ -78,4 +78,4 @@ The failure and recovery matrix was also completed on 2026-08-22:
 
 Phase 5 account-backed validation is complete. Phase 6 remains intentionally
 unstarted; its operationalization work must follow the plan in
-[docs/implementation-plan.md](implementation-plan.md).
+[implementation plan](../../implementation-plan.md).

@@ -12,7 +12,7 @@ The project has not yet published its first stable release.
 | `v0.1.x` | Planned: latest patch release only |
 | `< v0.1.0` development snapshots | No long-term support guarantee |
 
-A stable `v0.1.0` MUST NOT be published until the release gates in `docs/open-source-readiness-plan.md` pass.
+A stable `v0.1.0` MUST NOT be published until the release gates in `docs/plans/v0.1.0/open-source-readiness-plan.md` pass.
 
 ## Reporting a vulnerability
 
@@ -64,7 +64,7 @@ The project follows these principles:
 - validate the report privately before public disclosure;
 - prefer a minimal, reviewable fix that preserves fail-closed behavior;
 - add a regression test whenever the issue can be reproduced safely;
-- update `docs/security-model.md` or `docs/threat-model.md` when a trust assumption changes;
+- update `docs/architecture/security-model.md` or `docs/architecture/threat-model.md` when a trust assumption changes;
 - do not publish exploit details before users have a reasonable upgrade path;
 - identify affected versions and required credential rotation when relevant;
 - never downgrade an uncertain mutation result merely to improve availability.
@@ -84,7 +84,7 @@ If a Tunnel control-plane key or another runtime secret may have leaked:
 
 ## Security boundaries
 
-The authoritative design description is `docs/security-model.md`. Threats and residual risks are tracked in `docs/threat-model.md`.
+The authoritative design description is `docs/architecture/security-model.md`. Threats and residual risks are tracked in `docs/architecture/threat-model.md`.
 
 Important non-guarantees:
 

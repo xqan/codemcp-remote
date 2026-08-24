@@ -127,8 +127,8 @@ the first failed lifecycle step and attempts owned-process cleanup.
 The 20-cycle runner is only one part of Phase 6. Bridge/Tunnel/worker crashes,
 port conflicts, dependency failures, timeout/process-tree cleanup, secret-log
 canaries, path/encoding cases, and dependency rollback must also be validated.
-The authoritative matrix and current PASS/PENDING state are recorded in
-[docs/phase-6-validation.md](phase-6-validation.md). Do not mark Phase 6 PASS
+The authoritative matrix and current PASS/PENDING state are recorded in the
+[Phase 6 validation plan](../acceptance/phase-6-validation.md). Do not mark Phase 6 PASS
 from the lifecycle runner alone.
 
 ## Phase 5 local Bridge and Tunnel
@@ -148,8 +148,8 @@ never points directly at codemcp.
 
 Do not expose codemcp directly to ChatGPT. The startup order is Bridge,
 codemcp worker on demand, tunnel-client, then ChatGPT tool discovery. The
-Bridge is the only MCP server exposed to the Tunnel. See
-[docs/tunnel-setup.md](tunnel-setup.md) for the complete setup.
+Bridge is the only MCP server exposed to the Tunnel. See the
+[Secure MCP Tunnel setup guide](tunnel-setup.md) for the complete setup.
 
 SQLite state is stored at `.local/bridge.sqlite3` and is ignored by Git. A
 normal shutdown closes active sessions. After an unclean restart, active

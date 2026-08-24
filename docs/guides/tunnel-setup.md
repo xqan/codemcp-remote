@@ -104,7 +104,7 @@ In ChatGPT developer mode:
 2. Select the tunnel associated with the target ChatGPT workspace, or enter
    its valid `tunnel_id`.
 3. Confirm that the Bridge tools are discovered.
-4. Run the contract in [test_tunnel_contract.md](../tests/e2e/test_tunnel_contract.md).
+4. Run the contract in [test_tunnel_contract.md](../../tests/e2e/test_tunnel_contract.md).
 
 The Bridge remains the only MCP server visible to the tunnel. The downstream
 codemcp worker is never configured as a tunnel target.

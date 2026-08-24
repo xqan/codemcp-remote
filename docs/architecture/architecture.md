@@ -3,7 +3,7 @@
 ## Scope
 
 This repository is the independent ChatGPT-only coding service described in
-docs/implementation-plan.md.
+the [implementation plan](../implementation-plan.md).
 
 The only reasoning engine is ChatGPT. The local components are execution and
 control components:

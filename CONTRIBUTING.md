@@ -28,7 +28,7 @@ uv run --project bridge --frozen codemcp-bridge-server check --bridge-config con
 git diff --check
 ```
 
-The real Windows 11 + WSL2 + Secure MCP Tunnel release gates are documented in `docs/phase-6-validation.md` and `docs/acceptance-test-plan.md`.
+The real Windows 11 + WSL2 + Secure MCP Tunnel release gates are documented in `docs/acceptance/phase-6-validation.md` and `docs/acceptance/acceptance-test-plan.md`.
 
 ## Pull requests
 
@@ -57,7 +57,7 @@ Changes to any of the following require corresponding tests and documentation re
 - Tunnel configuration or transport assumptions;
 - logging or audit data.
 
-Update `docs/security-model.md` and `docs/threat-model.md` whenever a trust boundary, capability, mitigation, or residual risk changes.
+Update `docs/architecture/security-model.md` and `docs/architecture/threat-model.md` whenever a trust boundary, capability, mitigation, or residual risk changes.
 
 ## Design boundaries
 

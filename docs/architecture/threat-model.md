@@ -91,7 +91,7 @@ Availability failures are acceptable when the safe alternative is to guess about
 
 ## Validation ownership
 
-`docs/acceptance-test-plan.md` will become the executable release matrix. Until that file is completed and all P0 paths pass, this threat model is a design record rather than proof of release security.
+`docs/acceptance/acceptance-test-plan.md` will become the executable release matrix. Until that file is completed and all P0 paths pass, this threat model is a design record rather than proof of release security.
 
 Every new high-privilege MCP tool must add:
 

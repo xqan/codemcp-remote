@@ -320,8 +320,8 @@ codemcp-remote/
 - README.md
 - config/bridge.example.toml
 - config/projects.example.toml
-- docs/architecture.md
-- docs/operations-runbook.md
+- docs/architecture/architecture.md
+- docs/guides/operations-runbook.md
 - tests/fixtures/sample-git-project/
 
 ### Changes
@@ -368,7 +368,7 @@ codemcp-remote/
 
 - bridge/src/codemcp_bridge/codemcp_probe.py
 - tests/integration/test_codemcp_compatibility.py
-- docs/codemcp-compatibility-matrix.md
+- docs/reports/compatibility/codemcp-compatibility-matrix.md
 - tests/fixtures/sample-git-project/
 
 ### Changes
@@ -535,7 +535,7 @@ codemcp-remote/
 - bridge/src/codemcp_bridge/git_guard.py
 - bridge/src/codemcp_bridge/checkpoint_service.py
 - bridge/tests/test_phase4_git.py
-- docs/git-policy.md
+- docs/architecture/git-policy.md
 
 ### Changes
 
@@ -583,7 +583,7 @@ codemcp-remote/
 - scripts/start-tunnel.ps1
 - scripts/doctor.ps1
 - config/tunnel-profile.example.env
-- docs/tunnel-setup.md
+- docs/guides/tunnel-setup.md
 - tests/e2e/test_tunnel_contract.md
 
 ### Changes
@@ -635,8 +635,8 @@ codemcp-remote/
 - scripts/start-tunnel.ps1
 - scripts/stop-all.ps1
 - scripts/doctor.ps1
-- docs/operations-runbook.md
-- docs/security-model.md
+- docs/guides/operations-runbook.md
+- docs/architecture/security-model.md
 - README.md
 
 ### Changes
@@ -680,9 +680,9 @@ codemcp-remote/
 
 ### Files / Modules
 
-- docs/acceptance-test-plan.md
-- docs/threat-model.md
-- docs/operations-runbook.md
+- docs/acceptance/acceptance-test-plan.md
+- docs/architecture/threat-model.md
+- docs/guides/operations-runbook.md
 - docs/implementation-plan.md
 - tests/e2e/
 
@@ -928,9 +928,9 @@ CommitMode.AMEND_SESSION_WIP
 ### 文档
 
 - `README.md`
-- `docs/architecture.md`
-- `docs/git-policy.md`
-- `docs/phase-4-validation.md`
+- `docs/architecture/architecture.md`
+- `docs/architecture/git-policy.md`
+- `docs/releases/v0.1.0/phase-4-validation.md`
 - `docs/implementation-plan.md`
 
 ### 明确不受影响
@@ -1083,9 +1083,9 @@ MCP 合同共存，并把新的提交语义写入运维与安全文档。
 - `bridge/tests/test_phase4_git.py`
 - `tests/integration/test_codemcp_compatibility.py`
 - `README.md`
-- `docs/architecture.md`
-- `docs/git-policy.md`
-- `docs/phase-4-validation.md`
+- `docs/architecture/architecture.md`
+- `docs/architecture/git-policy.md`
+- `docs/releases/v0.1.0/phase-4-validation.md`
 - `docs/implementation-plan.md`
 
 #### Changes

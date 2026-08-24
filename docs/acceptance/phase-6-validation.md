@@ -140,7 +140,7 @@ Before changing `codemcp`, MCP SDK, or other execution-path dependencies:
 2. preserve the existing lock file;
 3. update one dependency scope at a time;
 4. run doctor, the full automated test suite, compatibility tests, Phase 6 lifecycle validation, and Phase 7 security acceptance;
-5. compare exposed MCP tool schemas and codemcp behavior against `docs/codemcp-compatibility-matrix.md`;
+5. compare exposed MCP tool schemas and codemcp behavior against `docs/reports/compatibility/codemcp-compatibility-matrix.md`;
 6. reject the upgrade if mutation/Git/process semantics change without an explicit design review.
 
 Rollback:

@@ -255,10 +255,10 @@ Required public documents:
 
 - [x] `LICENSE` — GNU AGPL v3, project SPDX `AGPL-3.0-only`
 - [x] `SECURITY.md`
-- [x] `docs/security-model.md`
-- [x] `docs/threat-model.md`
-- [x] `docs/phase-6-validation.md`
-- [x] `docs/acceptance-test-plan.md`
+- [x] `docs/architecture/security-model.md`
+- [x] `docs/architecture/threat-model.md`
+- [x] `docs/acceptance/phase-6-validation.md`
+- [x] `docs/acceptance/acceptance-test-plan.md`
 - [ ] public-user README restructured and clean-machine verified
 - [ ] `CONTRIBUTING.md`
 - [ ] `CODE_OF_CONDUCT.md`

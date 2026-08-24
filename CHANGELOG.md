@@ -2,7 +2,7 @@
 
 All notable public changes to codemcp-remote will be documented here.
 
-The project is currently pre-release. Version `v0.1.0` must not be published until the release gates in `docs/acceptance-test-plan.md` and `docs/open-source-readiness-plan.md` pass.
+The project is currently pre-release. Version `v0.1.0` must not be published until the release gates in `docs/acceptance/acceptance-test-plan.md` and `docs/plans/v0.1.0/open-source-readiness-plan.md` pass.
 
 ## [Unreleased]
 

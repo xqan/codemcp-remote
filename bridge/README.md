@@ -8,7 +8,8 @@ rollback。Secure MCP Tunnel 的启动、profile 校验和诊断脚本位于仓�
 
 Phase 1 已确定 codemcp mutation worker 运行在 WSL2；原生 Windows 的
 Git-backed mutation 不支持。Adapter 必须显式处理 Windows/WSL 路径映射、
-worker 超时和进程树清理，详见 `docs/codemcp-compatibility-matrix.md`。
+worker 超时和进程树清理，详见
+`docs/reports/compatibility/codemcp-compatibility-matrix.md`。
 
 本包不包含任何模型调用。
 

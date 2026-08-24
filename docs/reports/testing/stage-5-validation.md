@@ -73,4 +73,4 @@ These are activation checks, not permission to move the release gate to PASS wit
 
 ## Conclusion
 
-Stage 5 repository implementation is complete. Stable `v0.1.0` remains blocked by the pending hosted activation check and by the other P0 release gates defined in `docs/open-source-readiness-plan.md`.
+Stage 5 repository implementation is complete. Stable `v0.1.0` remains blocked by the pending hosted activation check and by the other P0 release gates defined in `docs/plans/v0.1.0/open-source-readiness-plan.md`.
