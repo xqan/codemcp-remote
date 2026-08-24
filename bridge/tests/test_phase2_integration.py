@@ -56,10 +56,7 @@ def _settings(project: Path, data_dir: Path) -> BridgeSettings:
         timeout_seconds=30,
         approval="not-required",
     )
-    test_script = (
-        "from pathlib import Path; "
-        "Path('test-output.txt').write_text('test passed\\n', encoding='utf-8')"
-    )
+    test_script = "print('test passed')"
     test_command = CommandSpec(
         command_id="test",
         kind="test",
@@ -101,10 +98,7 @@ def git_project() -> Iterator[Path]:
     (project / "src" / "notes.txt").write_text("baseline notes\n", encoding="utf-8")
     (project / "src" / "binary.bin").write_bytes(b"header\x00binary\n")
     (project / "src" / "large.txt").write_text("x" * 4097, encoding="utf-8")
-    test_script = (
-        "from pathlib import Path; "
-        "Path('test-output.txt').write_text('test passed\\n', encoding='utf-8')"
-    )
+    test_script = "print('test passed')"
     (project / "codemcp.toml").write_text(
         "[commands.format]\n"
         'command = ["git", "--version"]\n'
@@ -278,9 +272,7 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                     )
                     assert tested["status"] == "succeeded"
                     assert "Code test successful" in tested["data"]["text"]
-                    assert (git_project / "test-output.txt").read_text(
-                        encoding="utf-8"
-                    ) == "test passed\n"
+                    assert "test passed" in tested["data"]["text"]
 
                     status = _payload(
                         await client.call_tool(

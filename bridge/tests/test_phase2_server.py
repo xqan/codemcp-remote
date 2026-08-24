@@ -466,7 +466,8 @@ async def test_local_mcp_contract_and_policy_rejections(
                     assert registered_build["status"] == "succeeded"
                     assert registered_build["data"]["command_id"] == "build"
                     assert registered_build["changed_files"] == []
-                    assert adapter.calls[-1][0] == "RunCommand"
+                    assert "Code build successful" in registered_build["data"]["text"]
+                    assert all(name != "RunCommand" for name, _ in adapter.calls)
 
                     unregistered_command = _payload(
                         await client.call_tool(
@@ -1168,7 +1169,11 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
                     )
                     assert confirmed["status"] == "succeeded"
                     assert confirmed["data"]["approved_operation"]["status"] == "succeeded"
-                    assert [name for name, _ in adapter.calls].count("RunCommand") == 1
+                    assert (
+                        "Code format successful"
+                        in confirmed["data"]["approved_operation"]["data"]["text"]
+                    )
+                    assert all(name != "RunCommand" for name, _ in adapter.calls)
 
                     final_status = _payload(
                         await client.call_tool(

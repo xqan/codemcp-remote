@@ -22,9 +22,9 @@ from .approval_service import ApprovalService
 from .audit_store import AuditStore
 from .checkpoint_service import CheckpointService
 from .codemcp_adapter import CodemcpAdapter
+from .command_runner import RegisteredCommandRunner
 from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
-from .generated_codemcp import materialize_generated_codemcp_config
 from .git_guard import GitGuard
 from .mcp_transport import BridgeStreamableHTTPSessionManager
 from .operation_service import OperationService
@@ -132,6 +132,7 @@ class BridgeService:
         self.git = GitGuard(max_output_bytes=settings.policy.max_result_bytes)
         self.policy = PolicyEngine(settings, self.registry, self.git)
         self.adapter = adapter or CodemcpAdapter(settings, self.registry)
+        self.command_runner = RegisteredCommandRunner(settings)
         self.database = Database(settings.storage.sqlite_file)
         self.sessions = SessionService(self.database)
         self.operations = OperationService(self.database)
@@ -1312,18 +1313,28 @@ class BridgeService:
                 session_id=session_id,
                 operation_id=operation_id,
             )
-            with materialize_generated_codemcp_config(project, command):
-                result = await self.adapter.call(
-                    project,
-                    "RunCommand",
-                    {"path": project.root, "command": command.command_id, "chat_id": session_id},
-                    timeout_seconds=command.timeout_seconds,
-                    mutation=True,
+            result = await self.command_runner.run(project, command)
+            after_command = await self.git.status(project.root)
+            if (
+                after_command.branch != checkpoint.branch
+                or after_command.head.lower() != checkpoint.head.lower()
+            ):
+                raise BridgeError(
+                    "UNKNOWN_SIDE_EFFECT",
+                    "registered command changed Git HEAD or branch",
+                    {
+                        "command_id": command.command_id,
+                        "expected_branch": checkpoint.branch,
+                        "actual_branch": after_command.branch,
+                        "expected_head": checkpoint.head,
+                        "actual_head": after_command.head,
+                    },
+                    status="unknown",
                 )
-        if _is_codemcp_error(result):
+        if result.is_error:
             raise BridgeError(
                 "BACKEND_UNAVAILABLE",
-                "codemcp rejected RunCommand",
+                "registered command failed",
                 {
                     "command_id": command.command_id,
                     "output": result.text,
