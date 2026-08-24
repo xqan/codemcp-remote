@@ -157,6 +157,7 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                     )
                     assert read["status"] == "succeeded"
                     assert "hello codemcp" in read["data"]["text"]
+                    assert service.adapter.is_active("integration") is True
 
                     searched = _payload(
                         await client.call_tool(
