@@ -9,7 +9,7 @@ description = "Local policy and MCP bridge for ChatGPT-only remote coding workfl
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
-authors = [{ name = "Fank", email = "cloudw2023@gmail.com" }]
+authors = [{ name = "Frank", email = "cloudw2023@gmail.com" }]
 dependencies = [
     "codemcp==0.3.0",
     "mcp>=1.13,<2",
