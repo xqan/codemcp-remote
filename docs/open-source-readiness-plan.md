@@ -191,6 +191,17 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 
 `Threat → Preconditions → Existing Mitigation → Residual Risk → Validation`
 
+### 当前执行状态（2026-08-24）
+
+- [x] 开源协议确定为 GNU AGPL v3，项目 SPDX 标识为 `AGPL-3.0-only`；
+- [x] 根目录加入完整、未修改的 GNU AGPL v3 `LICENSE` 正文；
+- [x] `bridge/pyproject.toml` 已切换为 `AGPL-3.0-only`；
+- [x] 新增 `SECURITY.md`；
+- [x] 新增 `docs/security-model.md`；
+- [x] 新增 `docs/threat-model.md`；
+- [ ] 将 threat model 每个 P0 威胁映射到现有自动测试或 Phase 7 人工验收项；
+- [ ] Stage 6 dependency audit 时复核全部第三方依赖许可证，并决定是否生成完整 Third-Party Notices。
+
 ### 验收
 
 - 安全文档和代码实际行为一致；
