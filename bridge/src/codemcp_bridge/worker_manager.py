@@ -171,6 +171,10 @@ class _CodemcpWorker:
 
         await asyncio.shield(startup_future)
 
+    def is_active(self) -> bool:
+        owner_task = self._owner_task
+        return self._session is not None and owner_task is not None and not owner_task.done()
+
     async def call(
         self,
         subtool: str,
