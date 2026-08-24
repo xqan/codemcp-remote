@@ -402,4 +402,3 @@ async def test_manager_close_waits_for_inflight_call_then_closes_owner(
     assert result.text == "ok"
     assert stdio_exited.is_set()
     assert manager.is_active("demo") is False
-
