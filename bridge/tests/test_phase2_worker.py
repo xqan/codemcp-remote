@@ -16,7 +16,12 @@ from codemcp_bridge.settings import (
 from codemcp_bridge.worker_manager import WorkerManager, _CodemcpWorker
 
 
-def _settings(project: Path, data_dir: Path) -> BridgeSettings:
+def _settings(
+    project: Path,
+    data_dir: Path,
+    *,
+    worker_mode: str = "local",
+) -> BridgeSettings:
     spec = ProjectSpec(
         project_id="demo",
         root=project,
@@ -32,9 +37,25 @@ def _settings(project: Path, data_dir: Path) -> BridgeSettings:
         server=ServerSettings("127.0.0.1", 46200, "/mcp", "streamable-http"),
         storage=StorageSettings(data_dir, data_dir / "bridge.sqlite3", data_dir / "logs"),
         policy=PolicySettings(False, False, False, True, 1024, 4096, "per-project"),
-        codemcp=CodemcpSettings("local", "Ubuntu", None, 10, 10, 5),
+        codemcp=CodemcpSettings(worker_mode, "Ubuntu", None, 10, 10, 5),
         projects={"demo": spec},
     )
+
+
+def test_wsl_worker_git_environment_aligns_autocrlf_with_windows(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, tmp_path / "data", worker_mode="wsl2")
+    worker = _CodemcpWorker(settings, settings.projects["demo"])
+
+    parameters = worker._parameters(os_name="nt")
+
+    assert parameters.command == "wsl.exe"
+    assert parameters.env is not None
+    assert parameters.env["GIT_CONFIG_COUNT"] == "2"
+    assert parameters.env["GIT_CONFIG_KEY_0"] == "core.excludesfile"
+    assert parameters.env["GIT_CONFIG_KEY_1"] == "core.autocrlf"
+    assert parameters.env["GIT_CONFIG_VALUE_1"] == "true"
 
 
 @pytest.mark.asyncio

@@ -64,7 +64,8 @@ class _CodemcpWorker:
         self._session: ClientSession | None = None
         self._stderr = None
 
-    def _parameters(self) -> StdioServerParameters:
+    def _parameters(self, *, os_name: str | None = None) -> StdioServerParameters:
+        host_os = os.name if os_name is None else os_name
         worker_home = self._settings.storage.data_dir / "workers" / self._project.project_id
         worker_home.mkdir(parents=True, exist_ok=True)
         git_excludes = worker_home / "git-excludes"
@@ -75,14 +76,14 @@ class _CodemcpWorker:
         environment["PYTHONIOENCODING"] = "utf-8"
         environment["GIT_CONFIG_COUNT"] = "1"
         environment["GIT_CONFIG_KEY_0"] = "core.excludesfile"
-        normalize_stderr = self._settings.codemcp.worker_mode == "wsl2" and os.name == "nt"
+        normalize_stderr = self._settings.codemcp.worker_mode == "wsl2" and host_os == "nt"
         self._stderr = open_worker_stderr(
             self._settings.storage.log_dir,
             self._project.project_id,
             normalize_subprocess_output=normalize_stderr,
         )
 
-        if self._settings.codemcp.worker_mode == "wsl2" and os.name == "nt":
+        if self._settings.codemcp.worker_mode == "wsl2" and host_os == "nt":
             python = self._settings.codemcp.wsl_python or to_wsl_path(
                 self._settings.repository_root / ".local" / "bridge-venv-wsl" / "bin" / "python"
             )
@@ -100,6 +101,9 @@ class _CodemcpWorker:
             environment["HOME"] = to_wsl_path(worker_home)
             environment["USERPROFILE"] = str(worker_home)
             environment["GIT_CONFIG_VALUE_0"] = to_wsl_path(git_excludes)
+            environment["GIT_CONFIG_COUNT"] = "2"
+            environment["GIT_CONFIG_KEY_1"] = "core.autocrlf"
+            environment["GIT_CONFIG_VALUE_1"] = "true"
             cwd = None
         else:
             command = sys.executable
