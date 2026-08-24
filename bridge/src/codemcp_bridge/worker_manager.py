@@ -65,8 +65,14 @@ class _CodemcpWorker:
         self._session: ClientSession | None = None
         self._stderr = None
 
-    def _parameters(self, *, os_name: str | None = None) -> StdioServerParameters:
+    def _parameters(
+        self,
+        *,
+        os_name: str | None = None,
+        frozen: bool | None = None,
+    ) -> StdioServerParameters:
         host_os = os.name if os_name is None else os_name
+        effective_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
         worker_home = self._settings.storage.data_dir / "workers" / self._project.project_id
         worker_home.mkdir(parents=True, exist_ok=True)
         git_excludes = worker_home / "git-excludes"
@@ -108,7 +114,7 @@ class _CodemcpWorker:
             cwd = None
         else:
             command = sys.executable
-            args = ["-m", "codemcp_bridge.native_codemcp_worker"]
+            args = ["_worker"] if effective_frozen else ["-m", "codemcp_bridge.native_codemcp_worker"]
             environment["HOME"] = str(worker_home)
             environment["USERPROFILE"] = str(worker_home)
             environment["GIT_CONFIG_VALUE_0"] = str(git_excludes)

@@ -27,6 +27,23 @@ class CommandInvocation:
     environment: dict[str, str] | None = None
 
 
+def _migrate_legacy_wsl_bridge_command(
+    project: ProjectSpec,
+    argv: tuple[str, ...],
+) -> tuple[str, ...] | None:
+    """Translate the repository's pre-native WSL tool paths to uv on Windows."""
+
+    if not argv or not (project.root / "bridge" / "pyproject.toml").is_file():
+        return None
+    executable = argv[0].replace("\\", "/")
+    legacy_prefix = f"{to_wsl_path(project.root).rstrip('/')}/.local/bridge-venv-wsl/bin/"
+    if executable == legacy_prefix + "python":
+        return ("uv", "run", "--project", str(project.root / "bridge"), "python", *argv[1:])
+    if executable == legacy_prefix + "ruff":
+        return ("uv", "run", "--project", str(project.root / "bridge"), "ruff", *argv[1:])
+    return None
+
+
 def build_command_invocation(
     settings: BridgeSettings,
     project: ProjectSpec,
@@ -61,6 +78,12 @@ def build_command_invocation(
             cwd=None,
         )
 
+    local_argv = command.argv
+    if host_os == "nt":
+        migrated_argv = _migrate_legacy_wsl_bridge_command(project, command.argv)
+        if migrated_argv is not None:
+            local_argv = migrated_argv
+
     environment: dict[str, str] | None = None
     if python_src_test:
         environment = dict(os.environ)
@@ -72,8 +95,8 @@ def build_command_invocation(
             else f"{src_value}{os.pathsep}{existing_pythonpath}"
         )
     return CommandInvocation(
-        executable=command.argv[0],
-        arguments=command.argv[1:],
+        executable=local_argv[0],
+        arguments=local_argv[1:],
         cwd=project.root,
         environment=environment,
     )

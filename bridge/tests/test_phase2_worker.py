@@ -81,6 +81,19 @@ def test_local_worker_uses_native_windows_entrypoint(tmp_path: Path) -> None:
     assert "GIT_CONFIG_KEY_1" not in parameters.env
 
 
+def test_frozen_local_worker_reuses_executable_internal_entrypoint(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, tmp_path / "data", worker_mode="local")
+    worker = _CodemcpWorker(settings, settings.projects["demo"])
+
+    parameters = worker._parameters(os_name="nt", frozen=True)
+
+    assert parameters.command == sys.executable
+    assert parameters.args == ["_worker"]
+    assert parameters.cwd == str(project)
+
+
 @pytest.mark.asyncio
 async def test_native_worker_subprocess_patch_supplies_devnull_stdin(
     monkeypatch: pytest.MonkeyPatch,

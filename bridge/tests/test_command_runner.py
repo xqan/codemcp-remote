@@ -93,3 +93,66 @@ def test_local_python_src_test_prepends_src_to_pythonpath(tmp_path: Path) -> Non
     assert invocation.cwd == project.root
     assert invocation.environment is not None
     assert invocation.environment["PYTHONPATH"].split(os.pathsep)[0] == str(project.root / "src")
+
+
+def test_local_windows_migrates_legacy_wsl_self_repository_tools(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    (root / "bridge").mkdir(parents=True)
+    (root / "bridge" / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+    project = ProjectSpec(
+        project_id="demo",
+        root=root,
+        allowed_branches=("main",),
+        require_clean_workspace=True,
+        codemcp_config=root / "codemcp.toml",
+        commands={},
+    )
+    legacy_prefix = f"{to_wsl_path(root)}/.local/bridge-venv-wsl/bin"
+
+    python_command = CommandSpec(
+        command_id="test",
+        kind="test",
+        argv=(f"{legacy_prefix}/python", "-m", "pytest", "-q"),
+        timeout_seconds=900,
+        approval="not-required",
+    )
+    python_invocation = build_command_invocation(
+        _settings(tmp_path, project, "local"),
+        project,
+        python_command,
+        os_name="nt",
+    )
+    assert python_invocation.executable == "uv"
+    assert python_invocation.arguments == (
+        "run",
+        "--project",
+        str(root / "bridge"),
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+    )
+
+    ruff_command = CommandSpec(
+        command_id="format",
+        kind="format",
+        argv=(f"{legacy_prefix}/ruff", "format", "--check", "bridge/src"),
+        timeout_seconds=300,
+        approval="not-required",
+    )
+    ruff_invocation = build_command_invocation(
+        _settings(tmp_path, project, "local"),
+        project,
+        ruff_command,
+        os_name="nt",
+    )
+    assert ruff_invocation.executable == "uv"
+    assert ruff_invocation.arguments == (
+        "run",
+        "--project",
+        str(root / "bridge"),
+        "ruff",
+        "format",
+        "--check",
+        "bridge/src",
+    )
