@@ -76,6 +76,17 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
 
         self.app._handle_message = tracked_handle_message  # type: ignore[method-assign]  # noqa: SLF001
 
+    @asynccontextmanager
+    async def run(self) -> AsyncIterator[None]:
+        try:
+            async with super().run():
+                if self._startup_callback is not None:
+                    await self._startup_callback()
+                yield
+        finally:
+            if self._shutdown_callback is not None:
+                await self._shutdown_callback()
+
     async def _handle_stateless_request(
         self,
         scope: Scope,
