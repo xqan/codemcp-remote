@@ -243,6 +243,9 @@ class WorkerManager:
         timeout = timeout_seconds or self._settings.codemcp.worker_timeout_seconds
         try:
             return await worker.call(subtool, arguments, timeout)
+        except asyncio.CancelledError:
+            await self._discard(project.project_id, worker)
+            raise
         except TimeoutError as exc:
             await self._discard(project.project_id, worker)
             code = "UNKNOWN_SIDE_EFFECT" if mutation else "BACKEND_UNAVAILABLE"
