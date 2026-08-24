@@ -298,3 +298,6 @@ async def test_real_codemcp_bridge_read_edit_command_and_diff(
                     assert "external change" in diff["data"]["text"]
 
     await service.close()
+    assert service.adapter.is_active("integration") is False
+    assert "Stateless session crashed" not in caplog.text
+    assert "Attempted to exit a cancel scope" not in caplog.text
