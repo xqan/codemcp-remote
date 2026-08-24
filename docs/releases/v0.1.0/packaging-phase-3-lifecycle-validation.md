@@ -40,23 +40,28 @@ Observed result on 2026-08-24:
 - EXE SHA-256: `2dbacbef5ef408925707926acc948653a5221f0eaee46b0dea7e8b4e71957284`.
 - Checksum file: `.local\dist\codemcp-remote\SHA256SUMS.txt`.
 
-## Remaining acceptance
+## Live lifecycle migration validation
 
-Packaging Phase 3 is not closed until the live Windows lifecycle migration passes:
+Command:
 
 ```powershell
 pwsh -File .\scripts\validate-windows-exe-lifecycle.ps1
 ```
 
-Expected result:
+Observed result on 2026-08-24:
 
-- frozen `doctor` passes before the legacy lifecycle is stopped;
-- the legacy PowerShell-managed Bridge/Tunnel are stopped;
-- `codemcp-remote.exe start` starts both services;
-- `codemcp-remote.exe status` reports native lifecycle ownership and healthy Bridge/Tunnel endpoints;
-- the validation script returns `phase: "3"`, `status: "ok"`, and `lifecycle: "native-exe"`;
-- the native EXE-managed services remain running for connector verification.
+- frozen `doctor`: PASS before stopping the legacy lifecycle.
+- legacy PowerShell-managed Bridge/Tunnel stop: PASS.
+- `codemcp-remote.exe start`: PASS.
+- `codemcp-remote.exe status`: PASS.
+- validation result: `phase: "3"`, `status: "ok"`, `lifecycle: "native-exe"`.
+- native EXE-managed services were left running for connector verification.
+- post-migration connector `project_open`: PASS.
+- post-migration connector `project_status`: PASS.
+- repository branch: `codex/20260824`.
+- repository working tree: clean.
+- registered project development readiness: PASS.
 
-If native startup fails after the legacy lifecycle has been stopped, the validation script attempts to restore the legacy lifecycle automatically.
+## Final state
 
-Do not enter Packaging Phase 4 until this live migration and connector verification pass.
+Packaging Phase 3 is PASS/CLOSED. Normal Bridge/Tunnel lifecycle no longer requires PowerShell; the legacy scripts remain only as migration/rollback compatibility tooling. Do not enter Packaging Phase 4 until explicitly instructed.
