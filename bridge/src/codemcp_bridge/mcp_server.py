@@ -2154,11 +2154,7 @@ def create_server(
 
     @asynccontextmanager
     async def lifespan(_: FastMCP):
-        await service.start()
-        try:
-            yield
-        finally:
-            await service.close_backend()
+        yield
 
     server = FastMCP(
         "codemcp-remote-bridge",
