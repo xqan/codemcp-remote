@@ -2176,6 +2176,8 @@ def create_server(
         stateless=server.settings.stateless_http,
         security_settings=server.settings.transport_security,
         max_request_body_size=server.settings.max_request_body_size,
+        startup_callback=service.start,
+        shutdown_callback=service.close,
     )
 
     @server.custom_route("/healthz", methods=["GET"], include_in_schema=False)
