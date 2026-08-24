@@ -293,6 +293,9 @@ async def test_cancelled_startup_does_not_cancel_shared_startup_future(
             stdio_exited.set()
 
     class FakeClientSession:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
         async def __aenter__(self) -> "FakeClientSession":
             return self
 
