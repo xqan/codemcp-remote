@@ -211,3 +211,123 @@ async def test_worker_contexts_are_owned_and_closed_by_same_task(
     assert session_exit_tasks == [owner_task]
     assert stdio_exit_tasks == [owner_task]
 
+
+@pytest.mark.asyncio
+async def test_cancelled_worker_call_discards_and_closes_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, tmp_path / "data")
+    call_started = asyncio.Event()
+    stdio_exited = asyncio.Event()
+
+    @asynccontextmanager
+    async def fake_stdio_client(*args: Any, **kwargs: Any):
+        del args, kwargs
+        try:
+            yield object(), object()
+        finally:
+            stdio_exited.set()
+
+    class FakeClientSession:
+        async def __aenter__(self) -> "FakeClientSession":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: object,
+        ) -> None:
+            del exc_type, exc_val, exc_tb
+
+        async def initialize(self) -> None:
+            return None
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            del name, arguments
+            call_started.set()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(worker_manager_module, "stdio_client", fake_stdio_client)
+    monkeypatch.setattr(worker_manager_module, "ClientSession", FakeClientSession)
+
+    manager = WorkerManager(settings)
+    call_task = asyncio.create_task(
+        manager.call(settings.projects["demo"], "ReadFile", {})
+    )
+    await asyncio.wait_for(call_started.wait(), timeout=1)
+
+    call_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call_task
+
+    await asyncio.wait_for(stdio_exited.wait(), timeout=1)
+    assert manager.is_active("demo") is False
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_startup_does_not_cancel_shared_startup_future(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, tmp_path / "data")
+    initialize_started = asyncio.Event()
+    release_initialize = asyncio.Event()
+    stdio_exited = asyncio.Event()
+
+    @asynccontextmanager
+    async def fake_stdio_client(*args: Any, **kwargs: Any):
+        del args, kwargs
+        try:
+            yield object(), object()
+        finally:
+            stdio_exited.set()
+
+    class FakeClientSession:
+        async def __aenter__(self) -> "FakeClientSession":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: object,
+        ) -> None:
+            del exc_type, exc_val, exc_tb
+
+        async def initialize(self) -> None:
+            initialize_started.set()
+            await release_initialize.wait()
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            raise AssertionError(f"unexpected call after startup cancellation: {name} {arguments}")
+
+    monkeypatch.setattr(worker_manager_module, "stdio_client", fake_stdio_client)
+    monkeypatch.setattr(worker_manager_module, "ClientSession", FakeClientSession)
+
+    manager = WorkerManager(settings)
+    call_task = asyncio.create_task(
+        manager.call(settings.projects["demo"], "ReadFile", {})
+    )
+    await asyncio.wait_for(initialize_started.wait(), timeout=1)
+    worker = manager._workers["demo"]
+
+    call_task.cancel()
+    await asyncio.sleep(0)
+    assert worker._startup_future is not None
+    assert worker._startup_future.cancelled() is False
+
+    release_initialize.set()
+    with pytest.raises(asyncio.CancelledError):
+        await call_task
+
+    await asyncio.wait_for(stdio_exited.wait(), timeout=1)
+    assert manager.is_active("demo") is False
+    await manager.close()
+
