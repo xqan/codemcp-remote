@@ -180,6 +180,52 @@ async def test_commit_file_bytes_honors_explicit_session_commit_modes(
 
 
 @pytest.mark.asyncio
+async def test_amend_rechecks_shared_refs_before_git_side_effect(
+    git_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = GitGuard()
+    baseline_head = _git(git_project, "rev-parse", "HEAD")
+    wip_head = await guard.commit_file_bytes(
+        git_project,
+        path="src/hello.txt",
+        content=b"session create\n",
+        expected_head=baseline_head,
+        description="create session WIP",
+        require_exists=True,
+        commit_mode=CommitMode.CREATE,
+        session_id="session-1",
+        expected_branch="main",
+    )
+    real_run = guard._run
+
+    async def publish_after_stage(project_root: Path, *arguments: str) -> str:
+        output = await real_run(project_root, *arguments)
+        if arguments[:2] == ("add", "--"):
+            _git(project_root, "tag", "race-published", wip_head)
+        return output
+
+    monkeypatch.setattr(guard, "_run", publish_after_stage)
+    with pytest.raises(BridgeError) as raised:
+        await guard.commit_file_bytes(
+            git_project,
+            path="src/hello.txt",
+            content=b"session amend\n",
+            expected_head=wip_head,
+            description="amend session WIP",
+            require_exists=True,
+            commit_mode=CommitMode.AMEND_SESSION_WIP,
+            session_id="session-1",
+            expected_branch="main",
+        )
+
+    assert raised.value.code == "UNKNOWN_SIDE_EFFECT"
+    assert raised.value.status == "unknown"
+    assert _git(git_project, "rev-parse", "HEAD") == wip_head
+    assert _git(git_project, "show-ref", "--verify", "refs/tags/race-published")
+
+
+@pytest.mark.asyncio
 async def test_create_wip_commit_writes_and_reads_exact_session_footer(
     git_project: Path,
 ) -> None:

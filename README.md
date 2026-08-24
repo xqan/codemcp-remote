@@ -181,9 +181,13 @@ For file mutations, the first successful mutation in an eligible Bridge session
 creates a branch-visible WIP commit with a
 `Codemcp-Remote-Session: <session_id>` footer. Later mutations amend that WIP
 only when the Bridge can prove the same session, branch, clean HEAD, finalized
-successful checkpoint, exact footer, and absence of shared or published refs.
-Any missing or uncertain evidence safely creates a new commit. No-op content
-changes do not create or transfer WIP ownership.
+successful checkpoint, exact footer, and absence of locally observable shared
+refs. The Bridge rechecks branch, HEAD, and shared refs immediately before an
+amend and records an unknown result if finalization observes a different HEAD.
+Missing or uncertain ownership evidence during mode selection safely creates a
+new commit; a race discovered after a file side effect starts remains `unknown`
+for explicit reconciliation. No-op content changes do not create or transfer
+WIP ownership.
 
 Before mutation, the Bridge records a Git baseline and creates a Bridge-owned checkpoint. Checkpoint restore:
 
@@ -203,6 +207,11 @@ mutation checkpoint retains the exact pre-mutation commit for audit, diff, and
 restore. Checkpoint refs are Bridge-owned recovery metadata and are not a
 publication mechanism. Commits or checkpoints created before session WIP
 footers were introduced are never automatically adopted for amend.
+
+Local branch, tag, and remote-tracking refs are the shared refs the Bridge can
+inspect. The Bridge cannot prove that a commit was never pushed to a remote
+state not represented locally, so operators must not publish an active session's
+WIP before its mutations are complete.
 
 See [`docs/architecture/git-policy.md`](docs/architecture/git-policy.md) and [`docs/architecture/security-model.md`](docs/architecture/security-model.md).
 

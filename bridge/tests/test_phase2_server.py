@@ -607,6 +607,46 @@ async def test_file_edit_is_isolated_to_the_requested_target(git_project: Path) 
 
 
 @pytest.mark.asyncio
+async def test_file_edit_finalize_rejects_external_head_race(
+    git_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = create_app(_settings(git_project), adapter=FakeAdapter())[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    real_finalize = service.checkpoints.finalize
+
+    async def race_finalize(*args: Any, **kwargs: Any) -> Any:
+        (git_project / "src" / "external.txt").write_text("external amend\n", encoding="utf-8")
+        _git(git_project, "add", "src/external.txt")
+        _git(git_project, "commit", "--amend", "--no-edit")
+        return await real_finalize(*args, **kwargs)
+
+    monkeypatch.setattr(service.checkpoints, "finalize", race_finalize)
+    description = "reject external finalize race"
+    result = await service.file_edit(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "hello",
+        "changed",
+        description,
+        "finalize-race-1",
+        request_hash(_file_edit_input("src/hello.txt", "hello", "changed", description)),
+    )
+
+    assert result["status"] == "unknown"
+    assert result["error"]["code"] == "UNKNOWN_SIDE_EFFECT"
+    checkpoints = service.database.list_checkpoints(operation_id=result["operation_id"])
+    assert len(checkpoints) == 1
+    assert checkpoints[0].after_data is None
+    assert _git(git_project, "status", "--porcelain") == ""
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_file_create_is_idempotent_and_never_overwrites(git_project: Path) -> None:
     adapter = WriteAdapter()
     service = create_app(_settings(git_project), adapter=adapter)[1]

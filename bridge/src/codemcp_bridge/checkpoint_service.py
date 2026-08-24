@@ -84,8 +84,37 @@ class CheckpointService:
         self,
         project: ProjectSpec,
         checkpoint: CheckpointRecord,
+        *,
+        expected_after_head: str | None = None,
+        expected_after_branch: str | None = None,
     ) -> CheckpointRecord:
+        if expected_after_head is not None:
+            self.validate_expected_head(expected_after_head)
+        if expected_after_branch is not None and (
+            not isinstance(expected_after_branch, str)
+            or not expected_after_branch
+            or any(character in expected_after_branch for character in "\x00\r\n")
+        ):
+            raise BridgeError("CHECKPOINT_INVALID", "expected Git branch is not valid")
         after = await self._git.snapshot(project.root)
+        if expected_after_head is not None and (
+            after.head.lower() != expected_after_head.lower()
+            or (
+                expected_after_branch is not None
+                and after.branch != expected_after_branch
+            )
+        ):
+            raise BridgeError(
+                "CHECKPOINT_CONFLICT",
+                "Git state changed before checkpoint finalization",
+                {
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "expected_after_branch": expected_after_branch,
+                    "actual_after_branch": after.branch,
+                    "expected_after_head": expected_after_head,
+                    "actual_after_head": after.head,
+                },
+            )
         changed_files = await self._git.diff_names_from(project.root, checkpoint.ref_name)
         diff, truncated = await self._git.diff_from(project.root, checkpoint.ref_name)
         after_data = after.as_data()

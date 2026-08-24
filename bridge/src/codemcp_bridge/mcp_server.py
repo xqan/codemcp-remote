@@ -450,10 +450,19 @@ class BridgeService:
         return _MutationContext(checkpoint=checkpoint, commit_mode=commit_mode)
 
     async def _finish_mutation(
-        self, project: ProjectSpec, checkpoint: CheckpointRecord
+        self,
+        project: ProjectSpec,
+        checkpoint: CheckpointRecord,
+        *,
+        expected_after_head: str,
     ) -> dict[str, Any]:
         try:
-            finalized = await self.checkpoints.finalize(project, checkpoint)
+            finalized = await self.checkpoints.finalize(
+                project,
+                checkpoint,
+                expected_after_head=expected_after_head,
+                expected_after_branch=checkpoint.branch,
+            )
         except BridgeError as exc:
             raise BridgeError(
                 "UNKNOWN_SIDE_EFFECT",
@@ -777,8 +786,13 @@ class BridgeService:
                     require_exists=True,
                     commit_mode=mutation.commit_mode,
                     session_id=session_id,
+                    expected_branch=checkpoint.branch,
                 )
-            checkpoint_data = await self._finish_mutation(project, checkpoint)
+                checkpoint_data = await self._finish_mutation(
+                    project,
+                    checkpoint,
+                    expected_after_head=new_head,
+                )
             return _Outcome(
                 {
                     "text": f"Bridge file edit committed at {new_head}",
@@ -860,8 +874,13 @@ class BridgeService:
                     require_exists=False,
                     commit_mode=mutation.commit_mode,
                     session_id=session_id,
+                    expected_branch=checkpoint.branch,
                 )
-            checkpoint_data = await self._finish_mutation(project, checkpoint)
+                checkpoint_data = await self._finish_mutation(
+                    project,
+                    checkpoint,
+                    expected_after_head=new_head,
+                )
             return _Outcome(
                 {
                     "path": normalized,
@@ -959,8 +978,13 @@ class BridgeService:
                     require_exists=True,
                     commit_mode=mutation.commit_mode,
                     session_id=session_id,
+                    expected_branch=checkpoint.branch,
                 )
-            checkpoint_data = await self._finish_mutation(project, checkpoint)
+                checkpoint_data = await self._finish_mutation(
+                    project,
+                    checkpoint,
+                    expected_after_head=new_head,
+                )
             return _Outcome(
                 {
                     "path": normalized,
@@ -1073,9 +1097,13 @@ class BridgeService:
                     description=description,
                     commit_mode=mutation.commit_mode,
                     session_id=session_id,
+                    expected_branch=checkpoint.branch,
                 )
-
-            checkpoint_data = await self._finish_mutation(project, checkpoint)
+                checkpoint_data = await self._finish_mutation(
+                    project,
+                    checkpoint,
+                    expected_after_head=new_head,
+                )
             return _Outcome(
                 {
                     "source_path": normalized_source,
@@ -1147,9 +1175,13 @@ class BridgeService:
                     description=description,
                     commit_mode=mutation.commit_mode,
                     session_id=session_id,
+                    expected_branch=checkpoint.branch,
                 )
-
-            checkpoint_data = await self._finish_mutation(project, checkpoint)
+                checkpoint_data = await self._finish_mutation(
+                    project,
+                    checkpoint,
+                    expected_after_head=new_head,
+                )
             return _Outcome(
                 {
                     "path": normalized,
@@ -1248,6 +1280,7 @@ class BridgeService:
                         require_exists=False,
                         commit_mode=mutation.commit_mode,
                         session_id=session_id,
+                        expected_branch=checkpoint.branch,
                     )
                 except asyncio.CancelledError:
                     if not marker.exists():
@@ -1269,7 +1302,11 @@ class BridgeService:
                             ) from cleanup_exc
                     raise exc
 
-            checkpoint_data = await self._finish_mutation(project, checkpoint)
+                checkpoint_data = await self._finish_mutation(
+                    project,
+                    checkpoint,
+                    expected_after_head=new_head,
+                )
             return _Outcome(
                 {
                     "path": normalized,
@@ -1383,18 +1420,22 @@ class BridgeService:
                     },
                     status="unknown",
                 )
-        if result.is_error:
-            raise BridgeError(
-                "BACKEND_UNAVAILABLE",
-                "registered command failed",
-                {
-                    "command_id": command.command_id,
-                    "output": result.text,
-                    "truncated": result.truncated,
-                },
-                status="failed",
+            if result.is_error:
+                raise BridgeError(
+                    "BACKEND_UNAVAILABLE",
+                    "registered command failed",
+                    {
+                        "command_id": command.command_id,
+                        "output": result.text,
+                        "truncated": result.truncated,
+                    },
+                    status="failed",
+                )
+            checkpoint_data = await self._finish_mutation(
+                project,
+                checkpoint,
+                expected_after_head=checkpoint.head,
             )
-        checkpoint_data = await self._finish_mutation(project, checkpoint)
         return _Outcome(
             {
                 "command_id": command.command_id,
@@ -1674,7 +1715,12 @@ class BridgeService:
                         },
                         status="unknown",
                     )
-                safety = await self.checkpoints.finalize(project, safety)
+                safety = await self.checkpoints.finalize(
+                    project,
+                    safety,
+                    expected_after_head=checkpoint.head,
+                    expected_after_branch=checkpoint.branch,
+                )
             except BridgeError as exc:
                 if exc.code == "UNKNOWN_SIDE_EFFECT":
                     raise

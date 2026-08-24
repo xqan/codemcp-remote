@@ -18,8 +18,9 @@ deferred to Phase 5.
 - Automatic mutation checkpoints for `file_edit`, `format_run`, `test_run`,
   and rollback safety checkpoints.
 - Session WIP commits use an exact `Codemcp-Remote-Session` footer and amend
-  only after SQLite, checkpoint, branch, HEAD, clean-worktree, and shared-ref
-  evidence agrees.
+  only after SQLite, checkpoint, branch, HEAD, clean-worktree, and locally
+  observable shared-ref evidence agrees; GitGuard repeats the checks before the
+  amend and finalization uses an expected after-HEAD/branch CAS.
 - SQLite migration 3 with checkpoint metadata and audit linkage.
 
 ## Validation commands
@@ -58,3 +59,6 @@ rollback requires no database downgrade and does not delete either old or new
 checkpoint refs. Operators should not publish an active session's WIP before
 the session's mutations are complete; a local remote-tracking ref may otherwise
 force the next mutation to create a new commit.
+
+The shared-ref check is limited to local branch, tag, and remote-tracking refs.
+It cannot prove that an unseen remote ref does not already contain the WIP.

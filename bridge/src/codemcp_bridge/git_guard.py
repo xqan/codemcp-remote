@@ -379,6 +379,41 @@ class GitGuard:
             )
         )
 
+    async def _verify_amend_target(
+        self,
+        project_root: Path,
+        *,
+        expected_head: str,
+        expected_branch: str | None = None,
+    ) -> None:
+        """Recheck the amend target immediately before the Git side effect."""
+
+        current = await self.status(project_root)
+        if current.head.lower() != expected_head.lower() or (
+            expected_branch is not None and current.branch != expected_branch
+        ):
+            raise BridgeError(
+                "CONFLICT",
+                "Git branch or HEAD changed before the session WIP amend started",
+                {
+                    "expected_branch": expected_branch,
+                    "actual_branch": current.branch,
+                    "expected_head": expected_head,
+                    "actual_head": current.head,
+                },
+            )
+        shared_refs = await self.shared_refs_containing_head(
+            project_root,
+            head=current.head,
+            branch=current.branch,
+        )
+        if shared_refs:
+            raise BridgeError(
+                "CONFLICT",
+                "session WIP amend is blocked by locally observable shared refs",
+                {"shared_refs": list(shared_refs), "head": current.head},
+            )
+
     @staticmethod
     def _validate_commit_paths(
         paths: tuple[str, ...] | list[str],
@@ -435,6 +470,7 @@ class GitGuard:
         description: str | None = None,
         session_id: str | None = None,
         expected_head: str | None = None,
+        expected_branch: str | None = None,
     ) -> str:
         """Apply one explicit, fixed-argv commit mode to selected paths."""
 
@@ -454,6 +490,12 @@ class GitGuard:
                 {"expected_head": expected_head, "actual_head": before.head},
             )
         try:
+            if commit_mode == CommitMode.AMEND_SESSION_WIP:
+                await self._verify_amend_target(
+                    project_root,
+                    expected_head=expected_head or before.head,
+                    expected_branch=expected_branch,
+                )
             await self._run(
                 project_root,
                 *arguments,
@@ -488,6 +530,7 @@ class GitGuard:
         description: str,
         session_id: str,
         expected_head: str | None = None,
+        expected_branch: str | None = None,
     ) -> str:
         """Create a Bridge WIP commit with a stable session ownership footer."""
 
@@ -498,6 +541,7 @@ class GitGuard:
             description=description,
             session_id=session_id,
             expected_head=expected_head,
+            expected_branch=expected_branch,
         )
 
     async def commit_file_bytes(
@@ -511,6 +555,7 @@ class GitGuard:
         require_exists: bool | None = None,
         commit_mode: CommitMode | None = None,
         session_id: str | None = None,
+        expected_branch: str | None = None,
     ) -> str:
         """Atomically replace one file and commit only that path.
 
@@ -626,6 +671,12 @@ class GitGuard:
                 )
 
             await self._run(project_root, "add", "--", path)
+            if commit_mode == CommitMode.AMEND_SESSION_WIP:
+                await self._verify_amend_target(
+                    project_root,
+                    expected_head=expected_head,
+                    expected_branch=expected_branch,
+                )
             await self._run(project_root, *commit_arguments)
             final = await self.status(project_root)
             if final.dirty or final.head.lower() == expected_head.lower():
@@ -657,6 +708,7 @@ class GitGuard:
         description: str | None = None,
         commit_mode: CommitMode = CommitMode.CREATE,
         session_id: str | None = None,
+        expected_branch: str | None = None,
     ) -> str:
         """Move one tracked file using an explicit create or safe amend mode."""
 
@@ -705,6 +757,12 @@ class GitGuard:
                         "unexpected_changed_files": unexpected_paths,
                     },
                 )
+            if commit_mode == CommitMode.AMEND_SESSION_WIP:
+                await self._verify_amend_target(
+                    project_root,
+                    expected_head=expected_head,
+                    expected_branch=expected_branch,
+                )
             await self._run(project_root, *commit_arguments)
             final = await self.status(project_root)
             if final.dirty or final.head.lower() == expected_head.lower():
@@ -739,6 +797,7 @@ class GitGuard:
         description: str | None = None,
         commit_mode: CommitMode = CommitMode.CREATE,
         session_id: str | None = None,
+        expected_branch: str | None = None,
     ) -> str:
         """Delete one tracked file using an explicit create or safe amend mode."""
 
@@ -785,6 +844,12 @@ class GitGuard:
                         "actual_head": staged.head,
                         "unexpected_changed_files": unexpected_paths,
                     },
+                )
+            if commit_mode == CommitMode.AMEND_SESSION_WIP:
+                await self._verify_amend_target(
+                    project_root,
+                    expected_head=expected_head,
+                    expected_branch=expected_branch,
                 )
             await self._run(project_root, *commit_arguments)
             final = await self.status(project_root)

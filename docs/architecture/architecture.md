@@ -81,16 +81,25 @@ Each file mutation still creates and finalizes its own checkpoint. While the
 project mutation lock is held, the Bridge independently evaluates whether the
 current HEAD is eligible for a session WIP amend. Amend is allowed only when
 the SQLite checkpoint evidence, exact commit footer, current branch/HEAD, clean
-worktree, and Git ref inspection all agree. Otherwise the mutation creates a
-new WIP commit with the current session footer.
+worktree, and Git ref inspection all agree. The GitGuard repeats the branch,
+HEAD, and locally observable shared-ref checks immediately before an amend.
+Otherwise the mutation creates a new WIP commit with the current session
+footer.
 
 An amend changes the branch tip but does not rewrite or move the checkpoint ref
 that was created before the mutation. This is why a sequence of operations can
 have one branch-visible WIP commit and still retain one recoverable checkpoint
 per operation. A no-op mutation finalizes with unchanged HEAD and cannot
-establish ownership. After restart, the original session is blocked; a
-successor can reconcile an unknown operation, but its next mutation starts a
-new WIP ownership chain.
+establish ownership. Git side effect, expected after-HEAD/branch verification,
+and checkpoint finalization stay inside the same project lock; a mismatch is
+persisted as `UNKNOWN_SIDE_EFFECT` without after-state ownership evidence.
+After restart, the original session is blocked; a successor can reconcile an
+unknown operation, but its next mutation starts a new WIP ownership chain.
+
+The shared-ref guarantee is limited to local branch, tag, and remote-tracking
+refs observable by GitGuard. It cannot prove the absence of a remote publication
+that has not propagated to a local ref, so an active session WIP must not be
+manually pushed before the session is complete.
 
 ## Phase 5 Secure MCP Tunnel
 
