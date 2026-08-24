@@ -97,6 +97,59 @@ def git_project(tmp_path: Path) -> Path:
 
 
 @pytest.mark.asyncio
+async def test_commit_file_bytes_commits_only_the_requested_path(git_project: Path) -> None:
+    guard = GitGuard()
+    before_head = _git(git_project, "rev-parse", "HEAD")
+
+    after_head = await guard.commit_file_bytes(
+        git_project,
+        path="src/hello.txt",
+        content=b"changed\n",
+        expected_head=before_head,
+        description="replace one tracked file",
+        require_exists=True,
+    )
+
+    assert after_head != before_head
+    assert (git_project / "src" / "hello.txt").read_bytes() == b"changed\n"
+    assert _git(git_project, "status", "--porcelain") == ""
+    assert _git(git_project, "diff", "--name-only", before_head, after_head) == "src/hello.txt"
+
+
+@pytest.mark.asyncio
+async def test_commit_file_bytes_finalize_failure_is_unknown(
+    git_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard = GitGuard()
+    before_head = _git(git_project, "rev-parse", "HEAD")
+    real_run = guard._run
+
+    async def fail_commit(project_root: Path, *arguments: str) -> str:
+        if arguments and arguments[0] == "commit":
+            raise BridgeError("BACKEND_UNAVAILABLE", "simulated commit failure")
+        return await real_run(project_root, *arguments)
+
+    monkeypatch.setattr(guard, "_run", fail_commit)
+
+    with pytest.raises(BridgeError) as raised:
+        await guard.commit_file_bytes(
+            git_project,
+            path="src/hello.txt",
+            content=b"changed but uncommitted\n",
+            expected_head=before_head,
+            description="simulate finalize failure",
+            require_exists=True,
+        )
+
+    assert raised.value.code == "UNKNOWN_SIDE_EFFECT"
+    assert raised.value.status == "unknown"
+    assert _git(git_project, "rev-parse", "HEAD") == before_head
+    assert (git_project / "src" / "hello.txt").read_bytes() == b"changed but uncommitted\n"
+    assert _git(git_project, "status", "--porcelain")
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_records_git_baseline_and_diff(git_project: Path, tmp_path: Path) -> None:
     database = Database(tmp_path / "data" / "bridge.sqlite3")
     database.initialize()

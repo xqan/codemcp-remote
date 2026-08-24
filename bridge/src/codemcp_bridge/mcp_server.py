@@ -26,7 +26,6 @@ from .command_runner import RegisteredCommandRunner
 from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
 from .git_guard import GitGuard
-from .generated_codemcp import materialize_generated_codemcp_config
 from .mcp_transport import BridgeStreamableHTTPSessionManager
 from .operation_service import OperationService
 from .operation_service import request_hash as calculate_request_hash
@@ -68,6 +67,45 @@ Operation = Callable[[str], Awaitable[_Outcome]]
 
 def _is_codemcp_error(result: Any) -> bool:
     return bool(result.is_error) or result.text.lstrip().lower().startswith("error")
+
+
+def _decode_utf8_text(raw: bytes, *, path: str) -> str:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BridgeError(
+            "BINARY_FILE",
+            "file is not valid UTF-8 text",
+            {"path": path},
+        ) from exc
+
+
+def _match_existing_line_endings(raw: bytes, value: str) -> str:
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+    if b"\r\n" in raw and raw.count(b"\n") == raw.count(b"\r\n"):
+        return normalized.replace("\n", "\r\n")
+    return normalized
+
+
+def _replace_exact_text(raw: bytes, *, path: str, old_string: str, new_string: str) -> bytes:
+    text = _decode_utf8_text(raw, path=path)
+    old_value = _match_existing_line_endings(raw, old_string)
+    new_value = _match_existing_line_endings(raw, new_string)
+    matches = text.count(old_value)
+    if matches == 0:
+        raise BridgeError("CONFLICT", "old_string was not found in the file", {"path": path})
+    if matches > 1:
+        raise BridgeError(
+            "CONFLICT",
+            "old_string must match exactly one occurrence",
+            {"path": path, "matches": matches},
+        )
+    return text.replace(old_value, new_value, 1).encode("utf-8")
+
+
+def _encode_existing_text(raw: bytes, *, path: str, content: str) -> bytes:
+    _decode_utf8_text(raw, path=path)
+    return _match_existing_line_endings(raw, content).encode("utf-8")
 
 
 _GREP_HEADER_PATTERN = re.compile(r"^Found \d+ files?$")
@@ -689,37 +727,49 @@ class BridgeService:
                 raise BridgeError("FILE_TOO_LARGE", "old_string exceeds the configured size limit")
             if len(new_string.encode("utf-8")) > self.settings.policy.max_file_bytes:
                 raise BridgeError("FILE_TOO_LARGE", "new_string exceeds the configured size limit")
-            project, target, _ = self.registry.resolve_path(project_id, path)
+            project, target, normalized = self.registry.resolve_path(project_id, path)
             self.policy.require_regular_file(target)
             self.policy.validate_file_size(target)
+            self.policy.require_text_file(target)
             async with self._mutation_lock(project_id):
                 checkpoint = await self._begin_mutation(
                     project,
                     session_id=session_id,
                     operation_id=operation_id,
                 )
-                with materialize_generated_codemcp_config(project):
-                    result = await self.adapter.call(
-                        project,
-                        "EditFile",
-                        {
-                            "path": target,
-                            "old_string": old_string,
-                            "new_string": new_string,
-                            "description": description,
-                            "chat_id": session_id,
-                        },
-                        mutation=True,
+                self.policy.require_regular_file(target)
+                self.policy.validate_file_size(target)
+                self.policy.require_text_file(target)
+                try:
+                    raw = target.read_bytes()
+                except OSError as exc:
+                    raise BridgeError("FILE_NOT_FOUND", "file cannot be read") from exc
+                updated = _replace_exact_text(
+                    raw,
+                    path=normalized,
+                    old_string=old_string,
+                    new_string=new_string,
+                )
+                if len(updated) > self.settings.policy.max_file_bytes:
+                    raise BridgeError(
+                        "FILE_TOO_LARGE",
+                        "edited file exceeds the configured size limit",
                     )
-            if _is_codemcp_error(result):
-                raise BridgeError("CONFLICT", "codemcp rejected EditFile", status="failed")
-            if result.text.startswith("String to replace not found"):
-                raise BridgeError("CONFLICT", "old_string was not found in the file")
+                new_head = await self.git.commit_file_bytes(
+                    project.root,
+                    path=normalized,
+                    content=updated,
+                    expected_head=checkpoint.head,
+                    description=description,
+                    require_exists=True,
+                )
             checkpoint_data = await self._finish_mutation(project, checkpoint)
             return _Outcome(
-                {"text": result.text, "checkpoint": checkpoint_data},
+                {
+                    "text": f"Bridge file edit committed at {new_head}",
+                    "checkpoint": checkpoint_data,
+                },
                 list(checkpoint_data["after"]["changed_files"]),
-                result.truncated,
             )
 
         return await self._execute(
@@ -785,29 +835,22 @@ class BridgeService:
                         "file appeared after the mutation baseline was recorded",
                         {"path": normalized},
                     )
-                with materialize_generated_codemcp_config(project):
-                    result = await self.adapter.call(
-                        project,
-                        "WriteFile",
-                        {
-                            "path": target,
-                            "content": content,
-                            "description": description,
-                            "chat_id": session_id,
-                        },
-                        mutation=True,
-                    )
-            if _is_codemcp_error(result):
-                raise BridgeError("CONFLICT", "codemcp rejected WriteFile", status="failed")
+                new_head = await self.git.commit_file_bytes(
+                    project.root,
+                    path=normalized,
+                    content=encoded,
+                    expected_head=checkpoint.head,
+                    description=description,
+                    require_exists=False,
+                )
             checkpoint_data = await self._finish_mutation(project, checkpoint)
             return _Outcome(
                 {
                     "path": normalized,
-                    "text": result.text,
+                    "text": f"Bridge file create committed at {new_head}",
                     "checkpoint": checkpoint_data,
                 },
                 list(checkpoint_data["after"]["changed_files"]),
-                result.truncated,
             )
 
         return await self._execute(
@@ -868,9 +911,10 @@ class BridgeService:
                 self.policy.validate_file_size(target)
                 self.policy.require_text_file(target)
                 try:
-                    actual_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+                    raw = target.read_bytes()
                 except OSError as exc:
                     raise BridgeError("FILE_NOT_FOUND", "file cannot be read") from exc
+                actual_sha256 = hashlib.sha256(raw).hexdigest()
                 if actual_sha256 != normalized_expected:
                     raise BridgeError(
                         "CONFLICT",
@@ -881,29 +925,28 @@ class BridgeService:
                             "actual_sha256": actual_sha256,
                         },
                     )
-                with materialize_generated_codemcp_config(project):
-                    result = await self.adapter.call(
-                        project,
-                        "WriteFile",
-                        {
-                            "path": target,
-                            "content": content,
-                            "description": description,
-                            "chat_id": session_id,
-                        },
-                        mutation=True,
+                prepared = _encode_existing_text(raw, path=normalized, content=content)
+                if len(prepared) > self.settings.policy.max_file_bytes:
+                    raise BridgeError(
+                        "FILE_TOO_LARGE",
+                        "replacement file exceeds the configured size limit",
                     )
-            if _is_codemcp_error(result):
-                raise BridgeError("CONFLICT", "codemcp rejected WriteFile", status="failed")
+                new_head = await self.git.commit_file_bytes(
+                    project.root,
+                    path=normalized,
+                    content=prepared,
+                    expected_head=checkpoint.head,
+                    description=description,
+                    require_exists=True,
+                )
             checkpoint_data = await self._finish_mutation(project, checkpoint)
             return _Outcome(
                 {
                     "path": normalized,
-                    "text": result.text,
+                    "text": f"Bridge file write committed at {new_head}",
                     "checkpoint": checkpoint_data,
                 },
                 list(checkpoint_data["after"]["changed_files"]),
-                result.truncated,
             )
 
         return await self._execute(

@@ -8,6 +8,7 @@ import os
 import re
 import signal
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -256,6 +257,132 @@ class GitGuard:
     async def reset_to_checkpoint(self, project_root: Path, ref_name: str) -> None:
         self._require_checkpoint_ref(ref_name)
         await self._run(project_root, "reset", "--hard", ref_name)
+
+    async def commit_file_bytes(
+        self,
+        project_root: Path,
+        *,
+        path: str,
+        content: bytes,
+        expected_head: str,
+        description: str,
+        require_exists: bool | None = None,
+    ) -> str:
+        """Atomically replace one file and commit only that path into a new Git baseline."""
+
+        self._require_head(expected_head)
+        before = await self.status(project_root)
+        if before.head.lower() != expected_head.lower():
+            raise BridgeError(
+                "CONFLICT",
+                "Git HEAD changed before the file mutation started",
+                {"expected_head": expected_head, "actual_head": before.head},
+            )
+        if before.dirty:
+            raise BridgeError(
+                "WORKSPACE_DIRTY",
+                "file mutation requires a clean workspace",
+                {"changed_files": list(before.changed_files)},
+            )
+
+        target = project_root / path
+        if require_exists is True and not target.is_file():
+            raise BridgeError("FILE_NOT_FOUND", "a regular file is required", {"path": path})
+        if require_exists is False and target.exists():
+            raise BridgeError("CONFLICT", "file already exists", {"path": path})
+        if target.exists() and not target.is_file():
+            raise BridgeError("CONFLICT", "target path is not a regular file", {"path": path})
+
+        if target.exists():
+            try:
+                if target.read_bytes() == content:
+                    return before.head
+            except OSError as exc:
+                raise BridgeError(
+                    "BACKEND_UNAVAILABLE",
+                    "target file could not be read before mutation",
+                    {"path": path},
+                    retryable=True,
+                    status="failed",
+                ) from exc
+
+        temp_path: Path | None = None
+        try:
+            descriptor, temp_name = tempfile.mkstemp(
+                prefix=".codemcp-remote-write-",
+                dir=target.parent,
+            )
+            temp_path = Path(temp_name)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, target)
+            temp_path = None
+        except OSError as exc:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise BridgeError(
+                "UNKNOWN_SIDE_EFFECT",
+                "file write outcome is unknown and requires reconciliation",
+                {"path": path},
+                status="unknown",
+            ) from exc
+
+        try:
+            after_write = await self.status(project_root)
+            unexpected_paths = sorted(set(after_write.changed_files) - {path})
+            if after_write.head.lower() != expected_head.lower() or unexpected_paths:
+                raise BridgeError(
+                    "CONFLICT",
+                    "Git state changed concurrently while writing the file",
+                    {
+                        "expected_head": expected_head,
+                        "actual_head": after_write.head,
+                        "unexpected_changed_files": unexpected_paths,
+                    },
+                )
+            if not after_write.dirty:
+                return after_write.head
+            if path not in after_write.changed_files:
+                raise BridgeError(
+                    "CONFLICT",
+                    "target file mutation was not isolated to the expected path",
+                    {"path": path, "changed_files": list(after_write.changed_files)},
+                )
+
+            await self._run(project_root, "add", "--", path)
+            await self._run(
+                project_root,
+                "commit",
+                "-m",
+                f"wip: {description}",
+                "--only",
+                "--",
+                path,
+            )
+            final = await self.status(project_root)
+            if final.dirty or final.head.lower() == expected_head.lower():
+                raise BridgeError(
+                    "CONFLICT",
+                    "file mutation did not finalize to a new clean Git baseline",
+                    {
+                        "expected_previous_head": expected_head,
+                        "actual_head": final.head,
+                        "changed_files": list(final.changed_files),
+                    },
+                )
+            return final.head
+        except BridgeError as exc:
+            raise BridgeError(
+                "UNKNOWN_SIDE_EFFECT",
+                "file mutation changed the worktree but could not be safely finalized",
+                {"path": path, "cause": exc.code},
+                status="unknown",
+            ) from exc
 
     async def move_tracked_file(
         self,

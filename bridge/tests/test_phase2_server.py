@@ -570,7 +570,7 @@ async def test_code_search_excludes_sensitive_paths_before_and_after_grep(
 
 
 @pytest.mark.asyncio
-async def test_file_edit_reports_all_checkpoint_changed_files(git_project: Path) -> None:
+async def test_file_edit_is_isolated_to_the_requested_target(git_project: Path) -> None:
     notes = git_project / "src" / "notes.txt"
     notes.write_text("baseline notes\n", encoding="utf-8")
     _git(git_project, "add", "src/notes.txt")
@@ -600,10 +600,9 @@ async def test_file_edit_reports_all_checkpoint_changed_files(git_project: Path)
     )
 
     assert result["status"] == "succeeded"
-    assert set(result["changed_files"]) == {"src/hello.txt", "src/notes.txt"}
-    assert set(result["data"]["checkpoint"]["after"]["changed_files"]) == set(
-        result["changed_files"]
-    )
+    assert result["changed_files"] == ["src/hello.txt"]
+    assert result["data"]["checkpoint"]["after"]["changed_files"] == ["src/hello.txt"]
+    assert notes.read_text(encoding="utf-8") == "baseline notes\n"
     await service.close()
 
 
@@ -676,7 +675,7 @@ async def test_file_create_is_idempotent_and_never_overwrites(git_project: Path)
     assert first["changed_files"] == ["src/created.txt"]
     assert first["data"]["checkpoint"]["after"]["changed_files"] == ["src/created.txt"]
     assert (git_project / "src" / "created.txt").read_text(encoding="utf-8") == content
-    assert [name for name, _ in adapter.calls].count("WriteFile") == 1
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 0
     await service.close()
 
 
@@ -760,7 +759,7 @@ async def test_file_write_requires_matching_sha256(git_project: Path) -> None:
     assert success["changed_files"] == ["src/hello.txt"]
     assert success["data"]["checkpoint"]["after"]["changed_files"] == ["src/hello.txt"]
     assert (git_project / "src" / "hello.txt").read_text(encoding="utf-8") == replacement
-    assert [name for name, _ in adapter.calls].count("WriteFile") == 1
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 0
     await service.close()
 
 
@@ -1123,7 +1122,7 @@ async def test_phase3_idempotency_approval_and_operation_status(git_project: Pat
                     first_edit = _payload(await client.call_tool("file_edit", edit_arguments))
                     second_edit = _payload(await client.call_tool("file_edit", edit_arguments))
                     assert first_edit == second_edit
-                    assert [name for name, _ in adapter.calls].count("EditFile") == 1
+                    assert [name for name, _ in adapter.calls].count("EditFile") == 0
 
                     approval = _payload(
                         await client.call_tool(
@@ -1289,9 +1288,17 @@ async def test_phase3_reconcile_unknown_mutation_releases_project_lock(
 
 
 @pytest.mark.asyncio
-async def test_cancelled_mutation_is_persisted_as_unknown(git_project: Path) -> None:
-    adapter = CancellingEditAdapter()
-    service = create_app(_settings(git_project), adapter=adapter)[1]
+async def test_cancelled_mutation_is_persisted_as_unknown(
+    git_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = create_app(_settings(git_project), adapter=FakeAdapter())[1]
+
+    async def cancelled_file_commit(*args: Any, **kwargs: Any) -> str:
+        del args, kwargs
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(service.git, "commit_file_bytes", cancelled_file_commit)
     await service.start()
     session = service.sessions.create("demo")
 

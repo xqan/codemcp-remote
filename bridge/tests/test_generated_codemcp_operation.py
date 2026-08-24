@@ -124,7 +124,7 @@ def _settings(
 
 
 @pytest.mark.asyncio
-async def test_root_only_file_edit_materializes_generated_config_only_for_adapter_call(
+async def test_root_only_file_edit_bypasses_codemcp_adapter_and_generated_config(
     tmp_path: Path,
 ) -> None:
     project = tmp_path / "project"
@@ -165,7 +165,7 @@ async def test_root_only_file_edit_materializes_generated_config_only_for_adapte
     )
 
     assert result["status"] == "succeeded"
-    assert adapter.saw_config is True
+    assert adapter.saw_config is False
     assert project.joinpath("codemcp.toml").exists() is False
     assert target.read_text(encoding="utf-8") == "after\n"
     assert _git(project, "status", "--porcelain") == ""
