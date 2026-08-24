@@ -75,6 +75,23 @@ issuing the fixed `git reset --hard <Bridge-owned-ref>`. Any external change
 causes a fail-closed `CHECKPOINT_CONFLICT`; an uncertain Git result becomes
 `UNKNOWN_SIDE_EFFECT` and requires reconciliation.
 
+## Session WIP commit lifecycle
+
+Each file mutation still creates and finalizes its own checkpoint. While the
+project mutation lock is held, the Bridge independently evaluates whether the
+current HEAD is eligible for a session WIP amend. Amend is allowed only when
+the SQLite checkpoint evidence, exact commit footer, current branch/HEAD, clean
+worktree, and Git ref inspection all agree. Otherwise the mutation creates a
+new WIP commit with the current session footer.
+
+An amend changes the branch tip but does not rewrite or move the checkpoint ref
+that was created before the mutation. This is why a sequence of operations can
+have one branch-visible WIP commit and still retain one recoverable checkpoint
+per operation. A no-op mutation finalizes with unchanged HEAD and cannot
+establish ownership. After restart, the original session is blocked; a
+successor can reconcile an unknown operation, but its next mutation starts a
+new WIP ownership chain.
+
 ## Phase 5 Secure MCP Tunnel
 
 The repository wrapper starts `tunnel-client` with a generated HTTP profile:

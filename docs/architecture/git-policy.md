@@ -20,6 +20,28 @@ ChatGPT.
 - The SQLite row and audit events are linked to the operation. Source file
   contents are not copied into the database.
 
+## Session WIP commits and checkpoint refs
+
+The Bridge maintains two deliberately separate Git layers:
+
+| Layer | Purpose | Lifetime and ownership |
+| --- | --- | --- |
+| Branch WIP commit | A clean, visible Git tip containing the latest session mutation | Created for the first eligible mutation; amended only with independently verified same-session evidence |
+| Checkpoint ref | The exact pre-mutation commit used for diff, audit, and restore | Created and retained for every operation under `refs/codemcp-remote/checkpoints/<checkpoint_id>` |
+
+The WIP commit footer is `Codemcp-Remote-Session: <session_id>`. A successful
+amend requires the matching finalized SQLite mutation checkpoint, exact footer,
+same branch and HEAD, clean worktree, and no other local branch, remote-tracking
+ref, or tag containing the current tip. Missing, malformed, or uncertain
+evidence falls back to a new commit. Existing commits without the footer are
+not automatically adopted.
+
+This fallback is intentional: an amend can make the previous tip non-ancestral,
+but the checkpoint ref created before that amend remains fixed and can still be
+used for its operation's diff or restore. Checkpoint retention is unchanged;
+there is no automatic ref cleanup or database migration in the session WIP
+rollout.
+
 ## Manual checkpoint and diff
 
 `checkpoint_create` is an approved mutation and only creates a lightweight

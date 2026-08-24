@@ -177,6 +177,14 @@ Mutation calls require a caller request ID and a canonical SHA-256 request hash.
 
 Commands or Git operations that require approval return a short-lived one-time approval flow. Plaintext approval tokens are not persisted in SQLite.
 
+For file mutations, the first successful mutation in an eligible Bridge session
+creates a branch-visible WIP commit with a
+`Codemcp-Remote-Session: <session_id>` footer. Later mutations amend that WIP
+only when the Bridge can prove the same session, branch, clean HEAD, finalized
+successful checkpoint, exact footer, and absence of shared or published refs.
+Any missing or uncertain evidence safely creates a new commit. No-op content
+changes do not create or transfer WIP ownership.
+
 Before mutation, the Bridge records a Git baseline and creates a Bridge-owned checkpoint. Checkpoint restore:
 
 - is scoped to the registered project/session;
@@ -188,6 +196,13 @@ Before mutation, the Bridge records a Git baseline and creates a Bridge-owned ch
 - refuses to overwrite externally changed Git state.
 
 If the Bridge cannot prove whether a side effect occurred, the operation remains `unknown`; do not blindly retry it. Inspect `operation_status` and use the explicit reconciliation flow.
+
+The branch WIP commit and the Bridge checkpoint ref serve different purposes:
+the commit is the visible Git baseline for the active session, while each
+mutation checkpoint retains the exact pre-mutation commit for audit, diff, and
+restore. Checkpoint refs are Bridge-owned recovery metadata and are not a
+publication mechanism. Commits or checkpoints created before session WIP
+footers were introduced are never automatically adopted for amend.
 
 See [`docs/architecture/git-policy.md`](docs/architecture/git-policy.md) and [`docs/architecture/security-model.md`](docs/architecture/security-model.md).
 

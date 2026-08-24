@@ -544,4 +544,34 @@ async def test_checkpoint_mcp_approval_diff_and_cas_restore(
     assert restored["status"] == "succeeded"
     assert _git(git_project, "rev-parse", "HEAD") == baseline_head
     assert (git_project / "src" / "hello.txt").read_text(encoding="utf-8") == "hello\n"
+
+    restored_edit_description = "mutate after checkpoint restore"
+    restored_edit = await bridge.file_edit(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "hello",
+        "after restore",
+        restored_edit_description,
+        "restore-follow-up-edit-1",
+        request_hash(
+            {
+                "path": "src/hello.txt",
+                "description": restored_edit_description,
+                "old_string_digest": request_hash("hello"),
+                "new_string_digest": request_hash("after restore"),
+            }
+        ),
+    )
+    assert restored_edit["status"] == "succeeded"
+    restored_edit_checkpoint = restored_edit["data"]["checkpoint"]
+    restored_edit_head = restored_edit_checkpoint["after"]["head"]
+    assert restored_edit_checkpoint["before"]["head"] == baseline_head
+    assert restored_edit_head != baseline_head
+    assert _git(git_project, "rev-list", "--count", "main") == "2"
+    assert await bridge.git.read_session_footer(
+        git_project,
+        head=restored_edit_head,
+    ) == session.session_id
     await bridge.close()

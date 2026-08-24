@@ -1621,23 +1621,36 @@ async def test_restart_successor_session_can_reconcile_applied_unknown_mutation(
     assert finalized.after_data is not None
     assert finalized.after_data["changed_files"] == ["src/hello.txt"]
 
-    probe_input = {"operation_id": "post-reconcile-probe", "project_id": "demo"}
-    probe = service.operations.start(
-        operation_id="post-reconcile-probe",
-        project_id="demo",
-        session_id=successor.session_id,
-        kind="file_edit",
-        mutation=True,
-        client_request_id="post-reconcile-probe-1",
-        supplied_request_hash=request_hash(probe_input),
-        input_data=probe_input,
+    successor_head_before = _git(git_project, "rev-parse", "HEAD")
+    successor_count_before = int(_git(git_project, "rev-list", "--count", "main"))
+    successor_description = "successor starts a new WIP"
+    successor_edit = await service.file_edit(
+        None,
+        "demo",
+        successor.session_id,
+        "src/hello.txt",
+        "changed",
+        "successor change",
+        successor_description,
+        "successor-edit-after-reconcile-1",
+        request_hash(
+            _file_edit_input(
+                "src/hello.txt",
+                "changed",
+                "successor change",
+                successor_description,
+            )
+        ),
     )
-    assert probe.record.state == "validated"
-    service.operations.finish(
-        probe.record.operation_id,
-        state="failed",
-        payload={"status": "failed", "error": None},
-    )
+    assert successor_edit["status"] == "succeeded"
+    successor_head = successor_edit["data"]["checkpoint"]["after"]["head"]
+    assert successor_head != successor_head_before
+    assert int(_git(git_project, "rev-list", "--count", "main")) == successor_count_before + 1
+    assert _git(git_project, "rev-parse", f"{successor_head}^") == successor_head_before
+    assert await service.git.read_session_footer(
+        git_project,
+        head=successor_head,
+    ) == successor.session_id
     await service.close()
 
 

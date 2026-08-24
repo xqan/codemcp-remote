@@ -1136,6 +1136,14 @@ payload 和幂等行为未变化，不通过远程路径修改真实用户仓库
 - `git diff --check` 和 status 已检查；仅提交本 Phase 文件。
 - 完成后停止并报告 commit、文件、验证结果及残余风险。
 
+#### Phase 3 compatibility boundary
+
+本 Phase 只增加恢复回归、文档和验收覆盖，不改变 MCP 参数、SQLite schema、
+checkpoint ref retention 或回退路径。既有 commit/checkpoint 因缺少
+`Codemcp-Remote-Session` footer 不会被自动收养；它们会让后续 mutation
+安全地 fallback 到 CREATE。代码回退无需数据库降级，也不自动删除新旧
+checkpoint ref。
+
 ## Final Validation
 
 最终验收必须同时满足：

@@ -3,8 +3,9 @@
 ## Scope
 
 Phase 4 adds Bridge-owned Git checkpoints, bounded checkpoint diffs, baseline
-metadata for mutation operations, and compare-and-swap rollback. Secure MCP
-Tunnel integration remains deferred to Phase 5.
+metadata for mutation operations, compare-and-swap rollback, and the follow-up
+session WIP commit safety behavior. Secure MCP Tunnel integration remains
+deferred to Phase 5.
 
 ## Implemented surface
 
@@ -16,6 +17,9 @@ Tunnel integration remains deferred to Phase 5.
   against a registered checkpoint.
 - Automatic mutation checkpoints for `file_edit`, `format_run`, `test_run`,
   and rollback safety checkpoints.
+- Session WIP commits use an exact `Codemcp-Remote-Session` footer and amend
+  only after SQLite, checkpoint, branch, HEAD, clean-worktree, and shared-ref
+  evidence agrees.
 - SQLite migration 3 with checkpoint metadata and audit linkage.
 
 ## Validation commands
@@ -27,10 +31,12 @@ uv run --project bridge ruff check bridge/src bridge/tests
 uv run --project bridge pytest -q --basetemp=.local/pytest-phase4
 ~~~
 
-The Phase 4 tests cover a Chinese/space-containing project path, clean and
-dirty worktrees, before/after HEAD and tree metadata, sensitive diff
+The Phase 4 and follow-up tests cover a Chinese/space-containing project path,
+clean and dirty worktrees, before/after HEAD and tree metadata, sensitive diff
 rejection, manual checkpoint approval, checkpoint diff, external HEAD races,
-CAS rejection, safety checkpoint creation, and successful restore.
+CAS rejection, safety checkpoint creation, successful restore, session WIP
+amend, restart/reconcile, successor-session isolation, idempotent replay, and
+unknown/cancelled mutation handling.
 
 ## Known limitations
 
@@ -39,5 +45,16 @@ CAS rejection, safety checkpoint creation, and successful restore.
 - Diff hashes are computed over the bounded diff returned by GitGuard. The
   full diff is never persisted.
 - A checkpoint ref is retained until a future retention policy is designed;
-  Phase 4 does not delete user branches or clean up checkpoint refs.
+  Phase 4 and the session WIP follow-up do not delete user branches or clean up
+  checkpoint refs.
 - Secure MCP Tunnel is not connected.
+
+## Session WIP rollout constraints
+
+The rollout is backward-compatible with existing SQLite data and MCP request
+parameters. Historical commits or checkpoints without the new footer are
+treated as lacking ownership evidence and cause a safe CREATE fallback. A code
+rollback requires no database downgrade and does not delete either old or new
+checkpoint refs. Operators should not publish an active session's WIP before
+the session's mutations are complete; a local remote-tracking ref may otherwise
+force the next mutation to create a new commit.
