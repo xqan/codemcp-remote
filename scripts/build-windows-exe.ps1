@@ -52,6 +52,22 @@ $pyInstallerArgs = @(
     $entrypoint
 )
 
+$phase3Files = @(
+    (Join-Path $bridgeSrc "codemcp_bridge\lifecycle.py"),
+    (Join-Path $bridgeSrc "codemcp_bridge\main.py"),
+    (Join-Path $bridgeProject "tests\test_phase3_lifecycle.py")
+)
+& $uv.Source run --project $bridgeProject ruff format --check @phase3Files
+if ($LASTEXITCODE -ne 0) {
+    throw "Phase 3 scoped Ruff format check failed with exit code $LASTEXITCODE"
+}
+
+$phase3Tests = Join-Path $bridgeProject "tests\test_phase3_lifecycle.py"
+& $uv.Source run --project $bridgeProject pytest $phase3Tests -q
+if ($LASTEXITCODE -ne 0) {
+    throw "Phase 3 lifecycle tests failed with exit code $LASTEXITCODE"
+}
+
 & $uv.Source @pyInstallerArgs
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE"
@@ -87,6 +103,13 @@ if (-not $SkipSmoke) {
     & $uv.Source run --project $bridgeProject python $workerSmoke $exePath $repositoryRoot
     if ($LASTEXITCODE -ne 0) {
         throw "frozen worker mutation smoke failed with exit code $LASTEXITCODE"
+    }
+
+    $lifecycleSmokeRoot = Join-Path $WorkDir "lifecycle-smoke"
+    Remove-Item -LiteralPath $lifecycleSmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    & $exePath status --app-root $lifecycleSmokeRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "frozen lifecycle status smoke failed with exit code $LASTEXITCODE"
     }
 }
 
