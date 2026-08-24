@@ -114,7 +114,9 @@ class _CodemcpWorker:
             cwd = None
         else:
             command = sys.executable
-            args = ["_worker"] if effective_frozen else ["-m", "codemcp_bridge.native_codemcp_worker"]
+            args = (
+                ["_worker"] if effective_frozen else ["-m", "codemcp_bridge.native_codemcp_worker"]
+            )
             environment["HOME"] = str(worker_home)
             environment["USERPROFILE"] = str(worker_home)
             environment["GIT_CONFIG_VALUE_0"] = str(git_excludes)

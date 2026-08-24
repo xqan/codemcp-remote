@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-import runpy
 from typing import Any
+
+from codemcp import run as run_codemcp
 
 _ORIGINAL_CREATE_SUBPROCESS_EXEC = asyncio.create_subprocess_exec
 
@@ -48,7 +49,7 @@ def install_windows_compatibility(*, os_name: str | None = None) -> bool:
 
 def main() -> None:
     install_windows_compatibility()
-    runpy.run_module("codemcp.__main__", run_name="__main__")
+    run_codemcp()
 
 
 if __name__ == "__main__":

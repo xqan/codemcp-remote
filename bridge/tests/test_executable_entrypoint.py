@@ -9,7 +9,9 @@ import codemcp_bridge.main as main_module
 def test_runtime_root_uses_executable_directory_when_frozen(tmp_path: Path) -> None:
     executable = tmp_path / "dist" / "codemcp-remote.exe"
 
-    assert main_module.runtime_root(frozen=True, executable=executable) == executable.parent.resolve()
+    assert (
+        main_module.runtime_root(frozen=True, executable=executable) == executable.parent.resolve()
+    )
 
 
 def test_internal_worker_dispatch_skips_bridge_configuration(

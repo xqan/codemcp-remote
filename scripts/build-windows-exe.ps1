@@ -69,12 +69,24 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot "config\bridge.example.toml") 
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "config\projects.example.toml") -Destination $configDir -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "LICENSE") -Destination $appDir -Force
 
+$exeSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant()
+$sha256File = Join-Path $appDir "SHA256SUMS.txt"
+("{0}  codemcp-remote.exe" -f $exeSha256) | Set-Content -LiteralPath $sha256File -Encoding ascii
+
 if (-not $SkipSmoke) {
-    & $exePath check `
-        --bridge-config (Join-Path $repositoryRoot "config\bridge.example.toml") `
-        --projects-config (Join-Path $repositoryRoot "config\projects.toml")
+    & $exePath --version
+    if ($LASTEXITCODE -ne 0) {
+        throw "frozen Bridge version check failed with exit code $LASTEXITCODE"
+    }
+    & $exePath check
     if ($LASTEXITCODE -ne 0) {
         throw "frozen Bridge check failed with exit code $LASTEXITCODE"
+    }
+
+    $workerSmoke = Join-Path $repositoryRoot "tests\integration\executable_smoke.py"
+    & $uv.Source run --project $bridgeProject python $workerSmoke $exePath $repositoryRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "frozen worker mutation smoke failed with exit code $LASTEXITCODE"
     }
 }
 
@@ -83,5 +95,7 @@ if (-not $SkipSmoke) {
     pyinstaller_version = $pyInstallerVersion
     executable = $exePath
     distribution_dir = $appDir
+    sha256 = $exeSha256
+    sha256_file = $sha256File
     smoke = if ($SkipSmoke) { "skipped" } else { "passed" }
 } | ConvertTo-Json -Depth 4

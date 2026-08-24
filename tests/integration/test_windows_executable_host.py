@@ -39,8 +39,6 @@ def test_windows_onedir_executable_build_and_worker_smoke() -> None:
         "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
         f"Set-Location -LiteralPath '{windows_root}'; "
         "& .\\scripts\\build-windows-exe.ps1 | Out-Host; "
-        "$exe = Join-Path (Get-Location) '.local\\dist\\codemcp-remote\\codemcp-remote.exe'; "
-        "uv run --project bridge python .\\tests\\integration\\executable_smoke.py $exe (Get-Location).Path; "
         "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
     )
     completed = subprocess.run(

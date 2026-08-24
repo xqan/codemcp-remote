@@ -9,6 +9,7 @@ import logging
 import sys
 from pathlib import Path
 
+from . import __version__
 from .logging_utils import configure_logging
 from .mcp_server import create_server
 from .native_codemcp_worker import main as native_worker_main
@@ -38,6 +39,7 @@ if not DEFAULT_PROJECTS_CONFIG.is_file():
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the loopback codemcp Bridge")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "command",
         choices=("serve", "check", "_worker"),
