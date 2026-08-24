@@ -30,8 +30,16 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
     _RESPONDER_STARTED_SCOPE_KEY = "codemcp_bridge.responder_started"
     _RESPONDER_FINISHED_SCOPE_KEY = "codemcp_bridge.responder_finished"
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(
+        self,
+        *args: object,
+        startup_callback: Callable[[], Awaitable[None]] | None = None,
+        shutdown_callback: Callable[[], Awaitable[None]] | None = None,
+        **kwargs: object,
+    ) -> None:
         super().__init__(*args, **kwargs)
+        self._startup_callback = startup_callback
+        self._shutdown_callback = shutdown_callback
         original_handle_message = self.app._handle_message  # noqa: SLF001
 
         async def tracked_handle_message(
