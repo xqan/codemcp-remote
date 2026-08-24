@@ -211,6 +211,7 @@ async def test_worker_contexts_are_owned_and_closed_by_same_task(
     stdio_exit_tasks = [task for name, task in events if name == "stdio-exit"]
     assert session_exit_tasks == [owner_task]
     assert stdio_exit_tasks == [owner_task]
+    assert worker.is_active() is False
 
 
 @pytest.mark.asyncio
