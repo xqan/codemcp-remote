@@ -194,6 +194,7 @@ async def test_worker_contexts_are_owned_and_closed_by_same_task(
 
     assert first.text == "ok"
     assert second.text == "ok"
+    assert worker.is_active()
     stdio_enter_tasks = [task for name, task in events if name == "stdio-enter"]
     session_enter_tasks = [task for name, task in events if name == "session-enter"]
     assert len(stdio_enter_tasks) == 1
