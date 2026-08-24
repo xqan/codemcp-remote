@@ -64,7 +64,7 @@ def generated_config_sha256(project: ProjectSpec) -> str:
     return hashlib.sha256(render_generated_codemcp_config(project).encode("utf-8")).hexdigest()
 
 
-def _verify_existing_command(path: Path, command: CommandSpec) -> None:
+def _verify_existing_config(path: Path, command: CommandSpec | None) -> None:
     """Revalidate an existing config at the materialization boundary to close TOCTOU gaps."""
 
     try:
@@ -80,11 +80,17 @@ def _verify_existing_command(path: Path, command: CommandSpec) -> None:
     except BridgeError:
         raise
     except (OSError, tomllib.TOMLDecodeError) as exc:
+        details = {"path": GENERATED_CONFIG_NAME}
+        if command is not None:
+            details["command_id"] = command.command_id
         raise BridgeError(
             "COMMAND_NOT_ALLOWED",
-            "project codemcp configuration cannot be verified during command preparation",
-            {"command_id": command.command_id},
+            "project codemcp configuration cannot be verified during operation preparation",
+            details,
         ) from exc
+
+    if command is None:
+        return
 
     commands = config.get("commands", {})
     configured = commands.get(command.command_id, {}) if isinstance(commands, dict) else {}
@@ -100,9 +106,9 @@ def _verify_existing_command(path: Path, command: CommandSpec) -> None:
 @contextmanager
 def materialize_generated_codemcp_config(
     project: ProjectSpec,
-    command: CommandSpec,
+    command: CommandSpec | None = None,
 ) -> Iterator[GeneratedConfigLease]:
-    """Prepare an authoritative or generated config immediately before one command executes."""
+    """Prepare an authoritative or generated config immediately before one codemcp operation."""
 
     path = project.codemcp_config
     try:
@@ -117,7 +123,7 @@ def materialize_generated_codemcp_config(
         ) from exc
 
     if metadata is not None:
-        _verify_existing_command(path, command)
+        _verify_existing_config(path, command)
         yield GeneratedConfigLease(False, path)
         return
 

@@ -75,6 +75,23 @@ def test_generated_codemcp_config_exists_only_for_command_lease(tmp_path: Path) 
     assert path.exists() is False
 
 
+def test_generated_codemcp_config_exists_for_permission_lease_without_command(
+    tmp_path: Path,
+) -> None:
+    project = _maven_project(tmp_path)
+    path = project.codemcp_config
+
+    with materialize_generated_codemcp_config(project) as lease:
+        assert lease.generated is True
+        assert path.is_file()
+        assert tomllib.loads(path.read_text(encoding="utf-8"))["commands"]["test"]["command"] == [
+            "mvn",
+            "test",
+        ]
+
+    assert path.exists() is False
+
+
 def test_matching_existing_project_config_is_never_overwritten(tmp_path: Path) -> None:
     project = _maven_project(tmp_path)
     path = project.codemcp_config

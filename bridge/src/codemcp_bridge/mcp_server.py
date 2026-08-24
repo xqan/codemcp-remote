@@ -698,18 +698,19 @@ class BridgeService:
                     session_id=session_id,
                     operation_id=operation_id,
                 )
-                result = await self.adapter.call(
-                    project,
-                    "EditFile",
-                    {
-                        "path": target,
-                        "old_string": old_string,
-                        "new_string": new_string,
-                        "description": description,
-                        "chat_id": session_id,
-                    },
-                    mutation=True,
-                )
+                with materialize_generated_codemcp_config(project):
+                    result = await self.adapter.call(
+                        project,
+                        "EditFile",
+                        {
+                            "path": target,
+                            "old_string": old_string,
+                            "new_string": new_string,
+                            "description": description,
+                            "chat_id": session_id,
+                        },
+                        mutation=True,
+                    )
             if _is_codemcp_error(result):
                 raise BridgeError("CONFLICT", "codemcp rejected EditFile", status="failed")
             if result.text.startswith("String to replace not found"):
@@ -784,17 +785,18 @@ class BridgeService:
                         "file appeared after the mutation baseline was recorded",
                         {"path": normalized},
                     )
-                result = await self.adapter.call(
-                    project,
-                    "WriteFile",
-                    {
-                        "path": target,
-                        "content": content,
-                        "description": description,
-                        "chat_id": session_id,
-                    },
-                    mutation=True,
-                )
+                with materialize_generated_codemcp_config(project):
+                    result = await self.adapter.call(
+                        project,
+                        "WriteFile",
+                        {
+                            "path": target,
+                            "content": content,
+                            "description": description,
+                            "chat_id": session_id,
+                        },
+                        mutation=True,
+                    )
             if _is_codemcp_error(result):
                 raise BridgeError("CONFLICT", "codemcp rejected WriteFile", status="failed")
             checkpoint_data = await self._finish_mutation(project, checkpoint)
@@ -879,17 +881,18 @@ class BridgeService:
                             "actual_sha256": actual_sha256,
                         },
                     )
-                result = await self.adapter.call(
-                    project,
-                    "WriteFile",
-                    {
-                        "path": target,
-                        "content": content,
-                        "description": description,
-                        "chat_id": session_id,
-                    },
-                    mutation=True,
-                )
+                with materialize_generated_codemcp_config(project):
+                    result = await self.adapter.call(
+                        project,
+                        "WriteFile",
+                        {
+                            "path": target,
+                            "content": content,
+                            "description": description,
+                            "chat_id": session_id,
+                        },
+                        mutation=True,
+                    )
             if _is_codemcp_error(result):
                 raise BridgeError("CONFLICT", "codemcp rejected WriteFile", status="failed")
             checkpoint_data = await self._finish_mutation(project, checkpoint)
