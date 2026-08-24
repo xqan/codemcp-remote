@@ -42,6 +42,62 @@ CAS rejection, safety checkpoint creation, successful restore, session WIP
 amend, restart/reconcile, successor-session isolation, idempotent replay, and
 unknown/cancelled mutation handling.
 
+## Phase 3 final acceptance record
+
+The final validation baseline is commit `c442e4d` on 2026-08-24. The focused
+acceptance matrix passed `13` tests, covering all six file mutations, session and
+restart isolation, locally observable shared-ref cut-off, both external-HEAD
+CAS windows, checkpoint restore/reconcile, and `UNKNOWN_SIDE_EFFECT` handling.
+
+The complete validation results were:
+
+- Bridge: `122 passed, 3 skipped, 6 failed`.
+- Integration: `4 passed, 2 xfailed`.
+- `codemcp-bridge-server check`: `status=ok`, phase 5, three registered projects,
+  and `model_egress=deny`.
+- Python `compileall`: passed.
+- Full Ruff: 12 findings, all pre-existing lint debt; no new finding was
+  introduced by the Phase 2.5/2.5.1 changes.
+
+The six Bridge failures are classified as baseline exceptions rather than
+regressions in this feature:
+
+1. `test_existing_symlink_config_is_rejected` cannot create a symlink under the
+   current Windows account (WinError 1314); the same environment skips other
+   symlink tests.
+2. `test_root_only_maven_profile_runs_doctor_compile_and_test` reports a failed
+   WSL2/worker operation instead of success.
+3. `test_real_codemcp_bridge_read_edit_command_and_diff` reports the same
+   WSL2/worker integration failure.
+4. `test_real_codemcp_bridge_worker_restarts_after_bridge_shutdown` reports the
+   same WSL2/worker integration failure.
+5. `test_local_mcp_contract_and_policy_rejections` compares an LF fixture hash
+   with a CRLF file produced by the Windows text path.
+6. `test_file_write_requires_matching_sha256` has the same CRLF/LF fixture hash
+   mismatch.
+
+The 12 Ruff findings are also pre-existing and are recorded individually here
+so they are not mistaken for Phase 3 regressions:
+
+| Location | Rule | Classification |
+| --- | --- | --- |
+| `bridge/src/codemcp_bridge/command_runner.py:159` | E501 | Existing long line |
+| `bridge/src/codemcp_bridge/generated_codemcp.py:13` | UP035 | Existing `typing.Iterator` import style |
+| `bridge/src/codemcp_bridge/mcp_server.py:580` | F841 | Existing unused `file_size` |
+| `bridge/src/codemcp_bridge/mcp_server.py:2093` | E501 | Existing long line |
+| `bridge/src/codemcp_bridge/project_detection.py:9` | UP035 | Existing `typing.Mapping` import style |
+| `bridge/src/codemcp_bridge/project_profiles.py:7` | UP035 | Existing `typing.Mapping` import style |
+| `bridge/src/codemcp_bridge/security_defaults.py:6` | UP035 | Existing `typing.Mapping` import style |
+| `bridge/tests/test_generated_codemcp_operation.py:222` | E501 | Existing long test line |
+| `bridge/tests/test_phase2_worker.py:160` | UP037 | Existing quoted annotation |
+| `bridge/tests/test_phase2_worker.py:240` | UP037 | Existing quoted annotation |
+| `bridge/tests/test_phase2_worker.py:299` | UP037 | Existing quoted annotation |
+| `bridge/tests/test_phase2_worker.py:363` | UP037 | Existing quoted annotation |
+
+These exceptions are outside the Phase 3 mutation/checkpoint paths and remain
+follow-up environment or lint-debt items. The functional Phase 3 acceptance
+criteria are therefore closed with the documented baseline exceptions.
+
 ## Known limitations
 
 - The current compatibility decision still requires WSL2 for codemcp

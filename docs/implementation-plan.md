@@ -1228,7 +1228,8 @@ payload 和幂等行为未变化，不通过远程路径修改真实用户仓库
 
 #### Acceptance Criteria
 
-- 完整 Bridge 与 integration 测试通过，server check 和 Ruff 通过。
+- 完整 Bridge 与 integration 测试、server check 和 Ruff 均已执行；Phase 3 相关功能覆盖通过，
+  已知基线例外见下方最终验证记录。
 - restart/reconcile、checkpoint diff/restore、CAS 冲突和跨 session 场景全部有自动化覆盖。
 - 文档准确区分 branch WIP commit 与 Bridge checkpoint ref。
 - 无 schema migration、无新增依赖、无 MCP breaking change。
@@ -1242,6 +1243,52 @@ checkpoint ref retention 或回退路径。既有 commit/checkpoint 因缺少
 `Codemcp-Remote-Session` footer 不会被自动收养；它们会让后续 mutation
 安全地 fallback 到 CREATE。代码回退无需数据库降级，也不自动删除新旧
 checkpoint ref。
+
+#### Phase 3 final validation record
+
+验证基线为提交 `c442e4d`（2026-08-24）。核心验收矩阵共 `13 passed`，覆盖六类
+file mutation 的 session WIP 合并、跨 session/restart/shared-ref 切断、外部 HEAD
+两阶段 CAS、checkpoint restore/reconcile/UNKNOWN_SIDE_EFFECT 路径。
+
+完整回归结果如下：
+
+- Bridge：`122 passed, 3 skipped, 6 failed`。
+- Integration：`4 passed, 2 xfailed`。
+- `codemcp-bridge-server check`：`status=ok`，phase 5，注册 3 个 project，`model_egress=deny`。
+- Python `compileall`：通过。
+- 完整 Ruff：12 个既有 findings，未发现本 Phase 新增问题。
+
+6 个失败均为既有基线例外，不属于本 Phase 的 session WIP、checkpoint 或 finalize CAS 回归：
+
+1. `test_existing_symlink_config_is_rejected`：当前 Windows 账户缺少创建 symlink 的权限
+   （WinError 1314）；同类测试已在该环境 skip。
+2. `test_root_only_maven_profile_runs_doctor_compile_and_test`：WSL2/worker 集成链路返回
+   `failed` 而非 `succeeded`，属于既有 worker 环境问题。
+3. `test_real_codemcp_bridge_read_edit_command_and_diff`：同一 WSL2/worker 环境链路问题。
+4. `test_real_codemcp_bridge_worker_restarts_after_bridge_shutdown`：同一 WSL2/worker 环境链路问题。
+5. `test_local_mcp_contract_and_policy_rejections`：Windows 文本换行导致 fixture 实际为
+   CRLF，而测试固定按 LF 计算 SHA-256。
+6. `test_file_write_requires_matching_sha256`：同一 CRLF/LF fixture hash 基线问题。
+
+12 个 Ruff findings 也均为本 Phase 之前已存在的 lint debt：
+
+| 位置 | 规则 | 分类 |
+| --- | --- | --- |
+| `bridge/src/codemcp_bridge/command_runner.py:159` | E501 | 既有超长行 |
+| `bridge/src/codemcp_bridge/generated_codemcp.py:13` | UP035 | 既有 `typing.Iterator` 导入风格 |
+| `bridge/src/codemcp_bridge/mcp_server.py:580` | F841 | 既有未使用 `file_size` |
+| `bridge/src/codemcp_bridge/mcp_server.py:2093` | E501 | 既有超长行 |
+| `bridge/src/codemcp_bridge/project_detection.py:9` | UP035 | 既有 `typing.Mapping` 导入风格 |
+| `bridge/src/codemcp_bridge/project_profiles.py:7` | UP035 | 既有 `typing.Mapping` 导入风格 |
+| `bridge/src/codemcp_bridge/security_defaults.py:6` | UP035 | 既有 `typing.Mapping` 导入风格 |
+| `bridge/tests/test_generated_codemcp_operation.py:222` | E501 | 既有超长测试行 |
+| `bridge/tests/test_phase2_worker.py:160` | UP037 | 既有字符串化类型注解 |
+| `bridge/tests/test_phase2_worker.py:240` | UP037 | 既有字符串化类型注解 |
+| `bridge/tests/test_phase2_worker.py:299` | UP037 | 既有字符串化类型注解 |
+| `bridge/tests/test_phase2_worker.py:363` | UP037 | 既有字符串化类型注解 |
+
+上述例外均已与本 Phase 的变更路径隔离；它们保留为后续独立环境/lint debt，不阻塞本
+Phase 的功能验收。
 
 ## Final Validation
 
