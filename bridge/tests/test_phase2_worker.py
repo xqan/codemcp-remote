@@ -388,9 +388,7 @@ async def test_manager_close_waits_for_inflight_call_then_closes_owner(
     monkeypatch.setattr(worker_manager_module, "ClientSession", FakeClientSession)
 
     manager = WorkerManager(settings)
-    call_task = asyncio.create_task(
-        manager.call(settings.projects["demo"], "ReadFile", {})
-    )
+    call_task = asyncio.create_task(manager.call(settings.projects["demo"], "ReadFile", {}))
     await asyncio.wait_for(call_started.wait(), timeout=1)
 
     close_task = asyncio.create_task(manager.close())
