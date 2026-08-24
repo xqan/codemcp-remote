@@ -2,110 +2,142 @@
 
 ## 结论
 
-固定的 `codemcp==0.3.0` 可以作为 stdio MCP worker 启动，并通过
-`initialize`、`tools/list` 和不触发 Git 的 `ReadFile`。在当前 Windows 11
-原生环境中，所有需要调用 Git 的子工具都会在 MCP stdio worker 内超时，因而
-不能直接作为本项目的写入后端使用。
+固定的 `codemcp==0.3.0` 现在可以作为 **Windows 11 原生 stdio worker**
+运行 Git-backed 子工具。`codemcp-remote` 不再要求把 mutation worker 放进
+WSL2；默认模式改为 `local`，WSL2 Ubuntu 仅保留为显式 fallback。
 
-WSL2 Ubuntu（版本 2）可以在同一个 Windows 项目的 `/mnt/d` 挂载路径上完成
-Git-backed 读取、编辑、写入、命令执行和 Git 状态验证；长超时复核为 `2 passed`。
-因此本阶段的决策是：codemcp mutation worker 运行在 WSL2，原生 Windows
-codemcp 不作为 mutation 后端；Phase 2 先直接使用上游 `0.3.0`，暂不维护 fork。
-如果后续必须支持原生 Windows，再单独评估针对 stdin、超时和进程树的最小 fork。
+本项目没有维护 `codemcp` fork。Windows 差异被隔离在
+`codemcp_bridge.native_codemcp_worker` 中，对固定的上游 `0.3.0` 应用两个
+窄兼容修复：
 
-Bridge 后续必须负责 Windows 项目路径到 WSL 路径的显式映射，并在 worker 外部
-执行超时、进程树清理和 unknown side-effect 保护。WSL 挂载路径上的 Git probe
-需要 30 秒预算；这不是把超时责任交给 codemcp，上游命令执行仍没有可靠的内部
-默认超时。
+1. 对没有显式 stdin 的 `asyncio.create_subprocess_exec` 调用补
+   `stdin=asyncio.subprocess.DEVNULL`，防止 Git/命令子进程继承 MCP stdio
+   server 的 stdin 后阻塞。
+2. 替换 worker 进程内的 `codemcp.tools.file_utils.write_file_sync`，以
+   `newline=""` 写入已经由 codemcp 规范化的行尾，避免 Windows 文本模式对
+   `\r\n` 再做一次翻译而产生 `\r\r\n`。
+
+真实 Windows gate 会从 WSL 测试宿主调用 Windows PowerShell 和 Windows `uv`，
+执行原生 Windows 的 worker/兼容矩阵。当前完整回归结果为 **142 passed**，
+原生 Windows gate PASS；同一套回归同时保留 WSL2 fallback 覆盖。
 
 ## 版本和验证环境
 
 - 上游仓库：[ezyang/codemcp](https://github.com/ezyang/codemcp)
 - Release/tag：`0.3.0`
 - Release commit：`683e6ec29b15b91ec12430afabf5a45ed57d2489`
-- Python：`3.14.7`（由 uv 管理；项目要求 `>=3.12`）
-- Windows：Windows 11，build `26200`
-- Git：`2.51.0.windows.1`
-- WSL2：Ubuntu，Python `3.14.4`，Git `2.53.0`
-- MCP SDK：`1.29.0`
-- codemcp：`0.3.0`
-- 安装来源：PyPI；版本和 wheel/sdist SHA-256 已写入 `bridge/uv.lock`
-
-GitHub 的 release 页面将 `0.3.0` tag 映射到上述 `683e6ec` commit；本机
-`git ls-remote` 因 Windows Schannel 凭据错误未能完成远程复核。
+- 项目 Python 要求：`>=3.12`
+- Host：Windows 11
+- Native Git：Git for Windows
+- Fallback：WSL2 Ubuntu
+- codemcp 安装来源：PyPI，版本固定在 `bridge/uv.lock`
+- Windows 兼容入口：`codemcp_bridge.native_codemcp_worker`
 
 ## MCP 合约
 
-探针使用 MCP SDK 的 `stdio_client` 和 `ClientSession`，为每个 worker 设置
-独立的临时用户目录，避免写入操作员 profile。实际结果如下：
+探针使用 MCP SDK 的 `stdio_client` 和 `ClientSession`，并为每个 worker 使用
+隔离 HOME。当前结果：
 
 | 检查项 | Windows 原生 | WSL2 Ubuntu | 实际观察 |
 |---|---|---|---|
-| worker 启动 | PASS | PASS | `python -m codemcp` 正常启动 |
-| `initialize` | PASS | PASS | protocol `2025-11-25`，server name `codemcp` |
-| `tools/list` | PASS | PASS | 只有一个 MCP tool：`codemcp` |
-| 输入/输出 schema | PASS | PASS | `subtool` required，输出为 `result: string` |
-| `ReadFile` | PASS | PASS | 中文、空格和长嵌套路径下可读 |
-| Git-backed subtools | BLOCKED | PASS | WSL2 使用 30 秒 probe timeout；原生 Windows 2 秒内阻塞 |
-| worker 关闭/重启 | PASS | PASS | context 关闭后可以重新 initialize |
+| worker 启动 | PASS | PASS | 原生使用 Bridge compatibility entry point；WSL2 使用固定 Python worker |
+| `initialize` | PASS | PASS | MCP session 可初始化 |
+| `tools/list` | PASS | PASS | 暴露单一 `codemcp` MCP tool |
+| 输入/输出 schema | PASS | PASS | `subtool` required |
+| `ReadFile` | PASS | PASS | 中文、空格和长嵌套路径可读 |
+| Git-backed subtools | PASS | PASS | 30 秒 bounded compatibility budget |
+| worker 关闭/重启 | PASS | PASS | context 关闭后可重新 initialize |
 | 两个 stdio worker 并行启动 | PASS | PASS | 两个独立 worker 均可发现工具 |
-| 端口冲突 | N/A | N/A | stdio transport 不监听端口 |
+| stdio 端口冲突 | N/A | N/A | stdio worker 不监听端口 |
 
-实际暴露的是一个 `codemcp` 工具，`subtool` 值为：
+实际暴露的 `subtool` 包括：
 
 `InitProject`、`ReadFile`、`WriteFile`、`EditFile`、`LS`、`Grep`、`RunCommand`。
 
-`Format` 不是实际的独立 subtool；调用它会返回 `Unknown subtool: Format`。
-格式化只能通过登记在 `codemcp.toml` 的 `RunCommand` 命令表达。
+`Format` 不是独立 subtool；格式化仍通过登记在 `codemcp.toml` 的
+`RunCommand` 命令表达。
 
 ## 工具和 Git 行为
 
-| 能力 | 结果 | 说明 |
-|---|---|---|
 | 能力 | Windows 原生 | WSL2 Ubuntu |
 |---|---|---|
-| `InitProject` | blocked | PASS；读取 `project_prompt`，生成 `codemcp-id` 并创建空 Git commit |
-| `LS` / `Grep` | blocked | PASS；完成 Git 检查和搜索 |
-| `EditFile` / `WriteFile` | blocked | PASS；修改后 HEAD 改变但 commit 数不增加，工作区保持 clean |
-| `RunCommand` | blocked | PASS；登记命令成功、失败、stdout/stderr 和退出码均已验证 |
-| timeout | 不满足要求 | 上游 `run_code_command` 不传 `wait_time`；Adapter 必须在 worker 外部强制超时 |
-| crash recovery | 未完成 | 已验证正常退出、重启和重复启动；未完成强制崩溃后的恢复测试 |
+| `InitProject` | PASS | PASS |
+| `LS` / `Grep` | PASS | PASS |
+| `ReadFile` | PASS | PASS |
+| `EditFile` / `WriteFile` | PASS | PASS |
+| `RunCommand` | PASS | PASS |
+| 中文/空格路径 | PASS | PASS |
+| worker restart / duplicate startup | PASS | PASS |
+| bounded worker timeout policy | PASS | PASS |
 
-### Windows blocker
+Git-backed edit/write 验证同时检查 HEAD、commit count 和 clean worktree。
+Windows `WriteFile` 还覆盖了 CRLF 语义，防止兼容层引入额外空行。
 
-`codemcp 0.3.0` 的 `codemcp/shell.py` 使用
-`asyncio.create_subprocess_exec(..., stdout=PIPE, stderr=PIPE)`，没有设置
-`stdin=DEVNULL` 或独立 stdin。MCP stdio server 同时消费自己的 stdin；在
-worker 内调用 Git-backed subtool 时，Git 子进程继承该 stdio 输入，实测在
-2 秒 probe timeout 内没有返回 MCP tool result。这里“继承 stdio 输入导致
-阻塞”是由源码和运行日志共同支持的根因判断；直接在非 MCP 进程中调用同一
-版本的 `InitProject` 可以完成 Git commit，说明不是 Git 本身完全不可用。
+## Windows 根因与修复边界
 
-这意味着 Bridge 不能只把上游 stdio worker 包起来就宣称支持原生 Windows
-写入。当前实现应把 codemcp worker 放在 WSL2，并把 Windows 原生路径、WSL
-路径、worker 生命周期和超时作为 Adapter 的显式边界；不在 Bridge 中复制
-codemcp 的 Git 或文件逻辑。
+### 1. Git-backed 子工具阻塞
 
-### 命令安全边界
+上游 `codemcp 0.3.0` 的 `codemcp/shell.py` 调用：
 
-上游 `RunCommand` 从 `codemcp.toml` 读取命令列表，并会把调用方传入的
-`arguments` 追加到该列表。Bridge 不能把这个参数面直接暴露给 ChatGPT，必须
-只接受已登记的 command id 和完整的结构化 argv。
+~~~python
+await asyncio.create_subprocess_exec(
+    *cmd,
+    cwd=cwd,
+    env=env,
+    stdout=stdout_pipe,
+    stderr=stderr_pipe,
+)
+~~~
+
+没有为子进程指定 stdin。MCP server 自己使用 stdio transport，因此 Windows
+Git/命令子进程继承同一 stdin 时可能阻塞。
+
+Bridge compatibility entry point 只在 Windows worker 进程中为“调用方没有
+显式传 stdin”的 subprocess 补 `DEVNULL`。显式 stdin 仍被保留。
+
+### 2. Windows 行尾二次翻译
+
+上游 `write_text_content` 会先根据目标文件把 `\n` 转为所需的 `\r\n`，
+随后 `write_file_sync` 使用默认文本模式再次写入。在 Windows 上这会再次翻译
+换行，产生 `\r\r\n`。
+
+Bridge wrapper 只替换 worker 进程内的同步写入 helper，并使用 `newline=""`，
+让已经规范化的行尾按原样写入。上游包文件本身没有被修改。
+
+## 生命周期和安全边界
+
+- `worker_mode = "local"` 是默认值。
+- `worker_mode = "wsl2"` 仍受支持，可作为 fallback。
+- worker timeout 继续由 Bridge 外层强制执行；不能依赖上游命令的内部 timeout。
+- timeout/cancellation 会 fail closed；mutation timeout 映射为
+  `UNKNOWN_SIDE_EFFECT`。
+- `stop-all.ps1` 同时识别 native Windows worker 和 WSL2 fallback worker，
+  可清理 Bridge-owned/orphaned worker process tree。
+- 完整的多轮 start/stop、强制进程崩溃和 clean-machine operations stress
+  仍属于发布生命周期 gate，不由本兼容矩阵单独替代。
+
+## 命令安全边界
+
+上游 `RunCommand` 从 `codemcp.toml` 读取命令列表，并允许追加 arguments。
+Bridge 不直接暴露这个参数面给 ChatGPT，只接受登记的 command ID 和 Bridge
+解析出的固定结构化 argv。
 
 ## ChatGPT-only 检查
 
-- 已扫描安装包源码，未发现 `openai`、`anthropic`、`litellm`、`ollama` 等模型 provider 或模型 key 入口。
-- `uv tree` 中 codemcp 依赖为 anyio、MCP、ruff、toml/tomli，没有模型 SDK。
-- 这是静态源码和依赖检查，不等同于网络层 egress 证明；Bridge 后续仍需保持 `model_egress = "deny"`。
+- `codemcp` 仍固定为上游 `0.3.0`；本阶段没有引入新的模型 provider。
+- Bridge 保持 `model_egress = "deny"`。
+- Windows compatibility wrapper 只改变本地 subprocess/file-write 行为。
 
-## 验证命令
+## 验证
+
+主要 gate：
 
 ~~~text
-uv sync --project bridge
-uv run --project bridge codemcp-bridge doctor --strict --json
-uv run --project bridge pytest -q --basetemp=.local/pytest-phase1 tests/integration/test_codemcp_compatibility.py
-uv run --project bridge ruff check bridge/src bridge/tests tests/integration
+uv run --project bridge pytest -q
 ~~~
 
-当前 Windows 结果为：`5 passed, 2 xfailed`。两个严格 xfail 正是上表中
-Git-backed subtool 的已知 blocker，不是被跳过的测试；WSL2 结果为 `7 passed`。
+测试套件还包含 `test_native_windows_worker_host.py`：当测试宿主位于 WSL 时，
+它通过 Windows PowerShell 调起 Windows `uv`，重新执行 native worker 单元测试
+和 `test_codemcp_compatibility.py`，确保“Windows PASS”不是由 WSL 环境模拟得出。
+
+当前结果：**142 passed**。

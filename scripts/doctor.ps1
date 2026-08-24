@@ -112,7 +112,7 @@ function New-Phase6PathCheck {
 $dataDirValue = Get-Phase6TomlString -Path $BridgeConfig -Section "storage" -Key "data_dir" -Default ".local"
 $sqliteFileValue = Get-Phase6TomlString -Path $BridgeConfig -Section "storage" -Key "sqlite_file" -Default ".local/bridge.sqlite3"
 $logDirValue = Get-Phase6TomlString -Path $BridgeConfig -Section "storage" -Key "log_dir" -Default ".local/logs"
-$workerMode = Get-Phase6TomlString -Path $BridgeConfig -Section "codemcp" -Key "worker_mode" -Default "wsl2"
+$workerMode = Get-Phase6TomlString -Path $BridgeConfig -Section "codemcp" -Key "worker_mode" -Default "local"
 $wslDistribution = Get-Phase6TomlString -Path $BridgeConfig -Section "codemcp" -Key "wsl_distribution" -Default "Ubuntu"
 $wslPythonConfig = Get-Phase6TomlString -Path $BridgeConfig -Section "codemcp" -Key "wsl_python" -Default ""
 $dataDirPath = Resolve-Phase5Path -RepositoryRoot $repositoryRoot -Value $dataDirValue
@@ -144,7 +144,11 @@ $report.paths.log_dir = if (Test-Path -LiteralPath $logDirPath -PathType Contain
 } else {
     [ordered]@{ path = $logDirPath; status = "not_initialized" }
 }
-$report.paths.worker_venv = New-Phase6PathCheck -Path $workerVenvPath
+$report.paths.worker_venv = if ($workerMode -eq "wsl2") {
+    New-Phase6PathCheck -Path $workerVenvPath
+} else {
+    [ordered]@{ path = $workerVenvPath; status = "not_required" }
+}
 $report.paths.env_file = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
     New-Phase6PathCheck -Path $EnvFile -Leaf
 } else {

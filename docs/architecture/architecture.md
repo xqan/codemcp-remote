@@ -27,11 +27,13 @@ ChatGPT
 - Project access: explicit project_id registry; no arbitrary local paths.
 - Command access: explicit command IDs with structured argv; no arbitrary shell.
 - Model egress: denied for Bridge and codemcp.
-- Platform decision after Phase 1: run codemcp mutation workers in WSL2 Ubuntu;
-  native Windows Git-backed mutation is unsupported.
+- Platform decision after the native Windows compatibility follow-up: run codemcp
+  workers locally on Windows by default. A Bridge-owned compatibility entry point
+  prevents Git-backed child processes from inheriting MCP stdin and prevents
+  duplicate Windows newline translation. WSL2 Ubuntu remains an explicit fallback.
 - codemcp baseline: release 0.3.0 at commit 683e6ec29b15b91ec12430afabf5a45ed57d2489.
-- Phase 1 adapter decision: use upstream codemcp 0.3.0 unchanged initially; do
-  not maintain a fork unless native Windows support becomes a requirement.
+- The dependency remains upstream codemcp 0.3.0 unchanged; Windows compatibility
+  is isolated in the Bridge wrapper rather than maintained as an upstream fork.
 
 ## Deliberately deferred to later phases
 

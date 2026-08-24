@@ -356,7 +356,7 @@ def load_settings(
     if not isinstance(max_result_bytes, int) or max_result_bytes <= 0:
         raise SettingsError("policy.max_result_bytes must be positive")
 
-    worker_mode = codemcp_raw.get("worker_mode", "wsl2")
+    worker_mode = codemcp_raw.get("worker_mode", "local")
     if worker_mode not in {"wsl2", "local"}:
         raise SettingsError("codemcp.worker_mode must be 'wsl2' or 'local'")
     wsl_distribution = codemcp_raw.get("wsl_distribution", "Ubuntu")

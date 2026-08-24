@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -17,21 +16,9 @@ from codemcp_bridge.codemcp_probe import (
     result_text,
 )
 
-WINDOWS_GIT_SUBPROCESS_BLOCKER = pytest.mark.xfail(
-    condition=os.name == "nt",
-    strict=True,
-    reason=(
-        "codemcp 0.3.0 Git-backed subtools inherit the MCP stdio stdin and "
-        "do not return on native Windows"
-    ),
-)
-
-# Native Windows is intentionally kept at two seconds so the inherited-stdin
-# blocker fails fast.  Git operations against the Windows-mounted project
-# path are materially slower from WSL2, but complete successfully within this
-# bound; that is a performance distinction, not a protocol compatibility
-# failure.
-GIT_SUBTOOL_TIMEOUT_SECONDS = 2.0 if os.name == "nt" else 30.0
+# Native Windows and WSL2 share one bounded compatibility budget now that the
+# worker entry point prevents Git-backed child processes from inheriting MCP stdin.
+GIT_SUBTOOL_TIMEOUT_SECONDS = 30.0
 
 
 def _git(project: Path, *arguments: str) -> str:
@@ -150,7 +137,6 @@ async def test_initialize_and_tools_list(git_project: Path, tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-@WINDOWS_GIT_SUBPROCESS_BLOCKER
 async def test_read_only_subtools(git_project: Path, tmp_path: Path) -> None:
     source_file = next(git_project.rglob("hello file.txt"))
     async with connect(
@@ -204,7 +190,6 @@ async def test_format_subtool_is_not_exposed(git_project: Path, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-@WINDOWS_GIT_SUBPROCESS_BLOCKER
 async def test_subtools_commands_and_git_behavior(
     git_project: Path, tmp_path: Path
 ) -> None:

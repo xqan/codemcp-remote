@@ -32,7 +32,9 @@ class ProbeConfig:
 
     project_root: Path
     isolated_home: Path
-    command: tuple[str, ...] = field(default_factory=lambda: (sys.executable, "-m", "codemcp"))
+    command: tuple[str, ...] = field(
+        default_factory=lambda: (sys.executable, "-m", "codemcp_bridge.native_codemcp_worker")
+    )
     worker_cwd: Path | None = None
     timeout_seconds: float = 30.0
 

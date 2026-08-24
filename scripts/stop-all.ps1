@@ -86,6 +86,10 @@ function Get-Phase6Targets {
             $commandLine -match "(?i)(-m\s+codemcp\b|\bcodemcp\b)" -and
             ($commandLine -match "(?i)bridge-venv-wsl" -or
                 $commandLine -match $repositoryPattern)
+        ) -or (
+            $commandLine -match "(?i)-m\s+codemcp_bridge\.native_codemcp_worker\b" -and
+            ($commandLine -match $bridgeProjectPattern -or
+                $commandLine -match $repositoryPattern)
         )
         if ($isWorker) {
             $rawTargets += [pscustomobject]@{

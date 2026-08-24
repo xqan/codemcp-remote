@@ -6,7 +6,7 @@ A policy-controlled local MCP bridge for using **ChatGPT as the only reasoning e
 ChatGPT
   -> OpenAI Secure MCP Tunnel
   -> loopback codemcp-remote Bridge
-  -> pinned codemcp worker in WSL2
+  -> pinned codemcp worker (native Windows by default)
   -> registered local Git project
 ```
 
@@ -39,11 +39,11 @@ The Bridge does not contain an agent loop or model provider. Repository content 
 | Host OS | Windows 11 |
 | PowerShell | PowerShell 7 (`pwsh`) |
 | Bridge | Python 3.12+ |
-| Mutation worker | WSL2 Ubuntu |
-| codemcp | pinned `0.3.0` |
+| Mutation worker | Native Windows; WSL2 Ubuntu fallback |
+| codemcp | pinned `0.3.0` with Bridge-owned Windows compatibility wrapper |
 | Remote transport | OpenAI Secure MCP Tunnel |
 | Identity model | single-user local policy profile |
-| Native Windows Git-backed mutation | **not supported** |
+| Native Windows Git-backed mutation | **supported and compatibility-tested** |
 | Arbitrary shell / arbitrary path | **not exposed** |
 | Automatic push / merge / rebase / deploy | **not supported** |
 
@@ -55,11 +55,9 @@ See [`docs/reports/compatibility/codemcp-compatibility-matrix.md`](docs/reports/
 
 On Windows:
 
-- Windows 11 with WSL2 enabled;
-- an Ubuntu WSL2 distribution;
+- Windows 11;
 - Python 3.12+ on Windows;
-- Python 3.12+ and `python3-venv` inside the WSL distribution;
-- Git;
+- Git for Windows;
 - PowerShell 7 (`pwsh`);
 - [`uv`](https://docs.astral.sh/uv/);
 - `tunnel-client` for the remote ChatGPT path;
@@ -77,21 +75,18 @@ From the repository root:
 uv sync --project bridge
 ```
 
-### 2. Bootstrap the locked WSL2 worker environment
+### 2. Optional: prepare the WSL2 fallback worker
 
-The default worker Python is `.local/bridge-venv-wsl/bin/python` inside the repository as seen from WSL.
+Native Windows is the default worker mode and requires no WSL2 bootstrap. If you
+explicitly configure `codemcp.worker_mode = "wsl2"`, prepare the fallback runtime:
 
 ```powershell
 pwsh -File .\scripts\bootstrap-wsl.ps1
 ```
 
-The bootstrap exports the locked non-development dependency set from `bridge/uv.lock` into a Git-ignored `.local/worker-requirements.txt`, creates the WSL venv, installs those dependencies, and verifies `codemcp==0.3.0`.
-
-For a distribution other than the default Ubuntu name:
-
-```powershell
-pwsh -File .\scripts\bootstrap-wsl.ps1 -WslDistribution Ubuntu-24.04
-```
+The bootstrap exports the locked non-development dependency set from `bridge/uv.lock`,
+creates `.local/bridge-venv-wsl`, installs the worker dependencies, and verifies
+`codemcp==0.3.0`.
 
 ### 3. Register your first project
 

@@ -46,8 +46,9 @@ Copy-Item config/projects.example.toml config/projects.toml
 then starts tunnel-client and waits for Tunnel `readyz`. If either endpoint is
 already healthy and its process command line belongs to this repository/profile,
 the existing service is reused. An unknown process occupying a health endpoint
-is rejected. The codemcp WSL2 worker is started on demand by the Bridge when a
-registered project operation requires it.
+is rejected. The configured codemcp worker is started on demand by the Bridge
+when a registered project operation requires it. Native Windows is the default;
+WSL2 is retained as an explicit fallback mode.
 
 The Tunnel wrapper writes its merged stdout/stderr to
 `.local/logs/tunnel-client.log`, with the same 5 MB limit and three backups as
@@ -56,10 +57,11 @@ before the line is written. `start-all.ps1` follows the Bridge
 `[storage].log_dir`; use `-LogDir` on either startup script to override it.
 
 `doctor.ps1` reports structured checks for configuration paths, SQLite state,
-WSL2 distribution and worker Python, Git repository state, Bridge configuration
-and health, and Tunnel readiness. A missing database or log directory before
-first initialization is reported as `not_initialized`; a missing configuration,
-database parent, WSL2 distribution, or worker Python returns a failing status.
+the configured worker mode, Git repository state, Bridge configuration and health,
+and Tunnel readiness. Native worker mode does not require a WSL2 distribution or
+WSL worker venv; those checks are enforced only when `worker_mode = "wsl2"`.
+A missing database or log directory before first initialization is reported as
+`not_initialized`.
 Use `-SkipTunnel` when diagnosing the local Bridge without Tunnel credentials.
 For a non-default Bridge configuration, pass `-BridgeConfig` and
 `-ProjectsConfig` to both `start-all.ps1` and `doctor.ps1`.
@@ -104,8 +106,9 @@ pwsh -File .\scripts\stop-all.ps1
 ~~~
 
 `stop-all.ps1` matches the repository Bridge command line, the configured
-Tunnel profile directory and the WSL2 codemcp worker. It does not terminate an
-unrelated process that merely occupies port 46200 or 46201; such a listener is
+Tunnel profile directory, native codemcp workers, and WSL2 fallback workers. It
+does not terminate an unrelated process that merely occupies port 46200 or 46201;
+such a listener is
 reported for manual investigation. Run it with permission to query
 `Win32_Process` when a service was started elevated.
 
@@ -140,9 +143,11 @@ pwsh -File .\scripts\start-bridge.ps1
 curl http://127.0.0.1:46200/healthz
 ~~~
 
-On Windows, the default codemcp worker runs in WSL2 Ubuntu. The WSL virtual
-environment is expected at `.local/bridge-venv-wsl`; configure
-`codemcp.wsl_python` when the environment is elsewhere. This is a local
+On Windows, the default codemcp worker runs natively through
+`codemcp_bridge.native_codemcp_worker`. The wrapper keeps upstream
+`codemcp==0.3.0` unchanged while applying the narrow Windows subprocess and
+newline compatibility fixes. WSL2 Ubuntu remains available with
+`codemcp.worker_mode = "wsl2"` and `scripts/bootstrap-wsl.ps1`. This is a local
 development server. The Phase 5 tunnel wrapper is configured separately and
 never points directly at codemcp.
 

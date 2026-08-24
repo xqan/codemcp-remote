@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from typing import Any
 import anyio
 import pytest
 
+import codemcp_bridge.native_codemcp_worker as native_worker_module
 import codemcp_bridge.worker_manager as worker_manager_module
 from codemcp_bridge.errors import BridgeError
 from codemcp_bridge.settings import (
@@ -62,6 +64,86 @@ def test_wsl_worker_git_environment_aligns_autocrlf_with_windows(tmp_path: Path)
     assert parameters.env["GIT_CONFIG_KEY_0"] == "core.excludesfile"
     assert parameters.env["GIT_CONFIG_KEY_1"] == "core.autocrlf"
     assert parameters.env["GIT_CONFIG_VALUE_1"] == "true"
+
+
+def test_local_worker_uses_native_windows_entrypoint(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, tmp_path / "data", worker_mode="local")
+    worker = _CodemcpWorker(settings, settings.projects["demo"])
+
+    parameters = worker._parameters(os_name="nt")
+
+    assert parameters.command == sys.executable
+    assert parameters.args == ["-m", "codemcp_bridge.native_codemcp_worker"]
+    assert parameters.env is not None
+    assert parameters.env["GIT_CONFIG_COUNT"] == "1"
+    assert "GIT_CONFIG_KEY_1" not in parameters.env
+
+
+@pytest.mark.asyncio
+async def test_native_worker_subprocess_patch_supplies_devnull_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, tuple[str, ...], dict[str, Any]]] = []
+
+    async def fake_create_subprocess_exec(
+        program: str,
+        *args: str,
+        **kwargs: Any,
+    ) -> object:
+        calls.append((program, args, kwargs))
+        return object()
+
+    monkeypatch.setattr(
+        native_worker_module,
+        "_ORIGINAL_CREATE_SUBPROCESS_EXEC",
+        fake_create_subprocess_exec,
+    )
+
+    await native_worker_module._create_subprocess_exec_with_devnull_stdin("git", "--version")
+    sentinel = object()
+    await native_worker_module._create_subprocess_exec_with_devnull_stdin(
+        "git",
+        "status",
+        stdin=sentinel,
+    )
+
+    assert calls[0][2]["stdin"] == asyncio.subprocess.DEVNULL
+    assert calls[1][2]["stdin"] is sentinel
+
+
+def test_native_worker_file_write_preserves_pre_normalized_crlf(tmp_path: Path) -> None:
+    target = tmp_path / "crlf.txt"
+    native_worker_module._write_file_sync_without_newline_translation(
+        str(target),
+        "first\r\nsecond\r\n",
+    )
+
+    assert target.read_bytes() == b"first\r\nsecond\r\n"
+
+
+def test_native_worker_patch_is_windows_only() -> None:
+    from codemcp.tools import file_utils
+
+    original_subprocess = asyncio.create_subprocess_exec
+    original_write_file_sync = file_utils.write_file_sync
+    try:
+        assert native_worker_module.install_windows_compatibility(os_name="posix") is False
+        assert asyncio.create_subprocess_exec is original_subprocess
+        assert file_utils.write_file_sync is original_write_file_sync
+        assert native_worker_module.install_windows_compatibility(os_name="nt") is True
+        assert (
+            asyncio.create_subprocess_exec
+            is native_worker_module._create_subprocess_exec_with_devnull_stdin
+        )
+        assert (
+            file_utils.write_file_sync
+            is native_worker_module._write_file_sync_without_newline_translation
+        )
+    finally:
+        asyncio.create_subprocess_exec = original_subprocess
+        file_utils.write_file_sync = original_write_file_sync
 
 
 @pytest.mark.asyncio

@@ -327,7 +327,7 @@ try {
         repository_root = $repositoryRoot
         startup_timeout_sec = $StartupTimeoutSec
         services = $services
-        note = "codemcp WSL2 worker starts on demand inside the Bridge"
+        note = "codemcp worker starts on demand inside the Bridge"
     } | ConvertTo-Json -Depth 8
     exit 0
 } catch {
