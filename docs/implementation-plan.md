@@ -774,3 +774,391 @@ Phase 1 已确定：
 
 Phase 4 的本地安全和可靠性测试以及 Phase 5 的远程合同验收已通过；Phase 6
 仍需继续完成连续重启、异常退出、日志脱敏和版本升级回退验证。
+
+# Change Plan：会话级 WIP commit 合并（2026-08-24）
+
+## Goal
+
+在不改变“每个 mutation 都先创建独立 Bridge checkpoint”的安全设计下，减少
+Bridge 连续文件修改在当前分支产生的零碎 commit。
+
+完成定义：
+
+1. 每个 mutation 仍保留独立的修改前 checkpoint、修改后 HEAD、changed_files、
+   diff hash、operation 和 audit 关联。
+2. 同一 project、branch、active session 上连续且可证明由 Bridge 拥有的文件类
+   mutation，只在分支历史中保留一个 WIP commit；后续 mutation 通过安全 amend
+   更新该 commit。
+3. session 的第一次有效修改、新 session、外部 HEAD 变化、其他 session 插入修改、
+   已共享或已发布的 HEAD，以及任何无法证明归属的状态，一律新建 commit。
+4. 不自动 rebase、squash、push、删除 checkpoint ref 或重写用户提交。
+5. 对现有 MCP 请求参数、幂等键、审批、rollback 和 SQLite schema 保持兼容。
+
+本计划只减少当前分支可见的 WIP commit 数量。checkpoint ref 的数量和
+`git log --all` 可见的历史对象不在本次范围内。
+
+## Current Architecture
+
+当前 mutation 调用链为：
+
+~~~text
+MCP file mutation
+  -> project/session/operation validation
+  -> per-project mutation lock
+  -> _begin_mutation()
+       -> clean-worktree and allowed-branch checks
+       -> refs/codemcp-remote/checkpoints/<checkpoint_id>
+       -> SQLite checkpoint row
+  -> Git/codemcp side effect
+  -> _finish_mutation()
+       -> after HEAD/tree/changed_files/diff hash
+  -> terminal operation result and audit
+~~~
+
+已验证的代码事实：
+
+- `file_edit`、`file_create` 和 `file_write` 最终调用
+  `GitGuard.commit_file_bytes()`，每次有效修改执行新的 `git commit -m "wip: ..."`。
+- `file_move` 和 `file_delete` 当前无条件执行 `git commit --amend --no-edit`；当它们
+  是 session 的第一次修改时，可能重写并非 Bridge 所有的当前 HEAD。
+- `directory_create` 通过上游 codemcp `WriteFile` 创建 `.gitkeep`；固定版本上游同样
+  amend 当前 HEAD，因此也缺少 Bridge 所有权判定。
+- `_begin_mutation()` 对所有文件 mutation 和登记命令创建 checkpoint；该行为是
+  rollback、diff、unknown reconciliation 和审计的保护边界，不能移除。
+- SQLite 已持久化 session、operation、checkpoint 及 before/after HEAD；成功 operation
+  与 checkpoint 可用于证明某个 HEAD 是否由指定 session 的 Bridge mutation 产生。
+- 同一项目 mutation 已串行化，但可以存在多个 active session。不同 session 的操作
+  可能依次修改同一分支，因此不能仅凭 `wip:` commit message 决定 amend。
+- Bridge 没有显式的 project/session close MCP tool；session 通常持续到 Bridge 关闭或
+  重启。session 是当前可复用的最小提交分组边界，但不等同于永久分支所有权。
+
+## Architecture Decision
+
+### AD-WIP-1：checkpoint 粒度不变，commit 以 session 为合并边界
+
+每次 mutation 仍先创建 checkpoint。checkpoint 指向 mutation 前的 HEAD；后续 amend
+生成的新 commit 即使与旧 HEAD 是兄弟关系，Git tree diff 和固定 ref rollback 仍可使用。
+
+session 的第一次有效文件修改创建新的 WIP commit。此后的文件类 mutation 只有在
+以下条件全部成立时才可 amend：
+
+1. 当前 session 仍为 active，且判断发生在现有 per-project mutation lock 内。
+2. 当前 branch 和 HEAD 与刚创建的 mutation checkpoint 完全一致，worktree clean。
+3. SQLite 中存在同一 project、session 的已成功 mutation，其 finalized checkpoint
+   `after.head` 等于当前 HEAD、`after.branch` 等于当前 branch，且 before/after HEAD
+   不同；仅有 no-op checkpoint 不能建立提交所有权。
+4. 当前 commit 含有新版 Bridge 在首次 commit 写入并由后续 `--no-edit` 保留的精确
+   footer，例如 `Codemcp-Remote-Session: <session_id>`。
+5. footer 只能作为辅助证明；仓库内容不可信，必须同时满足 SQLite 证据，绝不能仅凭
+   commit message 授权 amend。
+6. 当前 HEAD 未被 remote-tracking ref、tag 或当前分支之外的 local branch 包含或直接
+   引用。发现共享/发布迹象时新建 commit，不重写该 HEAD。
+
+数据库缺失、历史 checkpoint 没有新版 footer、Git ref 检查失败、branch/HEAD 不匹配，
+或任何其他不确定情况都 fail safe 到 `create`，而不是失败开放到 `amend`。这样部署后
+第一次修改会自然创建新的 session WIP 边界，不会收养历史零碎 commit。
+
+### AD-WIP-2：所有文件类 mutation 使用统一的显式 commit mode
+
+在 Git 层引入内部枚举或等价受限类型：
+
+~~~text
+CommitMode.CREATE
+CommitMode.AMEND_SESSION_WIP
+~~~
+
+- `CREATE` 使用固定 argv 创建 `wip: <description>` commit，并写入 session footer。
+- `AMEND_SESSION_WIP` 使用固定 argv `git commit --amend --no-edit --only -- <paths>`。
+- `GitGuard` 不自行猜测归属，只执行 BridgeService/策略层传入的显式 mode，并继续校验
+  expected HEAD、clean worktree、允许路径和最终新 HEAD。
+- `file_edit`、`file_create`、`file_write`、`file_move`、`file_delete` 和
+  `directory_create` 使用同一 mode 判定。
+- `directory_create` 改为复用 Bridge 自有的原子文件提交路径写入 `.gitkeep`，避免上游
+  `WriteFile` 在首次 mutation 时无条件 amend 用户 HEAD。对外目录、marker、checkpoint
+  和幂等语义不变。
+- 后续 amend 保留 session 第一次 mutation 的 commit message；Bridge 不在本地生成任务
+  摘要，避免引入第二个推理步骤。
+
+### AD-WIP-3：不增加 schema、配置开关或外部依赖
+
+- 复用现有 checkpoint `before_json`、`after_json` 和关联 operation state 查询归属，
+  不创建数据库 migration。
+- 不修改 MCP 输入 schema、request hash、approval 或工具名称；响应结构原则上保持不变。
+- 不新增 Git 库，继续通过 `GitGuard` 的固定 argv 子进程调用系统 Git。
+- 不为本次需求增加 checkpoint retention、批量编辑 API、自动 session close 或提交发布
+  流程；这些可独立规划，不能混入本次改动。
+
+## Constraints
+
+- 每个 mutation 必须继续先创建一个 Bridge-owned checkpoint ref。
+- 所有 commit-mode 判断和 Git side effect 必须位于同一 project mutation lock 内。
+- dirty workspace、HEAD race、branch race、unexpected paths 和敏感路径继续 fail closed。
+- 幂等 replay 只能返回已持久化结果，不得再次 commit 或 amend。
+- Git 结果无法确认时继续进入 `UNKNOWN_SIDE_EFFECT`，不得为了减少 commit 放宽恢复规则。
+- rollback safety checkpoint 和 compare-and-swap 验证保持不变。
+- 不 amend 仅由 message、author、`wip:` 前缀或仓库文件声明为 Bridge-owned 的 commit。
+- 不 amend 其他 session、其他 branch、remote/tag/共享 branch 可达的 commit。
+- 不清理现有 checkpoint refs，不自动改写既有历史。
+- 不新增第三方依赖，不修改部署环境变量或项目注册格式。
+
+## Impact Scope
+
+### 代码
+
+- `bridge/src/codemcp_bridge/mcp_server.py`
+  - mutation baseline/context 和 commit-mode 编排；六类文件 mutation 接线。
+- `bridge/src/codemcp_bridge/git_guard.py`
+  - 显式 commit mode、session footer、共享 ref 检查、create/amend 固定命令。
+- `bridge/src/codemcp_bridge/checkpoint_service.py`
+  - 基于 checkpoint、operation 和 Git 证据的保守归属判定；或仅承载对应查询封装。
+- `bridge/src/codemcp_bridge/db/store.py`
+  - 增加只读查询，证明指定 HEAD 来自同 session 的成功、已 finalized mutation。
+
+### 测试
+
+- `bridge/tests/test_phase3_persistence.py`
+  - checkpoint/operation 归属查询和 no-op/failed/unknown 排除。
+- `bridge/tests/test_phase4_git.py`
+  - create/amend Git argv、footer、共享 ref 屏障、checkpoint diff/restore。
+- `bridge/tests/test_phase2_server.py`
+  - 跨文件工具、session 边界、并发 session、幂等和目录 marker 回归。
+- `tests/integration/test_codemcp_compatibility.py`
+  - 固定上游行为只作为兼容基线；确认新主流程不依赖上游 amend 来建立所有权。
+
+### 文档
+
+- `README.md`
+- `docs/architecture.md`
+- `docs/git-policy.md`
+- `docs/phase-4-validation.md`
+- `docs/implementation-plan.md`
+
+### 明确不受影响
+
+- SQLite schema version 和现有数据库文件。
+- MCP tool 名称、必填参数和 request hash 计算。
+- Tunnel、worker 生命周期、项目注册、命令白名单和审批 token。
+- checkpoint ref 命名、manual checkpoint、rollback safety checkpoint 和 retention 现状。
+
+## Phases
+
+### Phase 1：建立安全的 commit 归属判定和 Git 原语
+
+#### Goal
+
+在不改变现有 mutation 工具行为的前提下，先提供可独立测试、默认不允许 amend 的
+commit policy 基础能力，并封住“仅凭当前 HEAD/message 进行 amend”的风险。
+
+#### Files / Modules
+
+- `bridge/src/codemcp_bridge/db/store.py`
+- `bridge/src/codemcp_bridge/checkpoint_service.py`
+- `bridge/src/codemcp_bridge/git_guard.py`
+- `bridge/tests/test_phase3_persistence.py`
+- `bridge/tests/test_phase4_git.py`
+
+#### Changes
+
+1. 增加显式 `CommitMode` 受限类型，默认值必须为 `CREATE`。
+2. 增加数据库只读查询：只接受同 project/session、关联 operation 为 `succeeded`、
+   checkpoint 已 finalized、before/after HEAD 不同且 after branch/HEAD 精确匹配的记录。
+3. 增加 Git tip footer 精确读取和校验；footer 与数据库证据必须同时成立。
+4. 增加共享/发布 ref 检查，排除 remote refs、tags 和当前分支之外的 local branches；
+   checkpoint refs 不作为共享阻断条件。
+5. 将任何查询异常或证据缺失统一映射为 `CREATE`，并记录不含源码内容的诊断日志。
+6. 增加创建 WIP commit 时写入 session footer 的固定 argv helper；此 Phase 不切换现有
+   MCP mutation 调用方。
+
+#### Dependencies
+
+- 现有 schema 3 的 sessions、operations、checkpoints 和 audit 关联。
+- 现有 GitGuard 固定 argv、HEAD 校验和 project mutation lock。
+
+#### Risks
+
+- SQLite 查询如果未关联 operation state，可能把 failed/unknown checkpoint 当成所有权。
+- footer 若被 Git hook 改写会导致保守地多创建 commit，但不能导致错误 amend。
+- `for-each-ref --contains` 的解析必须固定 namespace，不能接受调用方提供 ref 参数。
+
+#### Validation
+
+~~~powershell
+uv run --project bridge pytest -q bridge/tests/test_phase3_persistence.py bridge/tests/test_phase4_git.py
+uv run --project bridge ruff check bridge/src bridge/tests/test_phase3_persistence.py bridge/tests/test_phase4_git.py
+~~~
+
+覆盖：无历史记录、历史记录无 footer、同 HEAD no-op、failed、unknown、其他 session、
+branch 不同、remote ref、tag、其他 local branch，以及数据库/Git 检查失败。
+
+#### Acceptance Criteria
+
+- 只有 SQLite 成功证据、精确 footer、branch/HEAD 连续性和未共享检查全部通过时返回
+  `AMEND_SESSION_WIP`。
+- 所有不确定与历史数据均返回 `CREATE`。
+- 未改动 MCP mutation 的现有提交行为。
+- `git diff --check`、目标测试和 Ruff 通过；检查 status 后仅提交本 Phase 文件。
+- 完成后停止，不自动进入 Phase 2。
+
+### Phase 2：统一六类文件 mutation 的 session WIP 行为
+
+#### Goal
+
+把安全 commit mode 接入全部文件类 mutation，使同 session 连续修改只增加一个分支
+WIP commit，同时修复移动、删除和目录创建首次调用会无条件 amend 当前 HEAD 的问题。
+
+#### Files / Modules
+
+- `bridge/src/codemcp_bridge/mcp_server.py`
+- `bridge/src/codemcp_bridge/git_guard.py`
+- `bridge/src/codemcp_bridge/checkpoint_service.py`
+- `bridge/tests/test_phase2_server.py`
+- `bridge/tests/test_phase4_git.py`
+
+#### Changes
+
+1. 让 `_begin_mutation()` 返回 checkpoint 与已判定 commit mode 的内部 context；判断仍在
+   per-project lock 内完成。
+2. `commit_file_bytes()` 根据显式 mode 选择新 commit 或安全 amend，保留现有原子写入、
+   expected HEAD、unexpected paths、clean-final-state 和 unknown 处理。
+3. 为 `move_tracked_file()`、`delete_tracked_file()` 增加 description 和显式 mode；首次
+   mutation 使用新 commit，只有已证明的 session WIP 才 amend。
+4. `directory_create` 使用 Bridge 原子文件提交路径创建空 `.gitkeep`；失败时保留现有
+   目录清理与 unknown 判定，不再依赖上游 `WriteFile` 的无条件 amend。
+5. 接入 `file_edit`、`file_create`、`file_write`、`file_move`、`file_delete`、
+   `directory_create`；每次仍创建并 finalize 独立 checkpoint。
+6. no-op 文件内容继续不创建 Git commit；它也不能建立或转移 session WIP 所有权。
+7. 保持现有成功 payload、changed_files、idempotency replay 和错误码兼容。
+
+#### Dependencies
+
+- Phase 1 的 commit mode、数据库证据和 Git ref/footer 检查。
+
+#### Risks
+
+- amend 后前后 commit 不再是祖先关系；checkpoint diff 必须继续按 tree 比较验证。
+- 目录创建从 adapter 路径切换到 GitGuard 后，现有 fake-adapter 调用次数断言需要按新事实
+  更新，但 MCP 外部契约不得变化。
+- 多个 active session 交错时会主动切断合并链并新建 commit，提交数可能高于单 session，
+  这是保护所有权的预期行为。
+
+#### Validation
+
+~~~powershell
+uv run --project bridge pytest -q bridge/tests/test_phase2_server.py bridge/tests/test_phase4_git.py
+uv run --project bridge ruff check bridge/src bridge/tests
+~~~
+
+至少覆盖以下 Git 序列：
+
+1. 用户基线 `U`。
+2. session A 首次编辑得到 `A1`：commit count `+1`，且 `A1^ == U`。
+3. session A 创建、写入、移动、删除和目录创建依次得到 `A2...A6`：每次 HEAD 改变，
+   分支 commit count 不再增加，每个 mutation checkpoint 分别指向前一个 HEAD。
+4. 对任一中间 checkpoint 执行 diff 和 approved restore，结果与该次 mutation 一致。
+5. session B 在当前 HEAD 修改时新建 `B1`，不得 amend session A 的 WIP。
+6. 用户外部 commit、tag、remote-tracking ref 或其他 local branch 共享当前 HEAD 后，下一次
+   Bridge mutation 新建 commit。
+7. 同一 idempotency key 重放不改变 HEAD、commit count 或 checkpoint count。
+
+#### Acceptance Criteria
+
+- 同 session、同 branch、无外部干预的六类文件 mutation 只产生一个分支可见 WIP commit。
+- session 的第一次 move/delete/directory_create 不再重写用户基线 commit。
+- 每个 mutation 的 checkpoint、diff hash、changed_files 和 restore 仍正确。
+- 新 session、外部 Git 变化和共享/发布 HEAD 一律新建 commit。
+- 目标测试、Ruff、`git diff --check` 通过；仅提交本 Phase 文件。
+- 完成后停止，不自动进入 Phase 3。
+
+### Phase 3：恢复回归、文档和完整验收
+
+#### Goal
+
+验证 session amend 与 restart、unknown reconciliation、rollback、WSL 兼容路径和远程
+MCP 合同共存，并把新的提交语义写入运维与安全文档。
+
+#### Files / Modules
+
+- `bridge/tests/test_phase2_server.py`
+- `bridge/tests/test_phase3_persistence.py`
+- `bridge/tests/test_phase4_git.py`
+- `tests/integration/test_codemcp_compatibility.py`
+- `README.md`
+- `docs/architecture.md`
+- `docs/git-policy.md`
+- `docs/phase-4-validation.md`
+- `docs/implementation-plan.md`
+
+#### Changes
+
+1. 增加 commit 已发生但 checkpoint/operation 未完成时的 unknown 与 reconcile 回归测试。
+2. 验证原 session 因重启 blocked、successor session 完成 reconcile 后，successor 的下一次
+   mutation 新建自己的 WIP commit，不继承原 session amend 权限。
+3. 验证 checkpoint restore 前创建 rollback safety ref，restore 后继续 mutation 时仍遵循
+   footer、SQLite、session 和共享 ref 规则。
+4. 验证 idempotent replay、取消和失败操作不会错误建立 commit 所有权。
+5. 更新 README、architecture、git-policy 和 Phase 4 validation，明确“操作级 checkpoint、
+   session 级 WIP commit”、安全 fallback 以及 checkpoint retention 不变。
+6. 记录 rollout：既有 commit/checkpoint 因缺少新版 footer 不会被自动收养；无需数据库
+   migration，回退代码也无需迁移数据。
+
+#### Dependencies
+
+- Phase 1 和 Phase 2 已独立完成并通过目标测试。
+- 固定 `codemcp==0.3.0` 和当前 WSL2 worker 兼容基线。
+
+#### Risks
+
+- 用户在 Bridge session 中途手动 push，但本地 remote-tracking ref 尚未更新时，Bridge
+  无法可靠知道该 commit 已发布；运维文档必须要求不要发布未结束 session 的 WIP。
+- session 当前没有显式 close 工具，长期复用同一 session 会形成较大的单个 WIP commit。
+- checkpoint refs 会继续固定每次 amend 前的 commit；磁盘对象和 `git log --all` 噪声
+  不会因本改动减少。
+
+#### Validation
+
+~~~powershell
+uv run --project bridge codemcp-bridge-server check
+uv run --project bridge ruff check bridge/src bridge/tests tests/integration
+uv run --project bridge pytest -q bridge/tests tests/integration
+git diff --check
+git status --short --branch
+~~~
+
+本项目没有浏览器 UI，本 Phase 不需要 Playwright；Tunnel 端到端合同只需确认工具 schema、
+payload 和幂等行为未变化，不通过远程路径修改真实用户仓库做破坏性验收。
+
+#### Acceptance Criteria
+
+- 完整 Bridge 与 integration 测试通过，server check 和 Ruff 通过。
+- restart/reconcile、checkpoint diff/restore、CAS 冲突和跨 session 场景全部有自动化覆盖。
+- 文档准确区分 branch WIP commit 与 Bridge checkpoint ref。
+- 无 schema migration、无新增依赖、无 MCP breaking change。
+- `git diff --check` 和 status 已检查；仅提交本 Phase 文件。
+- 完成后停止并报告 commit、文件、验证结果及残余风险。
+
+## Final Validation
+
+最终验收必须同时满足：
+
+- 安全不变量：逐 mutation checkpoint、clean workspace、project lock、CAS rollback、unknown
+  reconciliation 和敏感路径保护均未弱化。
+- 历史不变量：任何用户、其他 session、其他 branch、tag 或 remote 共享 commit 都不会被
+  Bridge amend。
+- 降噪目标：一个无外部干预的 active session，无论执行多少次受支持文件 mutation，
+  当前分支相对 session 起点只增加一个 WIP commit。
+- 可恢复目标：每个 amend 前版本仍由对应 checkpoint ref 固定，可单独 diff 和 restore。
+- 兼容目标：已有数据库直接启动；既有操作结果可重放；现有 MCP 客户端无需改参数。
+- 回退目标：代码回退不需要数据库降级，也不自动删除新旧 checkpoint 或修改 Git 历史。
+
+## Open Risks
+
+1. session 是现有最小边界，但缺少显式 close；如果未来需要“每个用户任务一个正式 commit”，
+   应单独设计 change-set/finalize 工具，不能让 Bridge 自行推断任务结束。
+2. 本计划不减少 checkpoint 数量。需要降低 ref/对象数量时，应另行设计 retention，并处理
+   restore、审计保留期和数据库/ref 原子删除。
+3. amend 会持续改变 WIP HEAD hash；依赖固定 HEAD 的外部工具必须使用最新 operation 结果，
+   不能缓存旧 WIP HEAD。
+4. 本地 remote-tracking ref 不能证明所有远端发布状态；“不要在 active session 中手动 push
+   WIP”仍是运维约束。
+5. Git hooks、签名策略或自定义 commit message cleanup 可能移除 footer；预期结果是安全地
+   退化为更多新 commit，而不是放宽 amend。
