@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
+import anyio
 import pytest
 
+import codemcp_bridge.worker_manager as worker_manager_module
 from codemcp_bridge.errors import BridgeError
 from codemcp_bridge.settings import (
     BridgeSettings,
