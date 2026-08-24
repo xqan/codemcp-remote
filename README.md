@@ -250,7 +250,7 @@ The final stable release additionally requires the gates in:
 
 Contributions must preserve the project's fail-closed security model. In particular, changes that widen filesystem, command, identity, transport, model-egress, or destructive Git scope require an explicit threat-model update and negative tests.
 
-See `CONTRIBUTING.md` once the open-source governance stage is complete.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), and [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
