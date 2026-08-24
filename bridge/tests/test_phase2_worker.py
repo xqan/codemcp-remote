@@ -318,9 +318,7 @@ async def test_cancelled_startup_does_not_cancel_shared_startup_future(
     monkeypatch.setattr(worker_manager_module, "ClientSession", FakeClientSession)
 
     manager = WorkerManager(settings)
-    call_task = asyncio.create_task(
-        manager.call(settings.projects["demo"], "ReadFile", {})
-    )
+    call_task = asyncio.create_task(manager.call(settings.projects["demo"], "ReadFile", {}))
     await asyncio.wait_for(initialize_started.wait(), timeout=1)
     worker = manager._workers["demo"]
 
