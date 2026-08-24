@@ -1,73 +1,259 @@
 # codemcp-remote
 
-独立的本机代码修改服务，目标架构为：
+A policy-controlled local MCP bridge for using **ChatGPT as the only reasoning engine** while safely operating on registered local code repositories.
 
-ChatGPT（唯一推理） → Secure MCP Tunnel → 本机 MCP Bridge → codemcp → 已登记项目
+```text
+ChatGPT
+  -> OpenAI Secure MCP Tunnel
+  -> loopback codemcp-remote Bridge
+  -> pinned codemcp worker in WSL2
+  -> registered local Git project
+```
 
-本项目不使用 Codex、OpenCode 或其他推理模型。Bridge 和 codemcp 只负责工具执行、安全控制、会话、审计和结果返回。
+> **Pre-release:** the core remote-coding path is implemented and has passed earlier phase validation, but the first stable `v0.1.0` is still blocked on the final Windows operations, security, clean-machine, secrets, and release gates in [`docs/acceptance-test-plan.md`](docs/acceptance-test-plan.md).
 
-## 当前状态
+## Why codemcp-remote
 
-- 当前阶段：Phase 6（Windows 11 运维化和开发者体验）
-- 当前实现：loopback MCP Bridge、SQLite 生命周期、幂等 operation、一次性审批、审计、Bridge-owned Git checkpoint/CAS rollback、WSL2 codemcp worker，以及受限的 tunnel-client 启动/诊断包装
-- 当前远程验收：真实 Tunnel 工具发现、主合同和失败恢复矩阵已通过；Phase 6 已完成一键启动/停止首个原子任务；Windows 原生 Git mutation 仍不支持
-- 平台决策：codemcp mutation worker 运行在 WSL2；Windows 原生 Git-backed
-  mutation 不支持，详见 [docs/codemcp-compatibility-matrix.md](docs/codemcp-compatibility-matrix.md)
+Remote code modification is a high-privilege operation. codemcp-remote deliberately exposes a smaller surface than arbitrary remote shell access:
 
-## Phase 5 本地检查
+- local projects must be explicitly registered;
+- tool paths stay inside the registered project root;
+- sensitive paths are denied by default;
+- commands are selected by registered command ID, not arbitrary shell text or caller-supplied argv;
+- mutations are idempotent and serialized per project;
+- high-risk operations use short-lived, one-time approvals;
+- mutations create Bridge-owned Git checkpoints;
+- rollback uses compare-and-swap checks and fails closed on external Git changes;
+- uncertain mutation outcomes remain `unknown` until explicitly reconciled;
+- Bridge listens on loopback only.
 
-需要 Python 3.12+、uv 和 Git：
+The Bridge does not contain an agent loop or model provider. Repository content is treated as untrusted data and cannot authorize a privileged action.
 
-~~~text
+## Current support
+
+| Component | `v0.1.0` target |
+|---|---|
+| Host OS | Windows 11 |
+| PowerShell | PowerShell 7 (`pwsh`) |
+| Bridge | Python 3.12+ |
+| Mutation worker | WSL2 Ubuntu |
+| codemcp | pinned `0.3.0` |
+| Remote transport | OpenAI Secure MCP Tunnel |
+| Identity model | single-user local policy profile |
+| Native Windows Git-backed mutation | **not supported** |
+| Arbitrary shell / arbitrary path | **not exposed** |
+| Automatic push / merge / rebase / deploy | **not supported** |
+
+Secure MCP Tunnel and ChatGPT developer-mode availability depend on the capabilities enabled for your account/workspace. Tunnel connectivity is transport only; it does not replace Bridge authorization or approvals.
+
+See [`docs/codemcp-compatibility-matrix.md`](docs/codemcp-compatibility-matrix.md) for the tested backend behavior.
+
+## Requirements
+
+On Windows:
+
+- Windows 11 with WSL2 enabled;
+- an Ubuntu WSL2 distribution;
+- Python 3.12+ on Windows;
+- Python 3.12+ and `python3-venv` inside the WSL distribution;
+- Git;
+- PowerShell 7 (`pwsh`);
+- [`uv`](https://docs.astral.sh/uv/);
+- `tunnel-client` for the remote ChatGPT path;
+- an OpenAI Tunnel and the required account/workspace permissions for Tunnel use.
+
+Do not store the Tunnel runtime API key in this repository, a local env file, the generated Tunnel profile, shell history, or logs.
+
+## Quick start
+
+### 1. Install the Bridge dependencies
+
+From the repository root:
+
+```powershell
+uv sync --project bridge
+```
+
+### 2. Bootstrap the locked WSL2 worker environment
+
+The default worker Python is `.local/bridge-venv-wsl/bin/python` inside the repository as seen from WSL.
+
+```powershell
+pwsh -File .\scripts\bootstrap-wsl.ps1
+```
+
+The bootstrap exports the locked non-development dependency set from `bridge/uv.lock` into a Git-ignored `.local/worker-requirements.txt`, creates the WSL venv, installs those dependencies, and verifies `codemcp==0.3.0`.
+
+For a distribution other than the default Ubuntu name:
+
+```powershell
+pwsh -File .\scripts\bootstrap-wsl.ps1 -WslDistribution Ubuntu-24.04
+```
+
+### 3. Register your first project
+
+Create the Git-ignored local registry:
+
+```powershell
+Copy-Item config/projects.example.toml config/projects.toml
+```
+
+Edit `config/projects.toml`. A conservative explicit example is:
+
+```toml
+[projects.my_project]
+root = "D:/workspace/my-project"
+allowed_branches = ["main", "develop", "feature/*"]
+require_clean_workspace = true
+codemcp_config = "codemcp.toml"
+
+[projects.my_project.commands.test]
+kind = "test"
+argv = ["mvn", "-q", "test"]
+timeout_seconds = 900
+approval = "not-required"
+```
+
+Only register repositories you intend ChatGPT to access. Treat registered command configuration as trusted local policy.
+
+### 4. Prepare the Tunnel profile input
+
+```powershell
+Copy-Item config/tunnel-profile.example.env config/tunnel-profile.local.env
+```
+
+Put the Tunnel ID and other non-secret profile settings in the local file as documented in [`docs/tunnel-setup.md`](docs/tunnel-setup.md).
+
+Inject `CONTROL_PLANE_API_KEY` into the process from a secret manager or another non-persistent mechanism. The wrapper rejects storing that key in `config/tunnel-profile.local.env`.
+
+### 5. Start and diagnose
+
+First local Tunnel profile initialization:
+
+```powershell
+pwsh -File .\scripts\start-all.ps1 -Initialize
+pwsh -File .\scripts\doctor.ps1
+```
+
+Normal later startup:
+
+```powershell
+pwsh -File .\scripts\start-all.ps1
+pwsh -File .\scripts\doctor.ps1
+```
+
+Stop project-owned Bridge, Tunnel, and worker process trees:
+
+```powershell
+pwsh -File .\scripts\stop-all.ps1
+```
+
+Preview what the stop script would target:
+
+```powershell
+pwsh -File .\scripts\stop-all.ps1 -WhatIf
+```
+
+## Connect from ChatGPT
+
+Follow [`docs/tunnel-setup.md`](docs/tunnel-setup.md):
+
+1. keep the local Bridge and `tunnel-client` healthy;
+2. create/use a ChatGPT developer-mode app with the supported Tunnel connection;
+3. select the Tunnel associated with the intended workspace;
+4. confirm that the Bridge tools are discovered;
+5. run the remote contract in [`tests/e2e/test_tunnel_contract.md`](tests/e2e/test_tunnel_contract.md).
+
+A safe first request is read-only: open one registered project, inspect its status, then read a non-sensitive source file.
+
+Before the first mutation, make sure the target branch and worktree are exactly the state you expect. The default policy rejects a dirty worktree.
+
+## Mutation, approval, and recovery
+
+Mutation calls require a caller request ID and a canonical SHA-256 request hash. Repeating an already completed mutation with the same identity replays the persisted result instead of executing it twice.
+
+Commands or Git operations that require approval return a short-lived one-time approval flow. Plaintext approval tokens are not persisted in SQLite.
+
+Before mutation, the Bridge records a Git baseline and creates a Bridge-owned checkpoint. Checkpoint restore:
+
+- is scoped to the registered project/session;
+- verifies the registered checkpoint ref;
+- requires the expected current HEAD;
+- requires a clean worktree;
+- requires explicit approval;
+- creates a rollback safety checkpoint;
+- refuses to overwrite externally changed Git state.
+
+If the Bridge cannot prove whether a side effect occurred, the operation remains `unknown`; do not blindly retry it. Inspect `operation_status` and use the explicit reconciliation flow.
+
+See [`docs/git-policy.md`](docs/git-policy.md) and [`docs/security-model.md`](docs/security-model.md).
+
+## Doctor and operations
+
+The main operator commands are:
+
+```powershell
+pwsh -File .\scripts\doctor.ps1
+pwsh -File .\scripts\doctor.ps1 -SkipTunnel
+pwsh -File .\scripts\start-all.ps1
+pwsh -File .\scripts\stop-all.ps1
+```
+
+The detailed operator guide is [`docs/operations-runbook.md`](docs/operations-runbook.md).
+
+For release validation, the repository also contains a 20-cycle lifecycle runner:
+
+```powershell
+pwsh -File .\scripts\validate-lifecycle.ps1 -Iterations 20
+```
+
+This is only one release gate. It does not replace the crash, secret-canary, path/encoding, Tunnel-disconnect, and security tests in [`docs/phase-6-validation.md`](docs/phase-6-validation.md).
+
+## Security model
+
+Read these before exposing a local repository through the Bridge:
+
+- [`SECURITY.md`](SECURITY.md) — vulnerability reporting;
+- [`docs/security-model.md`](docs/security-model.md) — trust boundaries and guarantees;
+- [`docs/threat-model.md`](docs/threat-model.md) — threats, mitigations, and residual risks;
+- [`docs/git-policy.md`](docs/git-policy.md) — checkpoint/diff/rollback constraints.
+
+Important boundaries:
+
+- the local OS account and trusted local configuration are root trust assumptions;
+- a dangerously configured registered command is still dangerous;
+- filename filtering cannot identify every secret stored under an ordinary filename;
+- a compromised dependency/toolchain is not fully contained by the Bridge;
+- this first release is not a multi-user identity/RBAC system.
+
+Security issues should follow [`SECURITY.md`](SECURITY.md), not a public exploit report.
+
+## Development
+
+Local checks:
+
+```powershell
 uv sync --project bridge
 uv run --project bridge codemcp-bridge doctor --strict --json
 uv run --project bridge codemcp-bridge-server check
-uv run --project bridge pytest -q --basetemp=.local/pytest-phase5
-uv run --project bridge ruff check bridge/src bridge/tests
-~~~
+uv run --project bridge ruff check bridge/src bridge/tests tests/integration
+uv run --project bridge pytest -q bridge/tests tests/integration
+```
 
-Phase 1 已固定并安装 `codemcp==0.3.0`；WSL2 路径已通过 Git-backed 集成验证，
-实际协议、工具和 Git 行为记录在兼容性矩阵中。Phase 2 的基础验证记录在
-[docs/phase-2-validation.md](docs/phase-2-validation.md)，Phase 3 的生命周期验证记录在
-[docs/phase-3-validation.md](docs/phase-3-validation.md)，Phase 4 的 Git 安全验证记录在
-[docs/phase-4-validation.md](docs/phase-4-validation.md)。Git 边界和 rollback
-约束见 [docs/git-policy.md](docs/git-policy.md)。Tunnel 配置和诊断见
-[docs/tunnel-setup.md](docs/tunnel-setup.md)，远程验收合同见
-[tests/e2e/test_tunnel_contract.md](tests/e2e/test_tunnel_contract.md)。Phase 5
-本地验证记录见 [docs/phase-5-validation.md](docs/phase-5-validation.md)。
+The final stable release additionally requires the gates in:
 
-本地启动 Bridge 和 Tunnel：
+- [`docs/open-source-readiness-plan.md`](docs/open-source-readiness-plan.md)
+- [`docs/phase-6-validation.md`](docs/phase-6-validation.md)
+- [`docs/acceptance-test-plan.md`](docs/acceptance-test-plan.md)
 
-~~~text
-Copy-Item config/tunnel-profile.example.env config/tunnel-profile.local.env
-pwsh -File .\scripts\start-all.ps1 -Initialize
-pwsh -File .\scripts\doctor.ps1
-~~~
+## Contributing
 
-项目注册信息写入本地的 `config/projects.toml`；该文件已被 Git 忽略。
-`config/projects.example.toml` 仅作为模板保留，不要把真实项目路径写回 example：
+Contributions must preserve the project's fail-closed security model. In particular, changes that widen filesystem, command, identity, transport, model-egress, or destructive Git scope require an explicit threat-model update and negative tests.
 
-~~~powershell
-Copy-Item config/projects.example.toml config/projects.toml
-# 编辑 config/projects.toml 后再启动 Bridge
-~~~
+See `CONTRIBUTING.md` once the open-source governance stage is complete.
 
-后续启动可直接运行 `pwsh -File .\scripts\start-all.ps1`；停止使用
-`pwsh -File .\scripts\stop-all.ps1`。`start-all.ps1` 会先等待 Bridge
-健康，再等待 Tunnel `readyz`；只有确认进程属于本仓库和 Tunnel profile
-时才会复用已健康的本机服务。
+## License
 
-## 关键约束
+codemcp-remote is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`). See [`LICENSE`](LICENSE).
 
-- ChatGPT 是唯一推理引擎。
-- Bridge 不包含模型 provider、模型 key 或模型调用代码。
-- Bridge 只允许已登记的 project_id、项目路径和命令 ID。
-- 不暴露任意路径读写和任意 shell。
-- Secure MCP Tunnel 只承担远程传输，不替代 Bridge 的授权、审批和审计。
-- tunnel-client 只允许使用 OpenAI control plane、loopback Bridge MCP URL 和环境变量密钥引用。
-- 本机不开放公网入站端口；Tunnel 通过出站 HTTPS 连接 OpenAI control plane。
-- 默认禁止 dirty workspace 直接写入。
-- checkpoint 使用 `refs/codemcp-remote/checkpoints/<id>`，只允许 Bridge 登记的 ref。
-- rollback 必须显式审批，并提交当前 branch/HEAD 作为 compare-and-swap 预期值；发生外部修改时 fail closed。
-
-详细执行计划见 [docs/implementation-plan.md](docs/implementation-plan.md)。
+`codemcp==0.3.0` is a separate third-party dependency and retains its upstream Apache-2.0 license. Other dependency licenses are reviewed as part of the release supply-chain gate.
