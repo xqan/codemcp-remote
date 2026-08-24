@@ -143,6 +143,43 @@ async def test_commit_file_bytes_commits_only_the_requested_path(git_project: Pa
 
 
 @pytest.mark.asyncio
+async def test_commit_file_bytes_honors_explicit_session_commit_modes(
+    git_project: Path,
+) -> None:
+    guard = GitGuard()
+    before_head = _git(git_project, "rev-parse", "HEAD")
+
+    created_head = await guard.commit_file_bytes(
+        git_project,
+        path="src/hello.txt",
+        content=b"session create\n",
+        expected_head=before_head,
+        description="explicit create mode",
+        require_exists=True,
+        commit_mode=CommitMode.CREATE,
+        session_id="session-1",
+    )
+    assert _git(git_project, "rev-list", "--count", "main") == "2"
+    assert _git(git_project, "rev-parse", f"{created_head}^") == before_head
+    assert await guard.read_session_footer(git_project, head=created_head) == "session-1"
+
+    amended_head = await guard.commit_file_bytes(
+        git_project,
+        path="src/hello.txt",
+        content=b"session amend\n",
+        expected_head=created_head,
+        description="explicit amend mode is ignored",
+        require_exists=True,
+        commit_mode=CommitMode.AMEND_SESSION_WIP,
+        session_id="session-1",
+    )
+    assert amended_head != created_head
+    assert _git(git_project, "rev-list", "--count", "main") == "2"
+    assert _git(git_project, "rev-parse", f"{amended_head}^") == before_head
+    assert await guard.read_session_footer(git_project, head=amended_head) == "session-1"
+
+
+@pytest.mark.asyncio
 async def test_create_wip_commit_writes_and_reads_exact_session_footer(
     git_project: Path,
 ) -> None:

@@ -25,7 +25,7 @@ from .codemcp_adapter import CodemcpAdapter
 from .command_runner import RegisteredCommandRunner
 from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
-from .git_guard import GitGuard
+from .git_guard import CommitMode, GitGuard
 from .mcp_transport import BridgeStreamableHTTPSessionManager
 from .operation_service import OperationService
 from .operation_service import request_hash as calculate_request_hash
@@ -44,6 +44,12 @@ class _Outcome:
     changed_files: list[str]
     truncated: bool = False
     status: str = "succeeded"
+
+
+@dataclass(frozen=True, slots=True)
+class _MutationContext:
+    checkpoint: CheckpointRecord
+    commit_mode: CommitMode
 
 
 class AdapterLike(Protocol):
@@ -428,14 +434,20 @@ class BridgeService:
         *,
         session_id: str,
         operation_id: str,
-    ) -> CheckpointRecord:
+    ) -> _MutationContext:
         await self.policy.require_mutation_preconditions(project)
-        return await self.checkpoints.create(
+        checkpoint = await self.checkpoints.create(
             project,
             session_id=session_id,
             operation_id=operation_id,
             kind="mutation",
         )
+        commit_mode = await self.checkpoints.determine_commit_mode(
+            project,
+            session_id=session_id,
+            checkpoint=checkpoint,
+        )
+        return _MutationContext(checkpoint=checkpoint, commit_mode=commit_mode)
 
     async def _finish_mutation(
         self, project: ProjectSpec, checkpoint: CheckpointRecord
@@ -732,11 +744,12 @@ class BridgeService:
             self.policy.validate_file_size(target)
             self.policy.require_text_file(target)
             async with self._mutation_lock(project_id):
-                checkpoint = await self._begin_mutation(
+                mutation = await self._begin_mutation(
                     project,
                     session_id=session_id,
                     operation_id=operation_id,
                 )
+                checkpoint = mutation.checkpoint
                 self.policy.require_regular_file(target)
                 self.policy.validate_file_size(target)
                 self.policy.require_text_file(target)
@@ -762,6 +775,8 @@ class BridgeService:
                     expected_head=checkpoint.head,
                     description=description,
                     require_exists=True,
+                    commit_mode=mutation.commit_mode,
+                    session_id=session_id,
                 )
             checkpoint_data = await self._finish_mutation(project, checkpoint)
             return _Outcome(
@@ -824,11 +839,12 @@ class BridgeService:
                         "file already exists",
                         {"path": normalized},
                     )
-                checkpoint = await self._begin_mutation(
+                mutation = await self._begin_mutation(
                     project,
                     session_id=session_id,
                     operation_id=operation_id,
                 )
+                checkpoint = mutation.checkpoint
                 if target.exists():
                     raise BridgeError(
                         "CONFLICT",
@@ -842,6 +858,8 @@ class BridgeService:
                     expected_head=checkpoint.head,
                     description=description,
                     require_exists=False,
+                    commit_mode=mutation.commit_mode,
+                    session_id=session_id,
                 )
             checkpoint_data = await self._finish_mutation(project, checkpoint)
             return _Outcome(
@@ -902,11 +920,12 @@ class BridgeService:
             self.policy.validate_file_size(target)
             self.policy.require_text_file(target)
             async with self._mutation_lock(project_id):
-                checkpoint = await self._begin_mutation(
+                mutation = await self._begin_mutation(
                     project,
                     session_id=session_id,
                     operation_id=operation_id,
                 )
+                checkpoint = mutation.checkpoint
                 self.policy.require_regular_file(target)
                 self.policy.validate_file_size(target)
                 self.policy.require_text_file(target)
@@ -938,6 +957,8 @@ class BridgeService:
                     expected_head=checkpoint.head,
                     description=description,
                     require_exists=True,
+                    commit_mode=mutation.commit_mode,
+                    session_id=session_id,
                 )
             checkpoint_data = await self._finish_mutation(project, checkpoint)
             return _Outcome(
@@ -1011,11 +1032,12 @@ class BridgeService:
                         {"path": normalized_destination},
                     )
 
-                checkpoint = await self._begin_mutation(
+                mutation = await self._begin_mutation(
                     project,
                     session_id=session_id,
                     operation_id=operation_id,
                 )
+                checkpoint = mutation.checkpoint
                 tracked_files = checkpoint.before_data.get("file_hashes", {})
                 if not isinstance(tracked_files, dict) or normalized_source not in tracked_files:
                     raise BridgeError(
@@ -1048,6 +1070,9 @@ class BridgeService:
                     source=normalized_source,
                     destination=normalized_destination,
                     expected_head=checkpoint.head,
+                    description=description,
+                    commit_mode=mutation.commit_mode,
+                    session_id=session_id,
                 )
 
             checkpoint_data = await self._finish_mutation(project, checkpoint)
@@ -1099,11 +1124,12 @@ class BridgeService:
             self.policy.require_regular_file(target)
 
             async with self._mutation_lock(project_id):
-                checkpoint = await self._begin_mutation(
+                mutation = await self._begin_mutation(
                     project,
                     session_id=session_id,
                     operation_id=operation_id,
                 )
+                checkpoint = mutation.checkpoint
                 tracked_files = checkpoint.before_data.get("file_hashes", {})
                 if not isinstance(tracked_files, dict) or normalized not in tracked_files:
                     raise BridgeError(
@@ -1118,6 +1144,9 @@ class BridgeService:
                     project.root,
                     path=normalized,
                     expected_head=checkpoint.head,
+                    description=description,
+                    commit_mode=mutation.commit_mode,
+                    session_id=session_id,
                 )
 
             checkpoint_data = await self._finish_mutation(project, checkpoint)
@@ -1178,11 +1207,12 @@ class BridgeService:
                         "path already exists",
                         {"path": normalized},
                     )
-                checkpoint = await self._begin_mutation(
+                mutation = await self._begin_mutation(
                     project,
                     session_id=session_id,
                     operation_id=operation_id,
                 )
+                checkpoint = mutation.checkpoint
                 if target.exists():
                     raise BridgeError(
                         "CONFLICT",
@@ -1207,17 +1237,17 @@ class BridgeService:
                     ) from exc
 
                 marker = target / ".gitkeep"
+                marker_path = self.registry.relative_path(project, marker)
                 try:
-                    result = await self.adapter.call(
-                        project,
-                        "WriteFile",
-                        {
-                            "path": marker,
-                            "content": "",
-                            "description": f"{description} (directory marker)",
-                            "chat_id": session_id,
-                        },
-                        mutation=True,
+                    new_head = await self.git.commit_file_bytes(
+                        project.root,
+                        path=marker_path,
+                        content=b"",
+                        expected_head=checkpoint.head,
+                        description=f"{description} (directory marker)",
+                        require_exists=False,
+                        commit_mode=mutation.commit_mode,
+                        session_id=session_id,
                     )
                 except asyncio.CancelledError:
                     if not marker.exists():
@@ -1239,41 +1269,15 @@ class BridgeService:
                             ) from cleanup_exc
                     raise exc
 
-                if _is_codemcp_error(result):
-                    if marker.exists():
-                        raise BridgeError(
-                            "UNKNOWN_SIDE_EFFECT",
-                            "directory marker may have been written despite backend rejection",
-                            {"path": normalized},
-                            status="unknown",
-                        )
-                    try:
-                        target.rmdir()
-                    except OSError as exc:
-                        raise BridgeError(
-                            "UNKNOWN_SIDE_EFFECT",
-                            "directory creation failed but cleanup could not be confirmed",
-                            {"path": normalized},
-                            status="unknown",
-                        ) from exc
-                    raise BridgeError(
-                        "CONFLICT",
-                        "codemcp rejected WriteFile",
-                        {"path": normalized},
-                        status="failed",
-                    )
-
             checkpoint_data = await self._finish_mutation(project, checkpoint)
-            marker_path = self.registry.relative_path(project, marker)
             return _Outcome(
                 {
                     "path": normalized,
                     "marker_path": marker_path,
-                    "text": result.text,
+                    "text": f"Bridge directory create committed at {new_head}",
                     "checkpoint": checkpoint_data,
                 },
                 list(checkpoint_data["after"]["changed_files"]),
-                result.truncated,
             )
 
         return await self._execute(
@@ -1355,11 +1359,12 @@ class BridgeService:
         operation_id: str,
     ) -> _Outcome:
         async with self._mutation_lock(project.project_id):
-            checkpoint = await self._begin_mutation(
+            mutation = await self._begin_mutation(
                 project,
                 session_id=session_id,
                 operation_id=operation_id,
             )
+            checkpoint = mutation.checkpoint
             result = await self.command_runner.run(project, command)
             after_command = await self.git.status(project.root)
             if (

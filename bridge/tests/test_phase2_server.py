@@ -901,6 +901,8 @@ async def test_file_move_is_idempotent_no_clobber_and_safe(git_project: Path) ->
     assert first["data"]["destination_path"] == "src/moved.txt"
     assert first["data"]["head"] != before_head
     assert first["data"]["checkpoint"]["after"]["head"] == first["data"]["head"]
+    assert _git(git_project, "rev-list", "--count", "main") == "3"
+    assert _git(git_project, "rev-parse", f"{first['data']['head']}^") == before_head
     assert not (git_project / "src" / "hello.txt").exists()
     assert (git_project / "src" / "moved.txt").read_text(encoding="utf-8") == "hello\n"
     assert _git(git_project, "status", "--porcelain") == ""
@@ -980,6 +982,8 @@ async def test_file_delete_is_idempotent_tracked_only_and_safe(git_project: Path
     assert first["data"]["path"] == "src/hello.txt"
     assert first["data"]["head"] != before_head
     assert first["data"]["checkpoint"]["after"]["head"] == first["data"]["head"]
+    assert _git(git_project, "rev-list", "--count", "main") == "3"
+    assert _git(git_project, "rev-parse", f"{first['data']['head']}^") == before_head
     assert not (git_project / "src" / "hello.txt").exists()
     assert _git(git_project, "status", "--porcelain") == ""
 
@@ -1044,6 +1048,7 @@ async def test_directory_create_is_git_trackable_idempotent_and_safe(
         "directory-create-1",
         request_hash(operation_input),
     )
+    before_head = _git(git_project, "rev-parse", "HEAD")
     first = await service.directory_create(*arguments)
     second = await service.directory_create(*arguments)
 
@@ -1054,9 +1059,212 @@ async def test_directory_create_is_git_trackable_idempotent_and_safe(
     assert first["data"]["marker_path"] == "src/generated/.gitkeep"
     assert first["changed_files"] == ["src/generated/.gitkeep"]
     assert first["data"]["checkpoint"]["after"]["changed_files"] == ["src/generated/.gitkeep"]
+    assert _git(git_project, "rev-list", "--count", "main") == "2"
+    assert (
+        _git(git_project, "rev-parse", f"{first['data']['checkpoint']['after']['head']}^")
+        == before_head
+    )
     assert marker.is_file()
     assert marker.read_text(encoding="utf-8") == ""
-    assert [name for name, _ in adapter.calls].count("WriteFile") == 1
+    assert [name for name, _ in adapter.calls].count("WriteFile") == 0
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_session_wip_merges_all_file_mutations_without_cross_session_amend(
+    git_project: Path,
+) -> None:
+    service = create_app(_settings(git_project), adapter=FakeAdapter())[1]
+    await service.start()
+    session_a = service.sessions.create("demo")
+    baseline_head = _git(git_project, "rev-parse", "HEAD")
+    baseline_count = int(_git(git_project, "rev-list", "--count", "main"))
+
+    async def assert_checkpoint(result: dict[str, Any], previous_head: str) -> str:
+        assert result["status"] == "succeeded"
+        checkpoint = result["data"]["checkpoint"]
+        new_head = checkpoint["after"]["head"]
+        assert checkpoint["before"]["head"] == previous_head
+        assert new_head != previous_head
+        assert len(checkpoint["diff_hash"]) == 64
+        assert _git(git_project, "status", "--porcelain") == ""
+        assert int(_git(git_project, "rev-list", "--count", "main")) == baseline_count + 1
+        return new_head
+
+    edit_description = "session A edit"
+    edited = await service.file_edit(
+        None,
+        "demo",
+        session_a.session_id,
+        "src/hello.txt",
+        "hello",
+        "session A",
+        edit_description,
+        "session-a-edit-1",
+        request_hash(_file_edit_input("src/hello.txt", "hello", "session A", edit_description)),
+    )
+    head_1 = await assert_checkpoint(edited, baseline_head)
+    assert _git(git_project, "rev-parse", f"{head_1}^") == baseline_head
+    assert await service.git.read_session_footer(git_project, head=head_1) == session_a.session_id
+
+    created_content = "session A created\n"
+    create_description = "session A create"
+    created = await service.file_create(
+        None,
+        "demo",
+        session_a.session_id,
+        "src/session-a.txt",
+        created_content,
+        create_description,
+        "session-a-create-1",
+        request_hash(_file_create_input("src/session-a.txt", created_content, create_description)),
+    )
+    head_2 = await assert_checkpoint(created, head_1)
+    assert created["data"]["checkpoint"]["after"]["changed_files"] == ["src/session-a.txt"]
+
+    written_content = "session A written\n"
+    write_description = "session A write"
+    expected_sha256 = hashlib.sha256(created_content.encode("utf-8")).hexdigest()
+    written = await service.file_write(
+        None,
+        "demo",
+        session_a.session_id,
+        "src/session-a.txt",
+        written_content,
+        expected_sha256,
+        write_description,
+        "session-a-write-1",
+        request_hash(
+            _file_write_input(
+                "src/session-a.txt",
+                written_content,
+                expected_sha256,
+                write_description,
+            )
+        ),
+    )
+    head_3 = await assert_checkpoint(written, head_2)
+    assert written["data"]["checkpoint"]["after"]["changed_files"] == ["src/session-a.txt"]
+
+    move_description = "session A move"
+    moved = await service.file_move(
+        None,
+        "demo",
+        session_a.session_id,
+        "src/session-a.txt",
+        "src/session-a-moved.txt",
+        move_description,
+        "session-a-move-1",
+        request_hash(
+            _file_move_input("src/session-a.txt", "src/session-a-moved.txt", move_description)
+        ),
+    )
+    head_4 = await assert_checkpoint(moved, head_3)
+    assert set(moved["data"]["checkpoint"]["after"]["changed_files"]) == {
+        "src/session-a.txt",
+        "src/session-a-moved.txt",
+    }
+
+    delete_description = "session A delete"
+    deleted = await service.file_delete(
+        None,
+        "demo",
+        session_a.session_id,
+        "src/session-a-moved.txt",
+        delete_description,
+        "session-a-delete-1",
+        request_hash(_file_delete_input("src/session-a-moved.txt", delete_description)),
+    )
+    head_5 = await assert_checkpoint(deleted, head_4)
+    assert deleted["data"]["checkpoint"]["after"]["changed_files"] == [
+        "src/session-a-moved.txt"
+    ]
+
+    directory_description = "session A directory"
+    directory = await service.directory_create(
+        None,
+        "demo",
+        session_a.session_id,
+        "src/session-a-directory",
+        directory_description,
+        "session-a-directory-1",
+        request_hash(_directory_create_input("src/session-a-directory", directory_description)),
+    )
+    head_6 = await assert_checkpoint(directory, head_5)
+    assert directory["data"]["checkpoint"]["after"]["changed_files"] == [
+        "src/session-a-directory/.gitkeep"
+    ]
+    assert await service.git.read_session_footer(git_project, head=head_6) == session_a.session_id
+
+    session_b = service.sessions.create("demo")
+    b_description = "session B edit"
+    b_edit = await service.file_edit(
+        None,
+        "demo",
+        session_b.session_id,
+        "src/hello.txt",
+        "session A",
+        "session B",
+        b_description,
+        "session-b-edit-1",
+        request_hash(_file_edit_input("src/hello.txt", "session A", "session B", b_description)),
+    )
+    assert b_edit["status"] == "succeeded"
+    b_checkpoint = b_edit["data"]["checkpoint"]
+    b_head = b_checkpoint["after"]["head"]
+    assert b_checkpoint["before"]["head"] == head_6
+    assert b_head != head_6
+    assert _git(git_project, "status", "--porcelain") == ""
+    assert int(_git(git_project, "rev-list", "--count", "main")) == baseline_count + 2
+    assert _git(git_project, "rev-parse", f"{b_head}^") == head_6
+    assert await service.git.read_session_footer(git_project, head=b_head) == session_b.session_id
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_noop_file_edit_does_not_establish_session_wip_ownership(
+    git_project: Path,
+) -> None:
+    service = create_app(_settings(git_project), adapter=FakeAdapter())[1]
+    await service.start()
+    session = service.sessions.create("demo")
+    baseline_head = _git(git_project, "rev-parse", "HEAD")
+    baseline_count = _git(git_project, "rev-list", "--count", "main")
+
+    noop_description = "same content no-op"
+    noop = await service.file_edit(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "hello",
+        "hello",
+        noop_description,
+        "noop-edit-1",
+        request_hash(_file_edit_input("src/hello.txt", "hello", "hello", noop_description)),
+    )
+    assert noop["status"] == "succeeded"
+    assert noop["changed_files"] == []
+    assert noop["data"]["checkpoint"]["after"]["head"] == baseline_head
+    assert _git(git_project, "rev-list", "--count", "main") == baseline_count
+
+    description = "first real edit after no-op"
+    real = await service.file_edit(
+        None,
+        "demo",
+        session.session_id,
+        "src/hello.txt",
+        "hello",
+        "real change",
+        description,
+        "real-edit-1",
+        request_hash(_file_edit_input("src/hello.txt", "hello", "real change", description)),
+    )
+    assert real["status"] == "succeeded"
+    real_head = real["data"]["checkpoint"]["after"]["head"]
+    assert _git(git_project, "rev-list", "--count", "main") == "2"
+    assert _git(git_project, "rev-parse", f"{real_head}^") == baseline_head
+    assert await service.git.read_session_footer(git_project, head=real_head) == session.session_id
     await service.close()
 
 

@@ -379,6 +379,53 @@ class GitGuard:
             )
         )
 
+    @staticmethod
+    def _validate_commit_paths(
+        paths: tuple[str, ...] | list[str],
+    ) -> tuple[str, ...]:
+        if isinstance(paths, (str, bytes)):
+            raise BridgeError("INVALID_REQUEST", "commit paths must be a sequence")
+        commit_paths = tuple(paths)
+        if not commit_paths or any(
+            not isinstance(path, str) or not path or "\x00" in path for path in commit_paths
+        ):
+            raise BridgeError("INVALID_REQUEST", "at least one valid commit path is required")
+        return commit_paths
+
+    def _commit_arguments(
+        self,
+        *,
+        paths: tuple[str, ...] | list[str],
+        commit_mode: CommitMode,
+        description: str | None,
+        session_id: str | None,
+    ) -> tuple[str, ...]:
+        if not isinstance(commit_mode, CommitMode):
+            raise BridgeError("INVALID_REQUEST", "commit_mode is not a supported Bridge mode")
+        commit_paths = self._validate_commit_paths(paths)
+        arguments = ["commit"]
+        if commit_mode == CommitMode.CREATE:
+            if (
+                not isinstance(description, str)
+                or not description
+                or len(description) > 500
+                or any(character in description for character in "\r\n\x00")
+                or not isinstance(session_id, str)
+            ):
+                raise BridgeError("INVALID_REQUEST", "description and session_id are required")
+            arguments.extend(
+                [
+                    "-m",
+                    f"wip: {description}\n\n{self.session_footer(session_id)}",
+                ]
+            )
+        elif commit_mode == CommitMode.AMEND_SESSION_WIP:
+            arguments.extend(["--amend", "--no-edit"])
+        else:
+            raise BridgeError("INVALID_REQUEST", "commit_mode is not a supported Bridge mode")
+        arguments.extend(["--only", "--", *commit_paths])
+        return tuple(arguments)
+
     async def commit_paths(
         self,
         project_root: Path,
@@ -391,26 +438,12 @@ class GitGuard:
     ) -> str:
         """Apply one explicit, fixed-argv commit mode to selected paths."""
 
-        if not isinstance(commit_mode, CommitMode):
-            raise BridgeError("INVALID_REQUEST", "commit_mode is not a supported Bridge mode")
-        message: str | None = None
-        if commit_mode == CommitMode.CREATE:
-            if (
-                not isinstance(description, str)
-                or not description
-                or len(description) > 500
-                or any(character in description for character in "\r\n\x00")
-                or not isinstance(session_id, str)
-            ):
-                raise BridgeError("INVALID_REQUEST", "description and session_id are required")
-            message = f"wip: {description}\n\n{self.session_footer(session_id)}"
-        if isinstance(paths, (str, bytes)):
-            raise BridgeError("INVALID_REQUEST", "commit paths must be a sequence")
-        commit_paths = tuple(paths)
-        if not commit_paths or any(
-            not isinstance(path, str) or not path or "\x00" in path for path in commit_paths
-        ):
-            raise BridgeError("INVALID_REQUEST", "at least one valid commit path is required")
+        arguments = self._commit_arguments(
+            paths=paths,
+            commit_mode=commit_mode,
+            description=description,
+            session_id=session_id,
+        )
         if expected_head is not None:
             self._require_head(expected_head)
         before = await self.status(project_root)
@@ -421,13 +454,6 @@ class GitGuard:
                 {"expected_head": expected_head, "actual_head": before.head},
             )
         try:
-            arguments = ["commit"]
-            if commit_mode == CommitMode.CREATE:
-                assert message is not None
-                arguments.extend(["-m", message])
-            else:
-                arguments.extend(["--amend", "--no-edit"])
-            arguments.extend(["--only", "--", *commit_paths])
             await self._run(
                 project_root,
                 *arguments,
@@ -483,10 +509,39 @@ class GitGuard:
         expected_head: str,
         description: str,
         require_exists: bool | None = None,
+        commit_mode: CommitMode | None = None,
+        session_id: str | None = None,
     ) -> str:
-        """Atomically replace one file and commit only that path into a new Git baseline."""
+        """Atomically replace one file and commit only that path.
+
+        ``commit_mode`` is optional for compatibility with the pre-session-WIP
+        low-level helper. Bridge mutation callers pass it explicitly so a new
+        commit carries the session footer and only proven WIP commits amend.
+        """
 
         self._require_head(expected_head)
+        if commit_mode is None:
+            if session_id is not None:
+                raise BridgeError(
+                    "INVALID_REQUEST",
+                    "session_id requires an explicit commit_mode",
+                )
+            legacy_paths = self._validate_commit_paths((path,))
+            commit_arguments = (
+                "commit",
+                "-m",
+                f"wip: {description}",
+                "--only",
+                "--",
+                *legacy_paths,
+            )
+        else:
+            commit_arguments = self._commit_arguments(
+                paths=(path,),
+                commit_mode=commit_mode,
+                description=description,
+                session_id=session_id,
+            )
         before = await self.status(project_root)
         if before.head.lower() != expected_head.lower():
             raise BridgeError(
@@ -571,15 +626,7 @@ class GitGuard:
                 )
 
             await self._run(project_root, "add", "--", path)
-            await self._run(
-                project_root,
-                "commit",
-                "-m",
-                f"wip: {description}",
-                "--only",
-                "--",
-                path,
-            )
+            await self._run(project_root, *commit_arguments)
             final = await self.status(project_root)
             if final.dirty or final.head.lower() == expected_head.lower():
                 raise BridgeError(
@@ -607,10 +654,19 @@ class GitGuard:
         source: str,
         destination: str,
         expected_head: str,
+        description: str | None = None,
+        commit_mode: CommitMode = CommitMode.CREATE,
+        session_id: str | None = None,
     ) -> str:
-        """Move one tracked file and amend only that path pair into HEAD."""
+        """Move one tracked file using an explicit create or safe amend mode."""
 
         self._require_head(expected_head)
+        commit_arguments = self._commit_arguments(
+            paths=(source, destination),
+            commit_mode=commit_mode,
+            description=description,
+            session_id=session_id,
+        )
         before = await self.status(project_root)
         if before.head.lower() != expected_head.lower():
             raise BridgeError(
@@ -649,16 +705,7 @@ class GitGuard:
                         "unexpected_changed_files": unexpected_paths,
                     },
                 )
-            await self._run(
-                project_root,
-                "commit",
-                "--amend",
-                "--no-edit",
-                "--only",
-                "--",
-                source,
-                destination,
-            )
+            await self._run(project_root, *commit_arguments)
             final = await self.status(project_root)
             if final.dirty or final.head.lower() == expected_head.lower():
                 raise BridgeError(
@@ -689,10 +736,19 @@ class GitGuard:
         *,
         path: str,
         expected_head: str,
+        description: str | None = None,
+        commit_mode: CommitMode = CommitMode.CREATE,
+        session_id: str | None = None,
     ) -> str:
-        """Delete one tracked file and amend only that path into HEAD."""
+        """Delete one tracked file using an explicit create or safe amend mode."""
 
         self._require_head(expected_head)
+        commit_arguments = self._commit_arguments(
+            paths=(path,),
+            commit_mode=commit_mode,
+            description=description,
+            session_id=session_id,
+        )
         before = await self.status(project_root)
         if before.head.lower() != expected_head.lower():
             raise BridgeError(
@@ -730,15 +786,7 @@ class GitGuard:
                         "unexpected_changed_files": unexpected_paths,
                     },
                 )
-            await self._run(
-                project_root,
-                "commit",
-                "--amend",
-                "--no-edit",
-                "--only",
-                "--",
-                path,
-            )
+            await self._run(project_root, *commit_arguments)
             final = await self.status(project_root)
             if final.dirty or final.head.lower() == expected_head.lower():
                 raise BridgeError(
