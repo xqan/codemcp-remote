@@ -24,6 +24,7 @@ from .checkpoint_service import CheckpointService
 from .codemcp_adapter import CodemcpAdapter
 from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
+from .generated_codemcp import materialize_generated_codemcp_config
 from .git_guard import GitGuard
 from .mcp_transport import BridgeStreamableHTTPSessionManager
 from .operation_service import OperationService
@@ -481,6 +482,7 @@ class BridgeService:
                         "missing": list(readiness.missing_commands),
                         "mismatched": list(readiness.mismatched_commands),
                     },
+                    "codemcp_config_source": readiness.codemcp_config_source,
                     "codemcp_config_ready": readiness.codemcp_config_ready,
                     "development_ready": readiness.development_ready,
                     "issues": list(readiness.issues),
@@ -1310,13 +1312,14 @@ class BridgeService:
                 session_id=session_id,
                 operation_id=operation_id,
             )
-            result = await self.adapter.call(
-                project,
-                "RunCommand",
-                {"path": project.root, "command": command.command_id, "chat_id": session_id},
-                timeout_seconds=command.timeout_seconds,
-                mutation=True,
-            )
+            with materialize_generated_codemcp_config(project, command):
+                result = await self.adapter.call(
+                    project,
+                    "RunCommand",
+                    {"path": project.root, "command": command.command_id, "chat_id": session_id},
+                    timeout_seconds=command.timeout_seconds,
+                    mutation=True,
+                )
         if _is_codemcp_error(result):
             raise BridgeError(
                 "BACKEND_UNAVAILABLE",

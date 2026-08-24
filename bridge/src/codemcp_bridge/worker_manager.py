@@ -67,10 +67,14 @@ class _CodemcpWorker:
     def _parameters(self) -> StdioServerParameters:
         worker_home = self._settings.storage.data_dir / "workers" / self._project.project_id
         worker_home.mkdir(parents=True, exist_ok=True)
+        git_excludes = worker_home / "git-excludes"
+        git_excludes.write_text("codemcp.toml\n", encoding="utf-8")
         environment = {
             key: os.environ[key] for key in SAFE_ENVIRONMENT if os.environ.get(key) is not None
         }
         environment["PYTHONIOENCODING"] = "utf-8"
+        environment["GIT_CONFIG_COUNT"] = "1"
+        environment["GIT_CONFIG_KEY_0"] = "core.excludesfile"
         normalize_stderr = self._settings.codemcp.worker_mode == "wsl2" and os.name == "nt"
         self._stderr = open_worker_stderr(
             self._settings.storage.log_dir,
@@ -95,12 +99,14 @@ class _CodemcpWorker:
             ]
             environment["HOME"] = to_wsl_path(worker_home)
             environment["USERPROFILE"] = str(worker_home)
+            environment["GIT_CONFIG_VALUE_0"] = to_wsl_path(git_excludes)
             cwd = None
         else:
             command = sys.executable
             args = ["-m", "codemcp"]
             environment["HOME"] = str(worker_home)
             environment["USERPROFILE"] = str(worker_home)
+            environment["GIT_CONFIG_VALUE_0"] = str(git_excludes)
             cwd = str(self._project.root)
 
         return StdioServerParameters(command=command, args=args, env=environment, cwd=cwd)

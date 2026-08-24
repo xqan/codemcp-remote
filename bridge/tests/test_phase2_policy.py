@@ -150,6 +150,40 @@ async def test_policy_rejects_dirty_workspace_and_command_drift(git_project: Pat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("global_requires_clean", "project_requires_clean", "expect_rejection"),
+    [
+        (True, False, True),
+        (False, True, True),
+        (False, False, False),
+    ],
+)
+async def test_clean_workspace_policy_requires_both_layers_to_opt_out(
+    git_project: Path,
+    global_requires_clean: bool,
+    project_requires_clean: bool,
+    expect_rejection: bool,
+) -> None:
+    settings = _settings(git_project)
+    project = replace(settings.projects["demo"], require_clean_workspace=project_requires_clean)
+    settings = replace(
+        settings,
+        policy=replace(settings.policy, require_clean_workspace=global_requires_clean),
+        projects={"demo": project},
+    )
+    policy = PolicyEngine(settings, ProjectRegistry(settings), GitGuard())
+    (git_project / "src" / "hello.txt").write_text("dirty\n", encoding="utf-8")
+
+    if expect_rejection:
+        with pytest.raises(BridgeError) as dirty:
+            await policy.require_mutation_preconditions(project)
+        assert _error_code(dirty) == "WORKSPACE_DIRTY"
+    else:
+        status = await policy.require_mutation_preconditions(project)
+        assert status.dirty is True
+
+
+@pytest.mark.asyncio
 async def test_git_diff_rejects_sensitive_paths(git_project: Path) -> None:
     secret = git_project / "private.key"
     secret.write_text("private material\n", encoding="utf-8")

@@ -6,6 +6,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .generated_codemcp import can_generate_codemcp_config
 from .project_detection import detect_project_profile
 from .settings import ProjectSpec
 
@@ -24,6 +25,7 @@ class DevelopmentReadiness:
     mismatched_commands: tuple[str, ...]
     codemcp_config_exists: bool
     codemcp_config_valid: bool
+    codemcp_config_source: str
     codemcp_config_ready: bool
     development_ready: bool
     issues: tuple[str, ...]
@@ -53,10 +55,13 @@ def inspect_development_readiness(project: ProjectSpec) -> DevelopmentReadiness:
         project.codemcp_config
     )
 
+    generated_config = not config_exists and can_generate_codemcp_config(project)
     matched: list[str] = []
     missing: list[str] = []
     mismatched: list[str] = []
-    if config_valid:
+    if generated_config:
+        matched.extend(available_commands)
+    elif config_valid:
         for command_id in available_commands:
             configured = configured_commands.get(command_id)
             if configured is None:
@@ -82,11 +87,11 @@ def inspect_development_readiness(project: ProjectSpec) -> DevelopmentReadiness:
     if available_commands and not quality_gate_available:
         issues.append("no test or verify command is available")
 
-    if not config_exists:
+    if not config_exists and not generated_config:
         issues.append("codemcp configuration file is missing")
-    elif not config_valid:
+    elif config_exists and not config_valid:
         issues.append("codemcp configuration file is invalid")
-    else:
+    elif config_exists:
         if missing:
             issues.append("codemcp configuration is missing commands: " + ", ".join(missing))
         if mismatched:
@@ -94,7 +99,18 @@ def inspect_development_readiness(project: ProjectSpec) -> DevelopmentReadiness:
                 "codemcp command argv does not match resolved commands: " + ", ".join(mismatched)
             )
 
-    codemcp_config_ready = config_exists and config_valid and not missing and not mismatched
+    if generated_config:
+        codemcp_config_source = "generated"
+    elif config_exists and config_valid:
+        codemcp_config_source = "project"
+    elif config_exists:
+        codemcp_config_source = "invalid"
+    else:
+        codemcp_config_source = "missing"
+
+    codemcp_config_ready = generated_config or (
+        config_exists and config_valid and not missing and not mismatched
+    )
     development_ready = (
         bool(available_commands)
         and quality_gate_available
@@ -113,6 +129,7 @@ def inspect_development_readiness(project: ProjectSpec) -> DevelopmentReadiness:
         mismatched_commands=tuple(mismatched),
         codemcp_config_exists=config_exists,
         codemcp_config_valid=config_valid,
+        codemcp_config_source=codemcp_config_source,
         codemcp_config_ready=codemcp_config_ready,
         development_ready=development_ready,
         issues=tuple(issues),

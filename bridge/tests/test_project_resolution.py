@@ -126,7 +126,9 @@ def test_explicit_command_override_wins_over_profile_command(tmp_path: Path) -> 
     assert spec.commands["test"].approval == "required"
 
 
-def test_profile_command_does_not_bypass_codemcp_command_drift_guard(tmp_path: Path) -> None:
+def test_profile_command_uses_generated_config_but_existing_drift_is_rejected(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     project.mkdir()
     (project / "pom.xml").write_text("<project/>\n", encoding="utf-8")
@@ -144,6 +146,12 @@ def test_profile_command_does_not_bypass_codemcp_command_drift_guard(tmp_path: P
     assert spec.commands["test"].argv == ("mvn", "test")
 
     policy = PolicyEngine(settings, ProjectRegistry(settings), GitGuard())
+    assert policy.command(spec, "test", "test").argv == ("mvn", "test")
+
+    (project / "codemcp.toml").write_text(
+        '[commands.test]\ncommand = ["mvn", "not-test"]\n',
+        encoding="utf-8",
+    )
     with pytest.raises(BridgeError) as rejected:
         policy.command(spec, "test", "test")
     assert rejected.value.code == "COMMAND_NOT_ALLOWED"

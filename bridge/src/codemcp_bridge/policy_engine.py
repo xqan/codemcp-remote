@@ -7,6 +7,7 @@ import tomllib
 from pathlib import Path
 
 from .errors import BridgeError
+from .generated_codemcp import can_generate_codemcp_config
 from .git_guard import GitGuard, GitStatus
 from .project_registry import ProjectRegistry
 from .settings import BridgeSettings, CommandSpec, ProjectSpec
@@ -44,10 +45,8 @@ class PolicyEngine:
 
     def require_clean_workspace(self, project: ProjectSpec, status: GitStatus) -> GitStatus:
         if (
-            self._settings.policy.require_clean_workspace
-            and project.require_clean_workspace
-            and status.dirty
-        ):
+            self._settings.policy.require_clean_workspace or project.require_clean_workspace
+        ) and status.dirty:
             raise BridgeError(
                 "WORKSPACE_DIRTY",
                 "mutation requires a clean workspace",
@@ -113,6 +112,14 @@ class PolicyEngine:
         return command
 
     def _verify_codemcp_command(self, project: ProjectSpec, command: CommandSpec) -> None:
+        try:
+            project.codemcp_config.lstat()
+        except FileNotFoundError:
+            if can_generate_codemcp_config(project):
+                return
+        except OSError:
+            pass
+
         try:
             relative = project.codemcp_config.relative_to(project.root).as_posix()
             _, config_path, _ = self._registry.resolve_path(
