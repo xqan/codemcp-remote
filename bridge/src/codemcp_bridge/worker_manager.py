@@ -59,8 +59,10 @@ class _CodemcpWorker:
         self._settings = settings
         self._project = project
         self._call_lock = asyncio.Lock()
-        self._stdio_context = None
-        self._session_context = None
+        self._lifecycle_lock = asyncio.Lock()
+        self._owner_task: asyncio.Task[None] | None = None
+        self._startup_future: asyncio.Future[ClientSession] | None = None
+        self._shutdown_event: asyncio.Event | None = None
         self._session: ClientSession | None = None
         self._stderr = None
 
@@ -115,22 +117,60 @@ class _CodemcpWorker:
 
         return StdioServerParameters(command=command, args=args, env=environment, cwd=cwd)
 
-    async def start(self) -> None:
-        if self._session is not None:
-            return
-        parameters = self._parameters()
+    async def _run_owner(
+        self,
+        startup_future: asyncio.Future[ClientSession],
+        shutdown_event: asyncio.Event,
+    ) -> None:
         try:
-            self._stdio_context = stdio_client(parameters, errlog=self._stderr)
-            read_stream, write_stream = await self._stdio_context.__aenter__()
-            self._session_context = ClientSession(read_stream, write_stream)
-            self._session = await self._session_context.__aenter__()
-            await asyncio.wait_for(
-                self._session.initialize(),
-                timeout=self._settings.codemcp.startup_timeout_seconds,
-            )
-        except Exception:
-            await self.close()
-            raise
+            parameters = self._parameters()
+            async with stdio_client(parameters, errlog=self._stderr) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await asyncio.wait_for(
+                        session.initialize(),
+                        timeout=self._settings.codemcp.startup_timeout_seconds,
+                    )
+                    self._session = session
+                    if not startup_future.done():
+                        startup_future.set_result(session)
+                    await shutdown_event.wait()
+        except BaseException as exc:
+            if not startup_future.done():
+                startup_future.set_exception(exc)
+            elif not isinstance(exc, asyncio.CancelledError):
+                logger.error(
+                    "codemcp worker owner task failed",
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+        finally:
+            self._session = None
+            if self._stderr is not None:
+                self._stderr.close()
+                self._stderr = None
+
+    async def start(self) -> None:
+        async with self._lifecycle_lock:
+            if self._session is not None:
+                return
+            if self._owner_task is None or self._owner_task.done():
+                loop = asyncio.get_running_loop()
+                startup_future: asyncio.Future[ClientSession] = loop.create_future()
+                shutdown_event = asyncio.Event()
+                self._startup_future = startup_future
+                self._shutdown_event = shutdown_event
+                self._owner_task = asyncio.create_task(
+                    self._run_owner(startup_future, shutdown_event),
+                    name=f"codemcp-worker-{self._project.project_id}",
+                )
+            else:
+                startup_future = self._startup_future
+                if startup_future is None:
+                    raise RuntimeError("codemcp worker owner has no startup future")
+
+        await startup_future
 
     async def call(
         self,
@@ -141,27 +181,32 @@ class _CodemcpWorker:
         async with self._call_lock:
             if self._session is None:
                 await self.start()
-            assert self._session is not None
+            session = self._session
+            if session is None:
+                raise RuntimeError("codemcp worker session failed to start")
             result = await asyncio.wait_for(
-                self._session.call_tool(CODEMCP_TOOL, {"subtool": subtool, **arguments}),
+                session.call_tool(CODEMCP_TOOL, {"subtool": subtool, **arguments}),
                 timeout=timeout_seconds,
             )
             return AdapterResult(text=_result_text(result), is_error=bool(result.isError))
 
     async def close(self) -> None:
-        session_context, stdio_context = self._session_context, self._stdio_context
-        self._session = None
-        self._session_context = None
-        self._stdio_context = None
-        if session_context is not None:
-            with suppress(Exception):
-                await session_context.__aexit__(None, None, None)
-        if stdio_context is not None:
-            with suppress(Exception):
-                await stdio_context.__aexit__(None, None, None)
-        if self._stderr is not None:
-            self._stderr.close()
-            self._stderr = None
+        async with self._call_lock:
+            async with self._lifecycle_lock:
+                owner_task = self._owner_task
+                shutdown_event = self._shutdown_event
+                if shutdown_event is not None:
+                    shutdown_event.set()
+
+            if owner_task is not None:
+                await owner_task
+
+            async with self._lifecycle_lock:
+                if self._owner_task is owner_task:
+                    self._owner_task = None
+                    self._startup_future = None
+                    self._shutdown_event = None
+                    self._session = None
 
 
 class WorkerManager:
