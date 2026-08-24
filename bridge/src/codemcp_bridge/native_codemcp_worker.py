@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
+import tomllib
 from typing import Any
-
-from codemcp import run as run_codemcp
 
 _ORIGINAL_CREATE_SUBPROCESS_EXEC = asyncio.create_subprocess_exec
 
@@ -33,6 +33,13 @@ def _write_file_sync_without_newline_translation(
         handle.write(content)
 
 
+def install_tomli_compatibility(*, modules: dict[str, Any] | None = None) -> None:
+    """Use the Python 3.12+ stdlib TOML parser in place of tomli's mypyc wheel."""
+
+    target = sys.modules if modules is None else modules
+    target.setdefault("tomli", tomllib)
+
+
 def install_windows_compatibility(*, os_name: str | None = None) -> bool:
     """Install the narrow compatibility patches required by codemcp 0.3.0 on Windows."""
 
@@ -48,7 +55,10 @@ def install_windows_compatibility(*, os_name: str | None = None) -> bool:
 
 
 def main() -> None:
+    install_tomli_compatibility()
     install_windows_compatibility()
+    from codemcp import run as run_codemcp
+
     run_codemcp()
 
 

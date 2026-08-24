@@ -136,6 +136,14 @@ def test_native_worker_file_write_preserves_pre_normalized_crlf(tmp_path: Path) 
     assert target.read_bytes() == b"first\r\nsecond\r\n"
 
 
+def test_native_worker_uses_stdlib_tomllib_as_tomli_compatibility() -> None:
+    modules: dict[str, Any] = {}
+
+    native_worker_module.install_tomli_compatibility(modules=modules)
+
+    assert modules["tomli"] is native_worker_module.tomllib
+
+
 def test_native_worker_patch_is_windows_only() -> None:
     from codemcp.tools import file_utils
 
