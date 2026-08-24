@@ -10,6 +10,7 @@ import signal
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from .errors import BridgeError
@@ -44,6 +45,16 @@ class GitSnapshot:
 
 _CHECKPOINT_REF_PATTERN = re.compile(r"^refs/codemcp-remote/checkpoints/[0-9a-f]{32}$")
 _HEAD_PATTERN = re.compile(r"^[0-9a-fA-F]{40,64}$")
+_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_SESSION_FOOTER_PREFIX = "Codemcp-Remote-Session: "
+_EXPECTED_REF_PREFIXES = ("refs/heads/", "refs/remotes/", "refs/tags/")
+
+
+class CommitMode(StrEnum):
+    """The only commit side effects a Bridge mutation may request."""
+
+    CREATE = "create"
+    AMEND_SESSION_WIP = "amend_session_wip"
 
 
 def _truncate_text(value: str, max_bytes: int) -> tuple[str, bool]:
@@ -219,7 +230,7 @@ class GitGuard:
 
     @staticmethod
     def _require_head(head: str) -> None:
-        if not _HEAD_PATTERN.fullmatch(head):
+        if not isinstance(head, str) or not _HEAD_PATTERN.fullmatch(head):
             raise BridgeError("CHECKPOINT_INVALID", "checkpoint head is not a Git commit")
 
     @staticmethod
@@ -257,6 +268,211 @@ class GitGuard:
     async def reset_to_checkpoint(self, project_root: Path, ref_name: str) -> None:
         self._require_checkpoint_ref(ref_name)
         await self._run(project_root, "reset", "--hard", ref_name)
+
+    @staticmethod
+    def session_footer(session_id: str) -> str:
+        if not isinstance(session_id, str) or not _SESSION_ID_PATTERN.fullmatch(session_id):
+            raise BridgeError(
+                "INVALID_REQUEST",
+                "session_id cannot be encoded in a Git commit footer",
+            )
+        return f"{_SESSION_FOOTER_PREFIX}{session_id}"
+
+    @staticmethod
+    def _parse_session_footer(message: str) -> str | None:
+        normalized = message.rstrip("\r\n")
+        if not normalized:
+            return None
+        lines = normalized.splitlines()
+        footer_lines = [line for line in lines if line.startswith(_SESSION_FOOTER_PREFIX)]
+        if len(footer_lines) != 1 or lines[-1] != footer_lines[0]:
+            return None
+        session_id = footer_lines[0][len(_SESSION_FOOTER_PREFIX) :]
+        if not _SESSION_ID_PATTERN.fullmatch(session_id):
+            return None
+        return session_id
+
+    async def read_session_footer(self, project_root: Path, *, head: str) -> str | None:
+        """Read only the exact Bridge session footer from a Git tip."""
+
+        self._require_head(head)
+        message = await self._run(
+            project_root,
+            "show",
+            "--no-patch",
+            "--no-notes",
+            "--format=%B",
+            head,
+        )
+        return self._parse_session_footer(message)
+
+    async def has_session_footer(
+        self,
+        project_root: Path,
+        *,
+        head: str,
+        session_id: str,
+    ) -> bool:
+        expected = self.session_footer(session_id)
+        actual = await self.read_session_footer(project_root, head=head)
+        return actual == expected[len(_SESSION_FOOTER_PREFIX) :]
+
+    async def shared_refs_containing_head(
+        self,
+        project_root: Path,
+        *,
+        head: str,
+        branch: str,
+    ) -> tuple[str, ...]:
+        """Return refs other than the current branch that publish/share a tip.
+
+        The namespaces are fixed here.  In particular, checkpoint refs are
+        deliberately not inspected and cannot block a safe session amend.
+        """
+
+        self._require_head(head)
+        if (
+            not isinstance(branch, str)
+            or not branch
+            or any(character in branch for character in "\x00\r\n")
+        ):
+            raise BridgeError("CHECKPOINT_INVALID", "Git branch is not valid")
+        current_ref = None if branch == "HEAD" else f"refs/heads/{branch}"
+        output = await self._run(
+            project_root,
+            "for-each-ref",
+            "--format=%(refname)",
+            "--contains",
+            head,
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        )
+        refs = tuple(line.strip() for line in output.splitlines() if line.strip())
+        shared: list[str] = []
+        for ref in refs:
+            if ref.startswith("refs/codemcp-remote/checkpoints/"):
+                continue
+            if not ref.startswith(_EXPECTED_REF_PREFIXES):
+                raise BridgeError(
+                    "BACKEND_UNAVAILABLE",
+                    "Git ref inspection returned an unexpected ref",
+                    status="failed",
+                )
+            if ref == current_ref:
+                continue
+            shared.append(ref)
+        return tuple(shared)
+
+    async def has_shared_refs_containing_head(
+        self,
+        project_root: Path,
+        *,
+        head: str,
+        branch: str,
+    ) -> bool:
+        return bool(
+            await self.shared_refs_containing_head(
+                project_root,
+                head=head,
+                branch=branch,
+            )
+        )
+
+    async def commit_paths(
+        self,
+        project_root: Path,
+        *,
+        paths: tuple[str, ...] | list[str],
+        commit_mode: CommitMode = CommitMode.CREATE,
+        description: str | None = None,
+        session_id: str | None = None,
+        expected_head: str | None = None,
+    ) -> str:
+        """Apply one explicit, fixed-argv commit mode to selected paths."""
+
+        if not isinstance(commit_mode, CommitMode):
+            raise BridgeError("INVALID_REQUEST", "commit_mode is not a supported Bridge mode")
+        message: str | None = None
+        if commit_mode == CommitMode.CREATE:
+            if (
+                not isinstance(description, str)
+                or not description
+                or len(description) > 500
+                or any(character in description for character in "\r\n\x00")
+                or not isinstance(session_id, str)
+            ):
+                raise BridgeError("INVALID_REQUEST", "description and session_id are required")
+            message = f"wip: {description}\n\n{self.session_footer(session_id)}"
+        if isinstance(paths, (str, bytes)):
+            raise BridgeError("INVALID_REQUEST", "commit paths must be a sequence")
+        commit_paths = tuple(paths)
+        if not commit_paths or any(
+            not isinstance(path, str) or not path or "\x00" in path for path in commit_paths
+        ):
+            raise BridgeError("INVALID_REQUEST", "at least one valid commit path is required")
+        if expected_head is not None:
+            self._require_head(expected_head)
+        before = await self.status(project_root)
+        if expected_head is not None and before.head.lower() != expected_head.lower():
+            raise BridgeError(
+                "CONFLICT",
+                "Git HEAD changed before the WIP commit started",
+                {"expected_head": expected_head, "actual_head": before.head},
+            )
+        try:
+            arguments = ["commit"]
+            if commit_mode == CommitMode.CREATE:
+                assert message is not None
+                arguments.extend(["-m", message])
+            else:
+                arguments.extend(["--amend", "--no-edit"])
+            arguments.extend(["--only", "--", *commit_paths])
+            await self._run(
+                project_root,
+                *arguments,
+            )
+            final = await self.status(project_root)
+            if final.dirty or (
+                expected_head is not None and final.head.lower() == expected_head.lower()
+            ):
+                raise BridgeError(
+                    "CONFLICT",
+                    "WIP commit did not finalize to a new clean Git baseline",
+                    {
+                        "expected_previous_head": expected_head,
+                        "actual_head": final.head,
+                        "changed_files": list(final.changed_files),
+                    },
+                )
+            return final.head
+        except BridgeError as exc:
+            raise BridgeError(
+                "UNKNOWN_SIDE_EFFECT",
+                "WIP commit outcome is unknown and requires reconciliation",
+                {"cause": exc.code},
+                status="unknown",
+            ) from exc
+
+    async def create_wip_commit(
+        self,
+        project_root: Path,
+        *,
+        paths: tuple[str, ...] | list[str],
+        description: str,
+        session_id: str,
+        expected_head: str | None = None,
+    ) -> str:
+        """Create a Bridge WIP commit with a stable session ownership footer."""
+
+        return await self.commit_paths(
+            project_root,
+            paths=paths,
+            commit_mode=CommitMode.CREATE,
+            description=description,
+            session_id=session_id,
+            expected_head=expected_head,
+        )
 
     async def commit_file_bytes(
         self,

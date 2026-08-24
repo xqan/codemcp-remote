@@ -41,6 +41,78 @@ def _start(
     ).record
 
 
+def _finish_mutation(
+    database: Database,
+    *,
+    operation_id: str,
+    session_id: str,
+    state: str = "succeeded",
+) -> None:
+    record, existing = database.create_operation(
+        operation_id=operation_id,
+        project_id="demo",
+        session_id=session_id,
+        owner_id="local-policy",
+        client_request_id=f"request-{operation_id}",
+        request_hash="0" * 64,
+        kind="file_edit",
+        mutation=True,
+        input_data={"operation_id": operation_id},
+    )
+    assert not existing
+    database.transition_operation(record.operation_id, "validated")
+    database.transition_operation(record.operation_id, "dispatched")
+    database.transition_operation(record.operation_id, "running")
+    database.transition_operation(
+        record.operation_id,
+        state,
+        result_data={"operation_id": operation_id, "status": state},
+    )
+
+
+def _add_checkpoint_evidence(
+    database: Database,
+    *,
+    checkpoint_id: str,
+    operation_id: str,
+    session_id: str,
+    before_head: str,
+    after_head: str,
+    branch: str = "main",
+    after_branch: str | None = None,
+    after_dirty: bool = False,
+) -> None:
+    database.create_checkpoint(
+        checkpoint_id=checkpoint_id,
+        project_id="demo",
+        session_id=session_id,
+        operation_id=operation_id,
+        owner_id="local-policy",
+        kind="mutation",
+        branch=branch,
+        head=before_head,
+        ref_name=f"refs/codemcp-remote/checkpoints/{checkpoint_id}",
+        before_data={
+            "branch": branch,
+            "head": before_head,
+            "dirty": False,
+            "changed_files": [],
+            "file_hashes": {},
+        },
+    )
+    database.finalize_checkpoint(
+        checkpoint_id,
+        after_data={
+            "branch": after_branch if after_branch is not None else branch,
+            "head": after_head,
+            "dirty": after_dirty,
+            "changed_files": ["src/hello.txt"],
+            "file_hashes": {},
+        },
+        diff_hash="a" * 64,
+    )
+
+
 def test_schema_migrations_are_idempotent(tmp_path: Path) -> None:
     database = _database(tmp_path)
     with sqlite3.connect(database.path) as connection:
@@ -58,6 +130,117 @@ def test_schema_migrations_are_idempotent(tmp_path: Path) -> None:
     database.initialize()
     with sqlite3.connect(database.path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (3,)
+    database.close()
+
+
+def test_session_wip_evidence_requires_successful_non_noop_checkpoint(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    database.create_session("session-1", "demo", "local-policy")
+    database.create_session("session-2", "demo", "local-policy")
+
+    _finish_mutation(database, operation_id="op-valid", session_id="session-1")
+    _add_checkpoint_evidence(
+        database,
+        checkpoint_id="1" * 32,
+        operation_id="op-valid",
+        session_id="session-1",
+        before_head="1" * 40,
+        after_head="2" * 40,
+    )
+    valid = database.find_session_wip_checkpoint(
+        project_id="demo",
+        session_id="session-1",
+        branch="main",
+        head="2" * 40,
+    )
+    assert valid is not None
+    assert valid.checkpoint_id == "1" * 32
+
+    _finish_mutation(database, operation_id="op-noop", session_id="session-1")
+    _add_checkpoint_evidence(
+        database,
+        checkpoint_id="2" * 32,
+        operation_id="op-noop",
+        session_id="session-1",
+        before_head="3" * 40,
+        after_head="3" * 40,
+    )
+    assert database.find_session_wip_checkpoint(
+        project_id="demo",
+        session_id="session-1",
+        branch="main",
+        head="3" * 40,
+    ) is None
+
+    _finish_mutation(database, operation_id="op-failed", session_id="session-1", state="failed")
+    _add_checkpoint_evidence(
+        database,
+        checkpoint_id="3" * 32,
+        operation_id="op-failed",
+        session_id="session-1",
+        before_head="4" * 40,
+        after_head="5" * 40,
+    )
+    assert database.find_session_wip_checkpoint(
+        project_id="demo",
+        session_id="session-1",
+        branch="main",
+        head="5" * 40,
+    ) is None
+
+    _finish_mutation(database, operation_id="op-unknown", session_id="session-1", state="unknown")
+    _add_checkpoint_evidence(
+        database,
+        checkpoint_id="4" * 32,
+        operation_id="op-unknown",
+        session_id="session-1",
+        before_head="6" * 40,
+        after_head="7" * 40,
+    )
+    assert database.find_session_wip_checkpoint(
+        project_id="demo",
+        session_id="session-1",
+        branch="main",
+        head="7" * 40,
+    ) is None
+    database.transition_operation(
+        "op-unknown",
+        "failed",
+        error_data={"code": "UNKNOWN_SIDE_EFFECT"},
+    )
+
+    _finish_mutation(database, operation_id="op-other-session", session_id="session-2")
+    _add_checkpoint_evidence(
+        database,
+        checkpoint_id="5" * 32,
+        operation_id="op-other-session",
+        session_id="session-2",
+        before_head="8" * 40,
+        after_head="9" * 40,
+    )
+    assert database.find_session_wip_checkpoint(
+        project_id="demo",
+        session_id="session-1",
+        branch="main",
+        head="9" * 40,
+    ) is None
+
+    _finish_mutation(database, operation_id="op-branch", session_id="session-1")
+    _add_checkpoint_evidence(
+        database,
+        checkpoint_id="6" * 32,
+        operation_id="op-branch",
+        session_id="session-1",
+        before_head="a" * 40,
+        after_head="b" * 40,
+        branch="feature/wip",
+    )
+    assert database.find_session_wip_checkpoint(
+        project_id="demo",
+        session_id="session-1",
+        branch="main",
+        head="b" * 40,
+    ) is None
     database.close()
 
 

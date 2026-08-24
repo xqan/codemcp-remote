@@ -9,7 +9,7 @@ import pytest
 from codemcp_bridge.checkpoint_service import CheckpointService
 from codemcp_bridge.db import Database
 from codemcp_bridge.errors import BridgeError
-from codemcp_bridge.git_guard import GitGuard
+from codemcp_bridge.git_guard import CommitMode, GitGuard
 from codemcp_bridge.mcp_server import BridgeService
 from codemcp_bridge.operation_service import request_hash
 from codemcp_bridge.settings import (
@@ -81,6 +81,32 @@ class NullAdapter:
         return None
 
 
+def _start_running_mutation(database: Database, operation_id: str, session_id: str) -> None:
+    record, existing = database.create_operation(
+        operation_id=operation_id,
+        project_id="demo",
+        session_id=session_id,
+        owner_id="local-policy",
+        client_request_id=f"request-{operation_id}",
+        request_hash="0" * 64,
+        kind="file_edit",
+        mutation=True,
+        input_data={"operation_id": operation_id},
+    )
+    assert not existing
+    database.transition_operation(record.operation_id, "validated")
+    database.transition_operation(record.operation_id, "dispatched")
+    database.transition_operation(record.operation_id, "running")
+
+
+def _finish_successful_mutation(database: Database, operation_id: str) -> None:
+    database.transition_operation(
+        operation_id,
+        "succeeded",
+        result_data={"operation_id": operation_id, "status": "succeeded"},
+    )
+
+
 @pytest.fixture
 def git_project(tmp_path: Path) -> Path:
     project = tmp_path / "phase4 project 中文"
@@ -114,6 +140,157 @@ async def test_commit_file_bytes_commits_only_the_requested_path(git_project: Pa
     assert (git_project / "src" / "hello.txt").read_bytes() == b"changed\n"
     assert _git(git_project, "status", "--porcelain") == ""
     assert _git(git_project, "diff", "--name-only", before_head, after_head) == "src/hello.txt"
+
+
+@pytest.mark.asyncio
+async def test_create_wip_commit_writes_and_reads_exact_session_footer(
+    git_project: Path,
+) -> None:
+    guard = GitGuard()
+    before_head = _git(git_project, "rev-parse", "HEAD")
+    (git_project / "src" / "hello.txt").write_text("session WIP\n", encoding="utf-8")
+
+    after_head = await guard.create_wip_commit(
+        git_project,
+        paths=("src/hello.txt",),
+        description="session footer primitive",
+        session_id="session-1",
+        expected_head=before_head,
+    )
+
+    assert after_head != before_head
+    assert await guard.read_session_footer(git_project, head=after_head) == "session-1"
+    assert await guard.has_session_footer(
+        git_project,
+        head=after_head,
+        session_id="session-1",
+    )
+    assert not await guard.has_session_footer(
+        git_project,
+        head=after_head,
+        session_id="session-2",
+    )
+    assert "Codemcp-Remote-Session: session-1" in _git(
+        git_project, "show", "-s", "--format=%B", after_head
+    )
+
+    (git_project / "src" / "hello.txt").write_text("amended WIP\n", encoding="utf-8")
+    amended_head = await guard.commit_paths(
+        git_project,
+        paths=("src/hello.txt",),
+        commit_mode=CommitMode.AMEND_SESSION_WIP,
+        expected_head=after_head,
+    )
+    assert amended_head != after_head
+    assert _git(git_project, "rev-list", "--count", "main") == "2"
+    assert await guard.read_session_footer(git_project, head=amended_head) == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_shared_ref_check_ignores_checkpoint_refs_and_blocks_published_refs(
+    git_project: Path,
+) -> None:
+    guard = GitGuard()
+    head = _git(git_project, "rev-parse", "HEAD")
+    checkpoint_ref = "refs/codemcp-remote/checkpoints/" + ("a" * 32)
+    await guard.create_checkpoint_ref(git_project, checkpoint_ref, head)
+    assert await guard.shared_refs_containing_head(
+        git_project,
+        head=head,
+        branch="main",
+    ) == ()
+
+    _git(git_project, "update-ref", "refs/remotes/origin/main", head)
+    assert await guard.has_shared_refs_containing_head(
+        git_project,
+        head=head,
+        branch="main",
+    )
+
+    _git(git_project, "update-ref", "-d", "refs/remotes/origin/main")
+    _git(git_project, "tag", "phase1-published", head)
+    assert "refs/tags/phase1-published" in await guard.shared_refs_containing_head(
+        git_project,
+        head=head,
+        branch="main",
+    )
+
+    _git(git_project, "tag", "-d", "phase1-published")
+    _git(git_project, "branch", "phase1-shared")
+    assert "refs/heads/phase1-shared" in await guard.shared_refs_containing_head(
+        git_project,
+        head=head,
+        branch="main",
+    )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_commit_mode_requires_database_footer_and_ref_evidence(
+    git_project: Path,
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "data" / "bridge.sqlite3")
+    database.initialize()
+    database.create_session("session-1", "demo", "local-policy")
+    git = GitGuard()
+    service = CheckpointService(database, git)
+    spec = _project_spec(git_project)
+
+    _start_running_mutation(database, "op-valid", "session-1")
+    baseline = await service.create(
+        spec,
+        session_id="session-1",
+        operation_id="op-valid",
+        kind="mutation",
+    )
+    before_head = baseline.head
+    (git_project / "src" / "hello.txt").write_text("session WIP\n", encoding="utf-8")
+    after_head = await git.create_wip_commit(
+        git_project,
+        paths=("src/hello.txt",),
+        description="session WIP",
+        session_id="session-1",
+        expected_head=before_head,
+    )
+    await service.finalize(spec, baseline)
+    _finish_successful_mutation(database, "op-valid")
+
+    _start_running_mutation(database, "op-next", "session-1")
+    next_checkpoint = await service.create(
+        spec,
+        session_id="session-1",
+        operation_id="op-next",
+        kind="mutation",
+    )
+    assert next_checkpoint.head == after_head
+    assert (
+        await service.determine_commit_mode(
+            spec,
+            session_id="session-1",
+            checkpoint=next_checkpoint,
+        )
+        is CommitMode.AMEND_SESSION_WIP
+    )
+    database.transition_operation("op-next", "failed", error_data={"code": "TEST"})
+
+    _git(git_project, "tag", "phase1-published", after_head)
+    _start_running_mutation(database, "op-shared", "session-1")
+    shared_checkpoint = await service.create(
+        spec,
+        session_id="session-1",
+        operation_id="op-shared",
+        kind="mutation",
+    )
+    assert (
+        await service.determine_commit_mode(
+            spec,
+            session_id="session-1",
+            checkpoint=shared_checkpoint,
+        )
+        is CommitMode.CREATE
+    )
+    database.transition_operation("op-shared", "failed", error_data={"code": "TEST"})
+    database.close()
 
 
 @pytest.mark.asyncio

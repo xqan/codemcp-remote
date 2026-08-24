@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import string
 import uuid
 from typing import Any
 
 from .db import CheckpointRecord, Database
 from .errors import BridgeError
-from .git_guard import GitGuard
+from .git_guard import CommitMode, GitGuard
 from .settings import ProjectSpec
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CheckpointService:
@@ -93,6 +96,79 @@ class CheckpointService:
             after_data=after_data,
             diff_hash=self._git.diff_hash(diff),
         )
+
+    async def determine_commit_mode(
+        self,
+        project: ProjectSpec,
+        *,
+        session_id: str | None,
+        checkpoint: CheckpointRecord,
+    ) -> CommitMode:
+        """Select amend only when independent Bridge and Git evidence agrees.
+
+        The caller must invoke this while holding the project's mutation lock.
+        Every missing or uncertain fact deliberately falls back to CREATE.
+        """
+
+        if (
+            not session_id
+            or checkpoint.project_id != project.project_id
+            or checkpoint.session_id != session_id
+            or checkpoint.kind != "mutation"
+        ):
+            return self._create_mode(
+                project.project_id,
+                session_id,
+                "checkpoint_scope_missing",
+            )
+        try:
+            current = await self._git.status(project.root)
+            if current.dirty:
+                return self._create_mode(project.project_id, session_id, "worktree_dirty")
+            if current.branch != checkpoint.branch:
+                return self._create_mode(project.project_id, session_id, "branch_changed")
+            if current.head.lower() != checkpoint.head.lower():
+                return self._create_mode(project.project_id, session_id, "head_changed")
+
+            candidate = self._database.find_session_wip_checkpoint(
+                project_id=project.project_id,
+                session_id=session_id,
+                branch=current.branch,
+                head=current.head,
+            )
+            if candidate is None:
+                return self._create_mode(
+                    project.project_id, session_id, "database_evidence_missing"
+                )
+            if not await self._git.has_session_footer(
+                project.root,
+                head=current.head,
+                session_id=session_id,
+            ):
+                return self._create_mode(project.project_id, session_id, "session_footer_missing")
+            shared_refs = await self._git.shared_refs_containing_head(
+                project.root,
+                head=current.head,
+                branch=current.branch,
+            )
+            if shared_refs:
+                return self._create_mode(project.project_id, session_id, "shared_ref_detected")
+            return CommitMode.AMEND_SESSION_WIP
+        except Exception as exc:
+            reason = getattr(exc, "code", type(exc).__name__)
+            return self._create_mode(
+                project.project_id, session_id, f"evidence_check_failed:{reason}"
+            )
+
+    @staticmethod
+    def _create_mode(project_id: str, session_id: str | None, reason: str) -> CommitMode:
+        _LOGGER.info(
+            "session WIP commit mode fell back to CREATE project_id=%s session_id=%s reason=%s",
+            project_id,
+            session_id,
+            reason,
+        )
+        return CommitMode.CREATE
 
     async def verify_ref(self, project: ProjectSpec, checkpoint: CheckpointRecord) -> None:
         try:

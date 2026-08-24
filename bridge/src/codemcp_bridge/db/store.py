@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import string
 import threading
 import uuid
 from collections.abc import Iterator
@@ -62,6 +63,22 @@ def utc_now() -> str:
 
 def json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _is_git_head(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) in {40, 64}
+        and all(character in string.hexdigits for character in value)
+    )
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in string.hexdigits for character in value)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -831,6 +848,78 @@ class Database:
                 values,
             ).fetchall()
         return [checkpoint for row in rows if (checkpoint := self._checkpoint(row))]
+
+    def find_session_wip_checkpoint(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        branch: str,
+        head: str,
+    ) -> CheckpointRecord | None:
+        """Find a finalized successful mutation that proves session WIP ownership.
+
+        This is intentionally a read-only evidence query.  JSON fields are
+        validated in Python so malformed historical data is treated as absent
+        evidence instead of being allowed to authorize a later amend.
+        """
+
+        if not _is_git_head(head) or not isinstance(branch, str) or not branch:
+            return None
+        connection = self._require_connection()
+        with self._lock:
+            rows = connection.execute(
+                "SELECT c.* FROM checkpoints c "
+                "JOIN operations o ON o.operation_id=c.operation_id "
+                "JOIN sessions s ON s.session_id=c.session_id "
+                "WHERE c.project_id=? AND c.session_id=? "
+                "AND c.kind='mutation' AND c.status='created' "
+                "AND c.after_json IS NOT NULL AND c.diff_hash IS NOT NULL "
+                "AND o.project_id=c.project_id AND o.session_id=c.session_id "
+                "AND o.owner_id='local-policy' AND o.mutation=1 AND o.state='succeeded' "
+                "AND s.project_id=c.project_id AND s.owner_id='local-policy' "
+                "AND s.status='active' AND c.owner_id='local-policy' "
+                "ORDER BY c.created_at DESC, c.checkpoint_id DESC",
+                (project_id, session_id),
+            ).fetchall()
+
+        normalized_head = head.lower()
+        for row in rows:
+            checkpoint = self._checkpoint(row)
+            if checkpoint is None:
+                continue
+            try:
+                before = checkpoint.before_data
+                after = checkpoint.after_data
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(before, dict) or not isinstance(after, dict):
+                continue
+            before_head = before.get("head")
+            after_head = after.get("head")
+            before_branch = before.get("branch")
+            after_branch = after.get("branch")
+            if not all(
+                isinstance(value, str)
+                for value in (before_head, after_head, before_branch, after_branch)
+            ):
+                continue
+            if not _is_git_head(before_head) or not _is_git_head(after_head):
+                continue
+            if checkpoint.head.lower() != before_head.lower() or checkpoint.branch != before_branch:
+                continue
+            if not isinstance(after.get("dirty"), bool) or after["dirty"]:
+                continue
+            if before_head.lower() == after_head.lower():
+                continue
+            if after_branch != branch or after_head.lower() != normalized_head:
+                continue
+            if before_branch != after_branch:
+                continue
+            if not _is_sha256(checkpoint.diff_hash):
+                continue
+            return checkpoint
+        return None
 
     def transition_operation(
         self,
