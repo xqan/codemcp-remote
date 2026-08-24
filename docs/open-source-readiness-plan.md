@@ -199,7 +199,7 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 - [x] 新增 `SECURITY.md`；
 - [x] 新增 `docs/security-model.md`；
 - [x] 新增 `docs/threat-model.md`；
-- [ ] 将 threat model 每个 P0 威胁映射到现有自动测试或 Phase 7 人工验收项；
+- [x] 已将 threat model 每个 P0 威胁映射到现有自动测试或明确的 Phase 6/7 验收项；映射完成不代表验收已 PASS；
 - [ ] Stage 6 dependency audit 时复核全部第三方依赖许可证，并决定是否生成完整 Third-Party Notices。
 
 ### 验收
