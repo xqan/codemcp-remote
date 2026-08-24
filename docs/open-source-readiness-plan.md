@@ -130,10 +130,11 @@ README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令�
 
 #### 1. LICENSE
 
-- 根目录加入正式 Apache License 2.0 文本；
+- 项目采用 GNU Affero General Public License v3.0，SPDX 标识为 `AGPL-3.0-only`；
+- 根目录加入正式 GNU AGPL v3 license 文本；
 - 核对 `bridge/pyproject.toml` 的 license 声明与根 LICENSE 一致；
-- 核对 codemcp 上游许可证及使用方式；
-- 必要时新增 Third-Party Notices。
+- `codemcp==0.3.0` 继续作为 Apache-2.0 第三方依赖单独记录，不改变其上游许可证；
+- 必要时新增 Third-Party Notices，并明确项目代码与第三方依赖的许可证边界。
 
 #### 2. SECURITY.md
 
