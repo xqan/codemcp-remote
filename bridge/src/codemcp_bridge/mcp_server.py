@@ -26,6 +26,7 @@ from .command_runner import RegisteredCommandRunner
 from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
 from .git_guard import GitGuard
+from .generated_codemcp import materialize_generated_codemcp_config
 from .mcp_transport import BridgeStreamableHTTPSessionManager
 from .operation_service import OperationService
 from .operation_service import request_hash as calculate_request_hash
