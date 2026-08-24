@@ -129,3 +129,85 @@ async def test_worker_crash_maps_to_backend_unavailable(
     assert raised.value.retryable is True
     assert manager.is_active("demo") is False
     await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_contexts_are_owned_and_closed_by_same_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = _settings(project, tmp_path / "data")
+    events: list[tuple[str, asyncio.Task[Any] | None]] = []
+    caller_task = asyncio.current_task()
+
+    @asynccontextmanager
+    async def fake_stdio_client(*args: Any, **kwargs: Any):
+        del args, kwargs
+        async with anyio.create_task_group():
+            events.append(("stdio-enter", asyncio.current_task()))
+            try:
+                yield object(), object()
+            finally:
+                events.append(("stdio-exit", asyncio.current_task()))
+
+    class FakeClientSession:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+            self._task_group: Any = None
+
+        async def __aenter__(self) -> "FakeClientSession":
+            self._task_group = anyio.create_task_group()
+            await self._task_group.__aenter__()
+            events.append(("session-enter", asyncio.current_task()))
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: object,
+        ) -> bool | None:
+            events.append(("session-exit", asyncio.current_task()))
+            self._task_group.cancel_scope.cancel()
+            return await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+
+        async def initialize(self) -> None:
+            return None
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            assert name == "codemcp"
+            assert arguments["subtool"] == "ReadFile"
+            return SimpleNamespace(
+                content=[SimpleNamespace(text="ok")],
+                structuredContent=None,
+                isError=False,
+            )
+
+    monkeypatch.setattr(worker_manager_module, "stdio_client", fake_stdio_client)
+    monkeypatch.setattr(worker_manager_module, "ClientSession", FakeClientSession)
+
+    worker = _CodemcpWorker(settings, settings.projects["demo"])
+    first = await worker.call("ReadFile", {}, 1)
+    second = await worker.call("ReadFile", {}, 1)
+
+    assert first.text == "ok"
+    assert second.text == "ok"
+    stdio_enter_tasks = [task for name, task in events if name == "stdio-enter"]
+    session_enter_tasks = [task for name, task in events if name == "session-enter"]
+    assert len(stdio_enter_tasks) == 1
+    assert len(session_enter_tasks) == 1
+    owner_task = stdio_enter_tasks[0]
+    assert owner_task is not None
+    assert owner_task is not caller_task
+    assert session_enter_tasks[0] is owner_task
+    assert not any(name.endswith("-exit") for name, _ in events)
+
+    await asyncio.create_task(worker.close())
+
+    session_exit_tasks = [task for name, task in events if name == "session-exit"]
+    stdio_exit_tasks = [task for name, task in events if name == "stdio-exit"]
+    assert session_exit_tasks == [owner_task]
+    assert stdio_exit_tasks == [owner_task]
+
