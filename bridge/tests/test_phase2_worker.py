@@ -232,6 +232,9 @@ async def test_cancelled_worker_call_discards_and_closes_worker(
             stdio_exited.set()
 
     class FakeClientSession:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
         async def __aenter__(self) -> "FakeClientSession":
             return self
 
