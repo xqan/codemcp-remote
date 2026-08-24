@@ -121,6 +121,7 @@ def git_project() -> Iterator[Path]:
 @pytest.mark.asyncio
 async def test_real_codemcp_bridge_read_edit_command_and_diff(
     git_project: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     settings = _settings(git_project, git_project.parent / "bridge-data")
     app, service = create_app(settings)
