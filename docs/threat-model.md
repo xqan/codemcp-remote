@@ -61,6 +61,23 @@ The following are P0 release blockers if unmitigated:
 9. Bridge exposure beyond loopback contrary to configuration;
 10. any hidden model/provider dependency that violates the documented execution boundary.
 
+## P0 validation mapping
+
+The table below maps each release-blocking threat to current evidence. A mapping is not a PASS: any item marked for Phase 6/7 still blocks release until that validation is actually executed successfully.
+
+| P0 threat | Current automated evidence | Remaining release validation |
+|---|---|---|
+| Project-root escape | `test_phase2_policy.py::test_registry_rejects_unregistered_escape_and_sensitive_paths`; `test_phase2_server.py::test_local_mcp_contract_and_policy_rejections` | Windows junction and WSL symlink escape matrix |
+| Arbitrary command / argument injection | `test_phase2_policy.py::test_policy_rejects_dirty_workspace_and_command_drift`; unregistered-command rejection in `test_local_mcp_contract_and_policy_rejections` | Explicit public MCP schema check proving no runtime argv/shell surface |
+| Secret read/search/diff | sensitive path + sensitive diff checks in `test_phase2_policy.py`; `test_phase2_server.py::test_code_search_excludes_sensitive_paths_before_and_after_grep` | Phase 7 secret corpus including non-obvious filenames and command-output canaries |
+| Approval bypass / cross-scope replay | `test_phase3_persistence.py::test_approval_is_one_time_and_token_is_not_persisted`; approval lifecycle in `test_phase3_idempotency_approval_and_operation_status`; foreign-session operation rejection in `test_phase3_reconcile_unknown_mutation_releases_project_lock` | Explicit cross-project approval negative case |
+| Canonical request hash / duplicate replay | `test_phase3_persistence.py::test_request_hash_is_bound_to_canonical_input`; `test_idempotency_replays_without_repeating_and_detects_hash_conflict`; Bridge-level replay tests in `test_phase2_server.py` | Tunnel-level duplicate/reconnect replay case |
+| Rollback overwriting external Git changes | Phase 4 Git regression suite exists in `bridge/tests/test_phase4_git.py` | Re-run CAS matrix in Phase 7 with external branch/HEAD/worktree races |
+| Incorrect handling of uncertain side effects | restart/unknown tests in `test_phase3_persistence.py`; cancellation and reconciliation tests in `test_phase2_server.py` | Worker crash, Tunnel disconnect, and timeout injection through real backend |
+| Runtime credential leakage | approval plaintext persistence test covers approval tokens | Phase 6 log canary scan for Tunnel/runtime secrets; release artifact secret scan |
+| Non-loopback Bridge exposure | loopback server configuration is exercised by local MCP contract tests | Clean-machine port/bind inspection proving no non-loopback listener |
+| Hidden model/provider dependency | architecture and dependency source review are required by the implementation plan | Phase 7 dependency/source scan plus runtime network observation |
+
 ## Residual-risk policy
 
 A threat may remain for `v0.1.0` only when:
