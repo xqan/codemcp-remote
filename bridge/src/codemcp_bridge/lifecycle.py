@@ -18,30 +18,24 @@ from pathlib import Path
 from typing import Any
 
 from .settings import PROJECT_ID_PATTERN, SettingsError, load_settings
+from .transports import (
+    LifecycleError,
+    OPENAI_TUNNEL_PROVIDER,
+    OpenAITunnelSettings,
+    RemoteTransportProvider,
+    TransportContext,
+)
+from .transports.openai_tunnel import (
+    DEFAULT_BRIDGE_URL,
+    DEFAULT_HEALTH_LISTEN_ADDR,
+    DEFAULT_PROFILE,
+    DEFAULT_TUNNEL_HEALTH_URL,
+)
 
 APP_NAME = "codemcp-remote"
-DEFAULT_PROFILE = "codemcp-bridge"
-DEFAULT_BRIDGE_URL = "http://127.0.0.1:46200/mcp"
-DEFAULT_TUNNEL_HEALTH_URL = "http://127.0.0.1:46201"
-DEFAULT_HEALTH_LISTEN_ADDR = "127.0.0.1:46201"
-TUNNEL_ID_PATTERN = re.compile(r"^tunnel_[A-Za-z0-9_-]{8,}$")
-PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-ALLOWED_ENV_NAMES = {
-    "CONTROL_PLANE_TUNNEL_ID",
-    "TUNNEL_CLIENT_PROFILE",
-    "TUNNEL_CLIENT_PROFILE_DIR",
-    "BRIDGE_MCP_URL",
-    "HEALTH_LISTEN_ADDR",
-    "TUNNEL_HEALTH_URL",
-    "CONTROL_PLANE_ORGANIZATION_ID",
-}
-_SECRET_NAME = "CONTROL_PLANE_API_KEY"
-_REDACT_KEY = re.compile(
-    r"(?i)((?:CONTROL_PLANE_API_KEY|OPENAI_API_KEY|API_KEY|AUTHORIZATION|"
-    r"ACCESS_TOKEN|REFRESH_TOKEN|TOKEN)\s*[:=]\s*)([^\s,;]+)"
-)
-_REDACT_BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
-_REDACT_SK = re.compile(r"(?i)\bsk-[A-Za-z0-9_-]{8,}")
+TunnelSettings = OpenAITunnelSettings
+_REMOTE_TRANSPORT = OPENAI_TUNNEL_PROVIDER
+_SECRET_NAME = _REMOTE_TRANSPORT.secret_env_name
 _LOG_MAX_BYTES = 5 * 1024 * 1024
 _LOG_BACKUP_COUNT = 3
 
@@ -61,21 +55,6 @@ class RuntimePaths:
     tunnel_env: Path
     state_file: Path
     secret_file: Path
-
-
-@dataclass(frozen=True, slots=True)
-class TunnelSettings:
-    tunnel_id: str
-    profile_name: str
-    profile_dir: Path
-    bridge_url: str
-    tunnel_health_url: str
-    health_listen_addr: str
-    env_file: Path
-
-
-class LifecycleError(RuntimeError):
-    """Raised when the native lifecycle manager cannot safely continue."""
 
 
 def app_data_root(*, environ: dict[str, str] | None = None, home: Path | None = None) -> Path:
@@ -110,6 +89,18 @@ def runtime_paths(runtime_root: Path, *, app_root: Path | None = None) -> Runtim
         tunnel_env=config_dir / "tunnel.env",
         state_file=run_dir / "state.json",
         secret_file=secret_dir / "control-plane-api-key.dpapi",
+    )
+
+
+def _transport_context(paths: RuntimePaths) -> TransportContext:
+    return TransportContext(
+        runtime_root=paths.runtime_root,
+        app_root=paths.app_root,
+        config_dir=paths.config_dir,
+        log_dir=paths.log_dir,
+        tunnel_dir=paths.tunnel_dir,
+        secret_file=paths.secret_file,
+        tunnel_env=paths.tunnel_env,
     )
 
 
@@ -156,11 +147,6 @@ def initialize_runtime(
     force: bool = False,
 ) -> dict[str, Any]:
     ensure_runtime_dirs(paths)
-    _validate_tunnel_id(tunnel_id)
-    _validate_profile_name(profile_name)
-    _validate_bridge_url(bridge_url)
-    _validate_health_url(tunnel_health_url)
-    _validate_health_listen_addr(health_listen_addr)
 
     template = paths.runtime_root / "config" / "bridge.example.toml"
     if not template.is_file():
@@ -176,18 +162,17 @@ def initialize_runtime(
         paths.projects_config.write_text("# Managed by codemcp-remote\n", encoding="utf-8")
         created.append(str(paths.projects_config))
 
-    env_lines = [
-        f"CONTROL_PLANE_TUNNEL_ID={tunnel_id}",
-        f"TUNNEL_CLIENT_PROFILE={profile_name}",
-        f"TUNNEL_CLIENT_PROFILE_DIR={paths.tunnel_dir}",
-        f"BRIDGE_MCP_URL={bridge_url}",
-        f"HEALTH_LISTEN_ADDR={health_listen_addr}",
-        f"TUNNEL_HEALTH_URL={tunnel_health_url}",
-        "",
-    ]
-    if force or not paths.tunnel_env.exists():
-        paths.tunnel_env.write_text("\n".join(env_lines), encoding="utf-8")
-        created.append(str(paths.tunnel_env))
+    created.extend(
+        _REMOTE_TRANSPORT.initialize_config(
+            _transport_context(paths),
+            tunnel_id=tunnel_id,
+            profile_name=profile_name,
+            bridge_url=bridge_url,
+            tunnel_health_url=tunnel_health_url,
+            health_listen_addr=health_listen_addr,
+            force=force,
+        )
+    )
 
     return {"status": "ok", "app_root": str(paths.app_root), "created": created}
 
@@ -229,166 +214,26 @@ def add_project(paths: RuntimePaths, *, project_id: str, root: Path) -> dict[str
     return {"status": "ok", "project_id": project_id, "root": str(project_root)}
 
 
-def _parse_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.is_file():
-        raise LifecycleError(f"tunnel environment file not found: {path}")
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if "=" not in stripped:
-            raise LifecycleError(f"invalid environment assignment at line {line_number}")
-        name, value = stripped.split("=", 1)
-        name = name.strip()
-        value = value.strip()
-        if name == _SECRET_NAME:
-            raise LifecycleError(f"{_SECRET_NAME} must never be stored in {path}")
-        if name not in ALLOWED_ENV_NAMES:
-            raise LifecycleError(f"{name} is not an allowed tunnel setting")
-        if len(value) >= 2 and value[:1] == value[-1:] and value.startswith(("'", '"')):
-            value = value[1:-1]
-        elif "'" in value or '"' in value:
-            raise LifecycleError(f"unterminated quoted value at line {line_number}")
-        if value:
-            values[name] = os.path.expandvars(value)
-    return values
-
-
 def load_tunnel_settings(paths: RuntimePaths, *, env_file: Path | None = None) -> TunnelSettings:
-    source = paths.tunnel_env if env_file is None else env_file.expanduser().resolve(strict=False)
-    values = _parse_env_file(source)
-    tunnel_id = values.get("CONTROL_PLANE_TUNNEL_ID") or os.environ.get(
-        "CONTROL_PLANE_TUNNEL_ID", ""
+    return _REMOTE_TRANSPORT.load_settings(
+        _transport_context(paths),
+        env_file=env_file,
     )
-    profile_name = values.get("TUNNEL_CLIENT_PROFILE", DEFAULT_PROFILE)
-    profile_dir_value = values.get("TUNNEL_CLIENT_PROFILE_DIR")
-    if profile_dir_value:
-        profile_dir_path = Path(profile_dir_value).expanduser()
-        if not profile_dir_path.is_absolute():
-            profile_dir_path = source.parent.parent / profile_dir_path
-        profile_dir = profile_dir_path.resolve(strict=False)
-    else:
-        profile_dir = paths.tunnel_dir
-    bridge_url = values.get("BRIDGE_MCP_URL", DEFAULT_BRIDGE_URL)
-    tunnel_health_url = values.get("TUNNEL_HEALTH_URL", DEFAULT_TUNNEL_HEALTH_URL)
-    health_listen_addr = values.get("HEALTH_LISTEN_ADDR", DEFAULT_HEALTH_LISTEN_ADDR)
-
-    _validate_tunnel_id(tunnel_id)
-    _validate_profile_name(profile_name)
-    _validate_bridge_url(bridge_url)
-    _validate_health_url(tunnel_health_url)
-    _validate_health_listen_addr(health_listen_addr)
-    return TunnelSettings(
-        tunnel_id=tunnel_id,
-        profile_name=profile_name,
-        profile_dir=profile_dir,
-        bridge_url=bridge_url,
-        tunnel_health_url=tunnel_health_url,
-        health_listen_addr=health_listen_addr,
-        env_file=source,
-    )
-
-
-def _validate_tunnel_id(value: str) -> None:
-    if (
-        not value
-        or not TUNNEL_ID_PATTERN.fullmatch(value)
-        or re.search(r"(?i)replace|example|placeholder", value)
-    ):
-        raise LifecycleError("CONTROL_PLANE_TUNNEL_ID must be a real OpenAI tunnel_id")
-
-
-def _validate_profile_name(value: str) -> None:
-    if not PROFILE_PATTERN.fullmatch(value):
-        raise LifecycleError("profile name contains unsupported characters")
-
-
-def _validate_bridge_url(value: str) -> None:
-    from urllib.parse import urlsplit
-
-    parsed = urlsplit(value)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or parsed.hostname != "127.0.0.1"
-        or parsed.path.rstrip("/") != "/mcp"
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise LifecycleError("Bridge MCP URL must be an HTTP(S) /mcp endpoint on 127.0.0.1")
-
-
-def _validate_health_url(value: str) -> None:
-    from urllib.parse import urlsplit
-
-    parsed = urlsplit(value)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or parsed.hostname != "127.0.0.1"
-        or parsed.path not in {"", "/"}
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise LifecycleError("Tunnel health URL must be a loopback HTTP(S) base URL")
-
-
-def _validate_health_listen_addr(value: str) -> None:
-    match = re.fullmatch(r"127\.0\.0\.1:(\d+)", value)
-    if match is None or not 0 <= int(match.group(1)) <= 65535:
-        raise LifecycleError("HEALTH_LISTEN_ADDR must bind to 127.0.0.1:<port>")
 
 
 def find_tunnel_client(paths: RuntimePaths) -> Path:
-    candidates = [
-        paths.runtime_root / "tunnel-client.exe",
-        paths.runtime_root / "tunnel-client",
-    ]
-    discovered = shutil.which("tunnel-client")
-    if discovered:
-        candidates.append(Path(discovered))
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve(strict=False)
-    raise LifecycleError("tunnel-client was not found beside the executable or on PATH")
-
-
-def _profile_path(settings: TunnelSettings) -> Path:
-    yaml_path = settings.profile_dir / f"{settings.profile_name}.yaml"
-    if yaml_path.is_file():
-        return yaml_path
-    yml_path = settings.profile_dir / f"{settings.profile_name}.yml"
-    return yml_path if yml_path.is_file() else yaml_path
+    return _REMOTE_TRANSPORT.find_client(_transport_context(paths))
 
 
 def validate_tunnel_profile(settings: TunnelSettings) -> Path:
-    profile = _profile_path(settings)
-    if not profile.is_file():
-        raise LifecycleError(f"Tunnel profile not found: {profile}; run 'codemcp-remote init'")
-    content = profile.read_text(encoding="utf-8", errors="replace")
-    tunnel_pattern = re.escape(settings.tunnel_id)
-    if not re.search(rf"(?m)^\s*tunnel_id:\s*[\"']?{tunnel_pattern}[\"']?\s*$", content):
-        raise LifecycleError("Tunnel profile tunnel_id does not match configured tunnel_id")
-    if not re.search(
-        r'(?m)^\s*base_url:\s*["\']?https://(api|mtls)\.openai\.com["\']?\s*$', content
-    ):
-        raise LifecycleError("Tunnel profile control plane is not an allowed OpenAI endpoint")
-    if not re.search(r'(?m)^\s*api_key:\s*["\']?env:CONTROL_PLANE_API_KEY["\']?\s*$', content):
-        raise LifecycleError("Tunnel profile must reference env:CONTROL_PLANE_API_KEY")
-    if re.search(r"(?m)^\s*commands:\s*$", content):
-        raise LifecycleError("stdio tunnel commands are not allowed")
-    urls = re.findall(
-        r'(?m)^\s*(?:-\s*)?url:\s*["\']?([^\r\n"\'\s]+)["\']?\s*$',
-        content,
-    )
-    if urls != [settings.bridge_url]:
-        raise LifecycleError("Tunnel profile must contain exactly the configured Bridge MCP URL")
+    profile = _REMOTE_TRANSPORT.validate_config(settings)
+    if not isinstance(profile, Path):
+        raise LifecycleError("OpenAI tunnel provider did not return a profile path")
     return profile
 
 
 def redact_log_text(value: str) -> str:
-    redacted = _REDACT_BEARER.sub("Bearer <redacted>", value)
-    redacted = _REDACT_KEY.sub(r"\1<redacted>", redacted)
-    return _REDACT_SK.sub("<redacted-api-key>", redacted)
+    return _REMOTE_TRANSPORT.redact(value)
 
 
 def _rotate_log(path: Path) -> None:
@@ -447,25 +292,56 @@ def _bridge_health_url(bridge_url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}/healthz"
 
 
-def _secret_from_runtime(paths: RuntimePaths) -> str | None:
-    value = os.environ.get(_SECRET_NAME)
+def _provider_secret_path(
+    paths: RuntimePaths,
+    provider: RemoteTransportProvider | None = None,
+) -> Path:
+    effective = _REMOTE_TRANSPORT if provider is None else provider
+    filename = effective.secret_file_name
+    if not filename or Path(filename).name != filename or filename in {".", ".."}:
+        raise LifecycleError("transport provider secret file name is invalid")
+    return paths.secret_dir / filename
+
+
+def _secret_from_runtime(
+    paths: RuntimePaths,
+    provider: RemoteTransportProvider | None = None,
+) -> str | None:
+    effective = _REMOTE_TRANSPORT if provider is None else provider
+    value = os.environ.get(effective.secret_env_name)
     if value:
         return value
-    if paths.secret_file.is_file() and os.name == "nt":
-        return _dpapi_unprotect(paths.secret_file.read_bytes()).decode("utf-8")
+    secret_path = _provider_secret_path(paths, effective)
+    if secret_path.is_file() and os.name == "nt":
+        return _dpapi_unprotect(secret_path.read_bytes()).decode("utf-8")
     return None
 
 
-def store_api_key_from_environment(paths: RuntimePaths) -> bool:
-    value = os.environ.get(_SECRET_NAME)
+def store_transport_secret_from_environment(
+    paths: RuntimePaths,
+    *,
+    provider: RemoteTransportProvider | None = None,
+) -> bool:
+    effective = _REMOTE_TRANSPORT if provider is None else provider
+    value = os.environ.get(effective.secret_env_name)
     if not value:
-        raise LifecycleError(f"{_SECRET_NAME} is not set in the current process")
+        raise LifecycleError(
+            f"{effective.secret_env_name} is not set in the current process"
+        )
     if os.name != "nt":
-        raise LifecycleError("secure API key storage is currently supported only on Windows")
+        raise LifecycleError("secure transport secret storage is currently supported only on Windows")
     ensure_runtime_dirs(paths)
+    secret_path = _provider_secret_path(paths, effective)
     encrypted = _dpapi_protect(value.encode("utf-8"))
-    paths.secret_file.write_bytes(encrypted)
+    secret_path.write_bytes(encrypted)
     return True
+
+
+def store_api_key_from_environment(paths: RuntimePaths) -> bool:
+    return store_transport_secret_from_environment(
+        paths,
+        provider=OPENAI_TUNNEL_PROVIDER,
+    )
 
 
 def initialize_tunnel_profile(
@@ -479,84 +355,27 @@ def initialize_tunnel_profile(
         raise LifecycleError(
             f"{_SECRET_NAME} is not available; set it for init or store it with --store-api-key"
         )
-    tunnel_client = find_tunnel_client(paths)
-    settings.profile_dir.mkdir(parents=True, exist_ok=True)
-    args = [
-        str(tunnel_client),
-        "init",
-        "--sample",
-        "sample_mcp_remote_no_auth",
-        "--profile",
-        settings.profile_name,
-        "--profile-dir",
-        str(settings.profile_dir),
-        "--tunnel-id",
-        settings.tunnel_id,
-        "--mcp-server-url",
-        settings.bridge_url,
-        "--health-listen-addr",
-        settings.health_listen_addr,
-        "--control-plane-api-key-ref",
-        f"env:{_SECRET_NAME}",
-    ]
-    if force:
-        args.append("--force")
-    environment = os.environ.copy()
-    environment[_SECRET_NAME] = secret
-    completed = subprocess.run(
-        args,
-        cwd=paths.app_root,
-        env=environment,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
+    profile = _REMOTE_TRANSPORT.initialize(
+        _transport_context(paths),
+        settings,
+        secret=secret,
+        force=force,
     )
-    if completed.returncode != 0:
-        detail = redact_log_text((completed.stdout or "") + "\n" + (completed.stderr or ""))
-        raise LifecycleError(f"tunnel-client init failed: {detail.strip()}")
-    return validate_tunnel_profile(settings)
+    if not isinstance(profile, Path):
+        raise LifecycleError("OpenAI tunnel provider did not return a profile path")
+    return profile
 
 
 def run_tunnel_proxy(paths: RuntimePaths, settings: TunnelSettings) -> int:
     secret = _secret_from_runtime(paths)
     if not secret:
         raise LifecycleError(f"{_SECRET_NAME} is unavailable")
-    validate_tunnel_profile(settings)
-    tunnel_client = find_tunnel_client(paths)
-    environment = os.environ.copy()
-    environment[_SECRET_NAME] = secret
-    paths.log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = paths.log_dir / "tunnel-client.log"
-    _rotate_log(log_path)
-    process = subprocess.Popen(
-        [
-            str(tunnel_client),
-            "run",
-            "--profile",
-            settings.profile_name,
-            "--profile-dir",
-            str(settings.profile_dir),
-            "--health.listen-addr",
-            settings.health_listen_addr,
-        ],
-        cwd=paths.app_root,
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
+    return _REMOTE_TRANSPORT.run(
+        _transport_context(paths),
+        settings,
+        secret=secret,
+        rotate_log=_rotate_log,
     )
-    assert process.stdout is not None
-    with log_path.open("a", encoding="utf-8", newline="\n") as handle:
-        for line in process.stdout:
-            timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            handle.write(f"{timestamp} {redact_log_text(line.rstrip())}\n")
-            handle.flush()
-    return int(process.wait())
 
 
 def _popen_background(
@@ -619,8 +438,8 @@ def start_services(
             return existing
         paths.state_file.unlink(missing_ok=True)
 
-    bridge_health = _bridge_health_url(tunnel.bridge_url)
-    tunnel_ready = f"{tunnel.tunnel_health_url.rstrip('/')}/readyz"
+    bridge_health = _bridge_health_url(_REMOTE_TRANSPORT.bridge_url(tunnel))
+    tunnel_ready = _REMOTE_TRANSPORT.ready_url(tunnel)
     if _http_check(bridge_health)["status"] == "ok":
         raise LifecycleError("Bridge health endpoint is already occupied; refusing unsafe takeover")
     if _http_check(tunnel_ready)["status"] == "ok":
@@ -779,32 +598,24 @@ def doctor_report(
         }
     except SettingsError as exc:
         checks["configuration"] = {"status": "failed", "error": str(exc)}
-    try:
-        tunnel = load_tunnel_settings(paths, env_file=env_file)
-        checks["tunnel_settings"] = {"status": "ok", "profile": tunnel.profile_name}
-        try:
-            profile = validate_tunnel_profile(tunnel)
-            checks["tunnel_profile"] = {"status": "ok", "path": str(profile)}
-        except LifecycleError as exc:
-            checks["tunnel_profile"] = {"status": "failed", "error": str(exc)}
-    except LifecycleError as exc:
-        checks["tunnel_settings"] = {"status": "failed", "error": str(exc)}
-    try:
-        client = find_tunnel_client(paths)
-        checks["tunnel_client"] = {"status": "ok", "path": str(client)}
-    except LifecycleError as exc:
-        checks["tunnel_client"] = {"status": "failed", "error": str(exc)}
+    secret = _secret_from_runtime(paths)
+    secret_path = _provider_secret_path(paths)
+    secret_source = (
+        "environment"
+        if os.environ.get(_REMOTE_TRANSPORT.secret_env_name)
+        else ("windows-dpapi" if secret_path.is_file() else "none")
+    )
+    checks.update(
+        _REMOTE_TRANSPORT.doctor(
+            _transport_context(paths),
+            env_file=env_file,
+            secret_available=bool(secret),
+            secret_source=secret_source,
+        )
+    )
     checks["git"] = {
         "status": "ok" if shutil.which("git") else "failed",
         "path": shutil.which("git"),
-    }
-    checks["api_key"] = {
-        "status": "ok" if _secret_from_runtime(paths) else "missing",
-        "source": (
-            "environment"
-            if os.environ.get(_SECRET_NAME)
-            else ("windows-dpapi" if paths.secret_file.is_file() else "none")
-        ),
     }
     checks["services"] = status_services(paths)
     failed = [

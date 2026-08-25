@@ -63,6 +63,42 @@ def _runtime(tmp_path: Path) -> tuple[Path, lifecycle.RuntimePaths]:
     return runtime, paths
 
 
+def test_default_transport_provider_preserves_openai_compatibility() -> None:
+    assert lifecycle._REMOTE_TRANSPORT.provider_id == "openai-tunnel"
+    assert lifecycle.TunnelSettings is lifecycle.OpenAITunnelSettings
+    assert lifecycle._SECRET_NAME == "CONTROL_PLANE_API_KEY"
+
+
+def test_initialize_runtime_delegates_transport_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, paths = _runtime(tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        provider_id = "fake"
+        secret_env_name = "FAKE_SECRET"
+
+        def initialize_config(self, context, **kwargs):
+            captured["context"] = context
+            captured["kwargs"] = kwargs
+            context.tunnel_env.write_text("FAKE_TRANSPORT=1\n", encoding="utf-8")
+            return [str(context.tunnel_env)]
+
+    monkeypatch.setattr(lifecycle, "_REMOTE_TRANSPORT", FakeProvider())
+
+    result = initialize_runtime(paths, tunnel_id="tunnel_12345678")
+
+    context = captured["context"]
+    kwargs = captured["kwargs"]
+    assert context.runtime_root == paths.runtime_root
+    assert context.app_root == paths.app_root
+    assert kwargs["tunnel_id"] == "tunnel_12345678"
+    assert kwargs["force"] is False
+    assert str(paths.tunnel_env) in result["created"]
+
+
 def test_initialize_runtime_moves_writable_state_out_of_distribution(tmp_path: Path) -> None:
     _, paths = _runtime(tmp_path)
 
