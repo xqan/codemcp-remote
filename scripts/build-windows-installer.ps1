@@ -17,7 +17,10 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$appDir = Join-Path $repositoryRoot ".local\dist\codemcp-remote"
+$installerWorkDir = Join-Path $repositoryRoot ".local\installer-work"
+$appDistDir = Join-Path $installerWorkDir "exe-dist"
+$appWorkDir = Join-Path $installerWorkDir "pyinstaller"
+$appDir = Join-Path $appDistDir "codemcp-remote"
 $mainExe = Join-Path $appDir "codemcp-remote.exe"
 $installerScript = Join-Path $repositoryRoot "scripts\codemcp-remote.iss"
 
@@ -68,9 +71,14 @@ Install the official 64-bit Inno Setup 7 compiler and rerun this command:
 }
 
 if (-not $SkipAppBuild) {
-    & pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $repositoryRoot "scripts\build-windows-exe.ps1")
+    Remove-Item -LiteralPath $installerWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $installerWorkDir | Out-Null
+    & pwsh -NoLogo -NoProfile -NonInteractive `
+        -File (Join-Path $repositoryRoot "scripts\build-windows-exe.ps1") `
+        -DistDir $appDistDir `
+        -WorkDir $appWorkDir
     if ($LASTEXITCODE -ne 0) {
-        throw "Phase 3 executable build failed with exit code $LASTEXITCODE"
+        throw "Phase 3 executable staging build failed with exit code $LASTEXITCODE"
     }
 }
 if (-not (Test-Path -LiteralPath $mainExe -PathType Leaf)) {
@@ -148,42 +156,104 @@ if ($signatureStatus -notin @("Valid", "NotSigned")) {
     throw "installer Authenticode status is unsafe: $signatureStatus"
 }
 
+function Invoke-GuiProcessAndWait {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
+
+    $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru
+    return $process.ExitCode
+}
+
 $smokeStatus = "skipped"
 if (-not $SkipSmoke) {
     $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A26B4BA3-1D96-4F1A-95C4-9984C941A1E1}_is1"
-    if (Test-Path -LiteralPath $uninstallKey) {
-        throw "installer smoke requires no existing installed codemcp-remote copy; use a clean host or -SkipSmoke"
-    }
     $smokeRoot = Join-Path $repositoryRoot ".local\installer-smoke"
     $installDir = Join-Path $smokeRoot "installed"
     $runtimeDir = Join-Path $smokeRoot "runtime"
+
+    if (Test-Path -LiteralPath $uninstallKey) {
+        $existingInstall = (Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction Stop).InstallLocation
+        $existingFullPath = if ([string]::IsNullOrWhiteSpace($existingInstall)) {
+            ""
+        } else {
+            [System.IO.Path]::GetFullPath($existingInstall)
+        }
+        $smokePrefix = [System.IO.Path]::GetFullPath($smokeRoot).TrimEnd("\") + "\"
+        if (-not $existingFullPath.StartsWith($smokePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "installer smoke requires no existing installed codemcp-remote copy; use a clean host or -SkipSmoke"
+        }
+        Write-Host "Removing stale isolated installer smoke state: $existingFullPath"
+        Remove-Item -LiteralPath $uninstallKey -Recurse -Force
+        if (Test-Path -LiteralPath $existingFullPath) {
+            Remove-Item -LiteralPath $existingFullPath -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $uninstallKey) {
+            throw "failed to remove stale installer smoke registration: $uninstallKey"
+        }
+    }
+
     Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
+    $setupLog = Join-Path $smokeRoot "setup.log"
 
     try {
-        & $setupPath `
-            "/VERYSILENT" `
-            "/SUPPRESSMSGBOXES" `
-            "/NORESTART" `
-            "/NOSTOPLIFECYCLE" `
-            ("/DIR={0}" -f $installDir) `
-            "/MERGETASKS=!addtopath"
-        if ($LASTEXITCODE -ne 0) {
-            throw "silent installer smoke failed with exit code $LASTEXITCODE"
+        $setupExit = Invoke-GuiProcessAndWait `
+            -FilePath $setupPath `
+            -ArgumentList @(
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                "/NOSTOPLIFECYCLE",
+                ('/DIR="{0}"' -f $installDir),
+                ('/LOG="{0}"' -f $setupLog),
+                "/MERGETASKS=!addtopath"
+            )
+        if ($setupExit -ne 0) {
+            throw "silent installer smoke failed with exit code $setupExit; log=$setupLog"
+        }
+        if (-not (Test-Path -LiteralPath $uninstallKey)) {
+            throw "installer smoke did not create the expected uninstall registration; log=$setupLog"
         }
 
-        $installedMain = Join-Path $installDir "codemcp-remote.exe"
-        $installedTunnel = Join-Path $installDir "tunnel-client.exe"
+        $installedLocation = (Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction Stop).InstallLocation
+        if ([string]::IsNullOrWhiteSpace($installedLocation)) {
+            throw "installer smoke uninstall registration has no InstallLocation; log=$setupLog"
+        }
+        $installedLocation = [System.IO.Path]::GetFullPath($installedLocation)
+        $expectedLocation = [System.IO.Path]::GetFullPath($installDir)
+        if ($installedLocation.TrimEnd("\") -ne $expectedLocation.TrimEnd("\")) {
+            $unexpectedUninstallers = @(
+                Get-ChildItem -LiteralPath $installedLocation -File -Filter "unins*.exe" -ErrorAction SilentlyContinue
+            )
+            if ($unexpectedUninstallers.Count -eq 1) {
+                $null = Invoke-GuiProcessAndWait `
+                    -FilePath $unexpectedUninstallers[0].FullName `
+                    -ArgumentList @(
+                        "/VERYSILENT",
+                        "/SUPPRESSMSGBOXES",
+                        "/NORESTART",
+                        "/NOSTOPLIFECYCLE"
+                    )
+            }
+            throw "installer smoke installed to unexpected location: $installedLocation; expected: $expectedLocation; log=$setupLog"
+        }
+
+        $installedMain = Join-Path $installedLocation "codemcp-remote.exe"
+        $installedTunnel = Join-Path $installedLocation "tunnel-client.exe"
         $requiredFiles = @(
             $installedMain,
             $installedTunnel,
-            (Join-Path $installDir "LICENSE"),
-            (Join-Path $installDir "THIRD_PARTY_NOTICES.txt"),
-            (Join-Path $installDir "THIRD_PARTY\tunnel-client\LICENSE")
+            (Join-Path $installedLocation "LICENSE"),
+            (Join-Path $installedLocation "THIRD_PARTY_NOTICES.txt"),
+            (Join-Path $installedLocation "THIRD_PARTY\tunnel-client\LICENSE")
         )
         foreach ($required in $requiredFiles) {
             if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
-                throw "installer smoke missing required file: $required"
+                throw "installer smoke missing required file: $required; log=$setupLog"
             }
         }
 
@@ -202,25 +272,32 @@ if (-not $SkipSmoke) {
         }
 
         $uninstallers = @(
-            Get-ChildItem -LiteralPath $installDir -File -Filter "unins*.exe"
+            Get-ChildItem -LiteralPath $installedLocation -File -Filter "unins*.exe"
         )
         if ($uninstallers.Count -ne 1) {
             throw "expected exactly one Inno Setup uninstaller"
         }
-        & $uninstallers[0].FullName `
-            "/VERYSILENT" `
-            "/SUPPRESSMSGBOXES" `
-            "/NORESTART" `
-            "/NOSTOPLIFECYCLE"
-        if ($LASTEXITCODE -ne 0) {
-            throw "silent uninstaller smoke failed with exit code $LASTEXITCODE"
+        $uninstallExit = Invoke-GuiProcessAndWait `
+            -FilePath $uninstallers[0].FullName `
+            -ArgumentList @(
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                "/NOSTOPLIFECYCLE"
+            )
+        if ($uninstallExit -ne 0) {
+            throw "silent uninstaller smoke failed with exit code $uninstallExit"
         }
         if (Test-Path -LiteralPath $installedMain -PathType Leaf) {
             throw "silent uninstall left codemcp-remote.exe behind"
         }
         $smokeStatus = "passed"
     } finally {
-        Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        if ($smokeStatus -eq "passed") {
+            Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Warning "Installer smoke artifacts were preserved for diagnosis: $smokeRoot"
+        }
     }
 }
 

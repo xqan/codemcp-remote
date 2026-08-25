@@ -36,12 +36,13 @@ The Bridge does not contain an agent loop or model provider. Repository content 
 
 | Component | `v0.1.0` target |
 |---|---|
-| Host OS | Windows 11 |
-| PowerShell | PowerShell 7 (`pwsh`) |
-| Bridge | Python 3.12+ |
-| Mutation worker | Native Windows; WSL2 Ubuntu fallback |
+| Host OS | Windows 11 x64-compatible |
+| Installed runtime | packaged `codemcp-remote.exe`; no Python/uv/pwsh requirement |
+| Mutation worker | Native Windows local worker |
+| Development fallback | WSL2 Ubuntu remains source-mode compatibility only |
 | codemcp | pinned `0.3.0` with Bridge-owned Windows compatibility wrapper |
-| Remote transport | OpenAI Secure MCP Tunnel |
+| Remote transport | bundled OpenAI Secure MCP `tunnel-client` |
+| Git | Git for Windows is an explicit runtime prerequisite |
 | Identity model | single-user local policy profile |
 | Native Windows Git-backed mutation | **supported and compatibility-tested** |
 | Arbitrary shell / arbitrary path | **not exposed** |
@@ -53,19 +54,50 @@ See [`docs/reports/compatibility/codemcp-compatibility-matrix.md`](docs/reports/
 
 ## Requirements
 
-On Windows:
+### Installed Windows release
 
-- Windows 11;
-- Python 3.12+ on Windows;
+The `codemcp-remote-setup.exe` release requires:
+
+- Windows 11 x64-compatible;
 - Git for Windows;
-- PowerShell 7 (`pwsh`);
-- [`uv`](https://docs.astral.sh/uv/);
-- `tunnel-client` for the remote ChatGPT path;
 - an OpenAI Tunnel and the required account/workspace permissions for Tunnel use.
+
+The installed runtime includes the Bridge, native codemcp worker, and OpenAI `tunnel-client`. It does **not** require Python, `uv`, PowerShell 7, WSL2, or the codemcp-remote source repository.
+
+### Source development
+
+Building or running from this repository additionally requires:
+
+- Python 3.12+ on Windows;
+- PowerShell 7 (`pwsh`);
+- [`uv`](https://docs.astral.sh/uv/).
+
+WSL2 is optional and only needed when explicitly testing the compatibility fallback worker.
 
 Do not store the Tunnel runtime API key in this repository, a local env file, the generated Tunnel profile, shell history, or logs.
 
-## Quick start
+## Installed release quick start
+
+After installing Git for Windows and `codemcp-remote-setup.exe`, initialize the installed runtime directly from its default per-user location:
+
+```powershell
+$exe = "$env:LOCALAPPDATA\Programs\codemcp-remote\codemcp-remote.exe"
+
+# Set CONTROL_PLANE_API_KEY only in the current process from your secret source.
+& $exe init --tunnel-id "<your tunnel id>" --store-api-key
+$env:CONTROL_PLANE_API_KEY = $null
+
+& $exe project add my_project "D:\workspace\my-project"
+& $exe doctor
+& $exe start
+& $exe status
+```
+
+`--store-api-key` uses Windows DPAPI. Do not paste the API key into chat or store it in the Tunnel env/profile files.
+
+For clean-machine release validation, use [`docs/releases/v0.1.0/packaging-phase-5-clean-machine-validation.md`](docs/releases/v0.1.0/packaging-phase-5-clean-machine-validation.md).
+
+## Source development quick start
 
 ### 1. Install the Bridge dependencies
 

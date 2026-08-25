@@ -1,0 +1,416 @@
+[CmdletBinding()]
+param(
+    [ValidateSet("Prepare", "Start", "Cleanup")]
+    [string]$Action = "Prepare",
+    [string]$InstallerPath,
+    [string]$ExpectedInstallerSha256,
+    [string]$TunnelId,
+    [string]$ProjectId = "phase5-clean",
+    [string]$ProjectRoot
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$UninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A26B4BA3-1D96-4F1A-95C4-9984C941A1E1}_is1"
+$DefaultProjectRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5\project"
+$Phase5StateFile = Join-Path $env:LOCALAPPDATA "codemcp-remote\phase5-validation.json"
+
+function Invoke-GuiProcessAndWait {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
+
+    $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru
+    return $process.ExitCode
+}
+
+function Invoke-JsonCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
+
+    $output = (& $FilePath @ArgumentList 2>&1 | Out-String).Trim()
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "$FilePath $($ArgumentList -join ' ') failed with exit code $exitCode`n$output"
+    }
+    try {
+        return $output | ConvertFrom-Json
+    } catch {
+        throw "Command did not return valid JSON: $FilePath $($ArgumentList -join ' ')`n$output"
+    }
+}
+
+function Require-CleanAcceptanceHost {
+    if ($env:OS -ne "Windows_NT") {
+        throw "Phase 5 clean-machine validation must run on Windows"
+    }
+    if (-not [Environment]::Is64BitOperatingSystem) {
+        throw "Phase 5 currently supports only x64-compatible Windows"
+    }
+    if (Test-Path -LiteralPath $UninstallKey) {
+        $existing = Get-ItemProperty -LiteralPath $UninstallKey -ErrorAction Stop
+        throw "codemcp-remote is already installed at '$($existing.InstallLocation)'; use a fresh Windows host/VM"
+    }
+}
+
+function Resolve-Git {
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($null -eq $git) {
+        throw "Git for Windows is required by the v0.1.0 release contract but was not found"
+    }
+    return $git.Source
+}
+
+function Get-InstalledRelease {
+    if (-not (Test-Path -LiteralPath $UninstallKey)) {
+        throw "codemcp-remote is not installed; run Action=Prepare first"
+    }
+    $registration = Get-ItemProperty -LiteralPath $UninstallKey -ErrorAction Stop
+    $installDir = [System.IO.Path]::GetFullPath([string]$registration.InstallLocation)
+    $exe = Join-Path $installDir "codemcp-remote.exe"
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+        throw "installed codemcp-remote.exe is missing: $exe"
+    }
+    return [ordered]@{
+        install_dir = $installDir
+        exe = $exe
+    }
+}
+
+function Set-RuntimeIsolationPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstallDir,
+        [Parameter(Mandatory = $true)]
+        [string]$GitPath
+    )
+
+    $entries = @(
+        $InstallDir,
+        (Split-Path -Parent $GitPath),
+        (Join-Path $env:SystemRoot "System32"),
+        $env:SystemRoot
+    )
+    $unique = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in $entries) {
+        if (-not [string]::IsNullOrWhiteSpace($entry) -and -not $unique.Contains($entry)) {
+            $unique.Add($entry)
+        }
+    }
+    $env:PATH = $unique -join ";"
+
+    foreach ($forbidden in @("python.exe", "py.exe", "uv.exe", "pwsh.exe")) {
+        if ($null -ne (Get-Command $forbidden -ErrorAction SilentlyContinue)) {
+            throw "runtime isolation failed: $forbidden is still visible on PATH"
+        }
+    }
+}
+
+function Prepare-AcceptanceProject {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$GitPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    if (Test-Path -LiteralPath $Root) {
+        throw "Phase 5 disposable project already exists: $Root"
+    }
+    New-Item -ItemType Directory -Force -Path $Root | Out-Null
+
+    & $GitPath -C $Root init
+    if ($LASTEXITCODE -ne 0) { throw "git init failed" }
+    & $GitPath -C $Root config user.name "codemcp-remote Phase 5"
+    if ($LASTEXITCODE -ne 0) { throw "git user.name configuration failed" }
+    & $GitPath -C $Root config user.email "phase5@localhost.invalid"
+    if ($LASTEXITCODE -ne 0) { throw "git user.email configuration failed" }
+
+    @"
+# codemcp-remote Phase 5 clean-machine acceptance
+
+This disposable repository exists only to validate the packaged Windows release.
+"@ | Set-Content -LiteralPath (Join-Path $Root "README.md") -Encoding UTF8
+
+    @"
+project_prompt = "Operate only on this disposable Phase 5 acceptance repository."
+"@ | Set-Content -LiteralPath (Join-Path $Root "codemcp.toml") -Encoding UTF8
+
+    "phase5-clean-machine" | Set-Content -LiteralPath (Join-Path $Root "PHASE5_ACCEPTANCE.txt") -Encoding ASCII
+
+    & $GitPath -C $Root add README.md codemcp.toml PHASE5_ACCEPTANCE.txt
+    if ($LASTEXITCODE -ne 0) { throw "git add failed" }
+    & $GitPath -C $Root commit -m "chore: create phase5 acceptance baseline"
+    if ($LASTEXITCODE -ne 0) { throw "git baseline commit failed" }
+
+    $head = (& $GitPath -C $Root rev-parse HEAD | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $head -notmatch "^[0-9a-f]{40,64}$") {
+        throw "git rev-parse HEAD failed"
+    }
+    return $head
+}
+
+function Assert-DoctorContract {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Doctor
+    )
+
+    if ($Doctor.status -ne "ok") {
+        throw "doctor did not report status=ok"
+    }
+    if ($Doctor.checks.configuration.worker_mode -ne "local") {
+        throw "clean-machine release is not using the native local worker"
+    }
+    if ($Doctor.checks.git.status -ne "ok") {
+        throw "doctor cannot find Git after runtime PATH isolation"
+    }
+    if ($Doctor.checks.api_key.status -ne "ok" -or $Doctor.checks.api_key.source -ne "windows-dpapi") {
+        throw "doctor did not prove Windows DPAPI secret recovery"
+    }
+    if ($Doctor.checks.tunnel_client.status -ne "ok") {
+        throw "doctor cannot find the bundled tunnel-client"
+    }
+}
+
+function Invoke-Start {
+    $release = Get-InstalledRelease
+    $gitPath = Resolve-Git
+    Set-RuntimeIsolationPath -InstallDir $release.install_dir -GitPath $gitPath
+
+    $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
+    Assert-DoctorContract -Doctor $doctor
+
+    $start = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("start", "--startup-timeout", "45")
+    if ($start.status -ne "ok") {
+        throw "native lifecycle start failed"
+    }
+    $status = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("status")
+    if ($status.status -ne "running") {
+        throw "native lifecycle did not reach running state"
+    }
+    if (-not $status.bridge.owned -or $status.bridge.health.status -ne "ok") {
+        throw "Bridge is not healthy and owned"
+    }
+    if (-not $status.tunnel.owned -or $status.tunnel.health.status -ne "ok") {
+        throw "Tunnel is not healthy and owned"
+    }
+
+    $phase5 = $null
+    if (Test-Path -LiteralPath $Phase5StateFile -PathType Leaf) {
+        try {
+            $phase5 = Get-Content -LiteralPath $Phase5StateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        } catch {
+            throw "Phase 5 validation state is unreadable: $Phase5StateFile"
+        }
+    }
+
+    [ordered]@{
+        status = "ready-for-remote-verification"
+        phase = "5"
+        action = "start"
+        install_dir = $release.install_dir
+        app_root = (Join-Path $env:LOCALAPPDATA "codemcp-remote")
+        project_id = if ($null -ne $phase5) { [string]$phase5.project_id } else { $null }
+        project_root = if ($null -ne $phase5) { [string]$phase5.project_root } else { $null }
+        baseline_head = if ($null -ne $phase5) { [string]$phase5.baseline_head } else { $null }
+        worker_mode = [string]$doctor.checks.configuration.worker_mode
+        git_path = $gitPath
+        api_key_source = [string]$doctor.checks.api_key.source
+        tunnel_client_path = [string]$doctor.checks.tunnel_client.path
+        bridge_health = [string]$status.bridge.health.status
+        tunnel_health = [string]$status.tunnel.health.status
+        python_visible_on_isolated_path = ($null -ne (Get-Command python.exe -ErrorAction SilentlyContinue))
+        uv_visible_on_isolated_path = ($null -ne (Get-Command uv.exe -ErrorAction SilentlyContinue))
+        pwsh_visible_on_isolated_path = ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue))
+        wsl_command_visible = ($null -ne (Get-Command wsl.exe -ErrorAction SilentlyContinue))
+        next = "Use the ChatGPT connector to open the Phase 5 project and run the remote contract before cleanup."
+    } | ConvertTo-Json -Depth 7
+}
+
+function Invoke-Cleanup {
+    if (-not (Test-Path -LiteralPath $UninstallKey)) {
+        [ordered]@{
+            status = "ok"
+            phase = "5"
+            action = "cleanup"
+            note = "codemcp-remote is not installed"
+        } | ConvertTo-Json -Depth 5
+        return
+    }
+
+    $release = Get-InstalledRelease
+    & $release.exe stop | Out-Host
+
+    $uninstallers = @(Get-ChildItem -LiteralPath $release.install_dir -File -Filter "unins*.exe" -ErrorAction SilentlyContinue)
+    if ($uninstallers.Count -ne 1) {
+        throw "expected exactly one Inno Setup uninstaller in $($release.install_dir)"
+    }
+    $exitCode = Invoke-GuiProcessAndWait -FilePath $uninstallers[0].FullName -ArgumentList @(
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART"
+    )
+    if ($exitCode -ne 0) {
+        throw "clean-machine uninstall failed with exit code $exitCode"
+    }
+    if (Test-Path -LiteralPath $UninstallKey) {
+        throw "uninstall registration still exists after cleanup"
+    }
+
+    [ordered]@{
+        status = "ok"
+        phase = "5"
+        action = "cleanup"
+        install_dir = $release.install_dir
+        note = "installer removed; runtime data and disposable project are intentionally preserved"
+    } | ConvertTo-Json -Depth 5
+}
+
+if ($Action -eq "Start") {
+    Invoke-Start
+    exit 0
+}
+if ($Action -eq "Cleanup") {
+    Invoke-Cleanup
+    exit 0
+}
+
+Require-CleanAcceptanceHost
+
+if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
+    throw "-InstallerPath is required for Action=Prepare"
+}
+if ($ExpectedInstallerSha256 -notmatch "^[0-9a-fA-F]{64}$") {
+    throw "-ExpectedInstallerSha256 must be a 64-character SHA-256 digest"
+}
+if ([string]::IsNullOrWhiteSpace($TunnelId)) {
+    throw "-TunnelId is required for Action=Prepare"
+}
+if ([string]::IsNullOrWhiteSpace($env:CONTROL_PLANE_API_KEY)) {
+    throw "Set CONTROL_PLANE_API_KEY in this process before running Phase 5; never pass the secret on the command line"
+}
+
+$installer = (Resolve-Path -LiteralPath $InstallerPath).Path
+$actualInstallerSha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualInstallerSha256 -ne $ExpectedInstallerSha256.ToLowerInvariant()) {
+    throw "installer SHA-256 mismatch: expected=$ExpectedInstallerSha256 actual=$actualInstallerSha256"
+}
+
+$gitPath = Resolve-Git
+$projectRootPath = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $DefaultProjectRoot
+} else {
+    [System.IO.Path]::GetFullPath($ProjectRoot)
+}
+
+$setupExit = Invoke-GuiProcessAndWait -FilePath $installer -ArgumentList @(
+    "/VERYSILENT",
+    "/SUPPRESSMSGBOXES",
+    "/NORESTART",
+    "/MERGETASKS=!addtopath"
+)
+if ($setupExit -ne 0) {
+    throw "clean-machine installer failed with exit code $setupExit"
+}
+if (-not (Test-Path -LiteralPath $UninstallKey)) {
+    throw "installer did not create the expected uninstall registration"
+}
+
+$release = Get-InstalledRelease
+$expectedInstallDir = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs\codemcp-remote"))
+if ($release.install_dir.TrimEnd("\") -ne $expectedInstallDir.TrimEnd("\")) {
+    throw "unexpected default install location: $($release.install_dir)"
+}
+
+$tunnelExe = Join-Path $release.install_dir "tunnel-client.exe"
+foreach ($required in @(
+    $release.exe,
+    $tunnelExe,
+    (Join-Path $release.install_dir "LICENSE"),
+    (Join-Path $release.install_dir "THIRD_PARTY_NOTICES.txt")
+)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "installed release is missing required file: $required"
+    }
+}
+foreach ($forbiddenBundledTool in @("python.exe", "uv.exe", "pwsh.exe", "wsl.exe")) {
+    if (Test-Path -LiteralPath (Join-Path $release.install_dir $forbiddenBundledTool) -PathType Leaf) {
+        throw "installer unexpectedly bundles $forbiddenBundledTool"
+    }
+}
+
+Set-RuntimeIsolationPath -InstallDir $release.install_dir -GitPath $gitPath
+
+$versionText = (& $release.exe --version 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $versionText -notmatch "0\.1\.0") {
+    throw "installed codemcp-remote version check failed: $versionText"
+}
+
+$init = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @(
+    "init",
+    "--tunnel-id", $TunnelId,
+    "--store-api-key"
+)
+if ($init.status -ne "ok") {
+    throw "codemcp-remote init did not report status=ok"
+}
+
+$env:CONTROL_PLANE_API_KEY = $null
+$doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
+Assert-DoctorContract -Doctor $doctor
+
+$baselineHead = Prepare-AcceptanceProject -GitPath $gitPath -Root $projectRootPath
+$project = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @(
+    "project", "add", $ProjectId, $projectRootPath
+)
+if ($project.status -ne "ok") {
+    throw "project registration failed"
+}
+
+$doctorAfterProject = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
+Assert-DoctorContract -Doctor $doctorAfterProject
+if ([int]$doctorAfterProject.checks.configuration.projects -lt 1) {
+    throw "doctor did not observe the registered Phase 5 project"
+}
+
+$phase5State = [ordered]@{
+    project_id = $ProjectId
+    project_root = $projectRootPath
+    baseline_head = $baselineHead
+    installer_sha256 = $actualInstallerSha256
+    install_dir = $release.install_dir
+}
+$stateParent = Split-Path -Parent $Phase5StateFile
+New-Item -ItemType Directory -Force -Path $stateParent | Out-Null
+$phase5State | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Phase5StateFile -Encoding UTF8
+
+[ordered]@{
+    status = "ready-for-start"
+    phase = "5"
+    action = "prepare"
+    installer_sha256 = $actualInstallerSha256
+    install_dir = $release.install_dir
+    app_root = (Join-Path $env:LOCALAPPDATA "codemcp-remote")
+    phase5_state_file = $Phase5StateFile
+    project_id = $ProjectId
+    project_root = $projectRootPath
+    baseline_head = $baselineHead
+    worker_mode = [string]$doctorAfterProject.checks.configuration.worker_mode
+    git_path = $gitPath
+    api_key_source = [string]$doctorAfterProject.checks.api_key.source
+    tunnel_client_path = [string]$doctorAfterProject.checks.tunnel_client.path
+    python_visible_on_isolated_path = ($null -ne (Get-Command python.exe -ErrorAction SilentlyContinue))
+    uv_visible_on_isolated_path = ($null -ne (Get-Command uv.exe -ErrorAction SilentlyContinue))
+    pwsh_visible_on_isolated_path = ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue))
+    wsl_command_visible = ($null -ne (Get-Command wsl.exe -ErrorAction SilentlyContinue))
+    next = "Coordinate the Tunnel cutover, then run this script again with -Action Start."
+} | ConvertTo-Json -Depth 7

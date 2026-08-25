@@ -1,0 +1,139 @@
+[CmdletBinding()]
+param(
+    [string]$InstallerDir,
+    [string]$OutputRoot,
+    [string]$Version = "0.1.0"
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+if ($env:OS -ne "Windows_NT") {
+    throw "Windows release candidates must be prepared on Windows"
+}
+
+$repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+if ([string]::IsNullOrWhiteSpace($InstallerDir)) {
+    $InstallerDir = Join-Path $repositoryRoot ".local\installer-dist"
+}
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    $OutputRoot = Join-Path $repositoryRoot ".local\release-candidate"
+}
+$InstallerDir = [System.IO.Path]::GetFullPath($InstallerDir)
+$OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+
+$installer = Join-Path $InstallerDir "codemcp-remote-setup.exe"
+$phase4Checksums = Join-Path $InstallerDir "SHA256SUMS.txt"
+$validationScript = Join-Path $repositoryRoot "scripts\validate-clean-windows-release.ps1"
+$validationDoc = Join-Path $repositoryRoot "docs\releases\v0.1.0\packaging-phase-5-clean-machine-validation.md"
+$license = Join-Path $repositoryRoot "LICENSE"
+
+foreach ($required in @($installer, $phase4Checksums, $validationScript, $validationDoc, $license)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "required release-candidate input is missing: $required"
+    }
+}
+
+$windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
+    throw "Windows PowerShell 5.1 was not found for clean-machine script compatibility validation"
+}
+$escapedValidationScript = $validationScript.Replace("'", "''")
+$parseCommand = "[void][scriptblock]::Create([IO.File]::ReadAllText('$escapedValidationScript'))"
+& $windowsPowerShell -NoLogo -NoProfile -NonInteractive -Command $parseCommand
+if ($LASTEXITCODE -ne 0) {
+    throw "clean-machine validation script is not compatible with the Windows PowerShell parser"
+}
+
+$checksumLine = @(
+    Get-Content -LiteralPath $phase4Checksums -Encoding ASCII |
+        Where-Object { $_ -match "^[0-9A-Fa-f]{64}\s+codemcp-remote-setup\.exe$" }
+)
+if ($checksumLine.Count -ne 1) {
+    throw "Phase 4 SHA256SUMS.txt must contain exactly one codemcp-remote-setup.exe entry"
+}
+$expectedInstallerSha256 = ($checksumLine[0] -split "\s+")[0].ToLowerInvariant()
+$actualInstallerSha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualInstallerSha256 -ne $expectedInstallerSha256) {
+    throw "Phase 4 installer checksum mismatch"
+}
+
+$signature = Get-AuthenticodeSignature -LiteralPath $installer
+$signatureStatus = [string]$signature.Status
+if ($signatureStatus -notin @("Valid", "NotSigned")) {
+    throw "installer Authenticode status is unsafe: $signatureStatus"
+}
+
+$candidateName = "codemcp-remote-v{0}-windows-x64" -f $Version
+$candidateDir = Join-Path $OutputRoot $candidateName
+$zipPath = Join-Path $OutputRoot ($candidateName + ".zip")
+$zipHashPath = $zipPath + ".sha256"
+
+Remove-Item -LiteralPath $candidateDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $zipHashPath -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $candidateDir | Out-Null
+
+Copy-Item -LiteralPath $installer -Destination (Join-Path $candidateDir "codemcp-remote-setup.exe")
+Copy-Item -LiteralPath $validationScript -Destination (Join-Path $candidateDir "validate-clean-windows-release.ps1")
+Copy-Item -LiteralPath $validationDoc -Destination (Join-Path $candidateDir "CLEAN-MACHINE-VALIDATION.md")
+Copy-Item -LiteralPath $license -Destination (Join-Path $candidateDir "LICENSE")
+
+$manifest = [ordered]@{
+    product = "codemcp-remote"
+    version = $Version
+    platform = "windows-x64"
+    phase = 5
+    installer_sha256 = $actualInstallerSha256
+    authenticode_status = $signatureStatus
+    runtime_prerequisites = @(
+        "Windows 11 x64-compatible",
+        "Git for Windows",
+        "OpenAI Tunnel ID and account/workspace permission"
+    )
+    not_required_at_runtime = @(
+        "Python",
+        "uv",
+        "PowerShell 7",
+        "WSL2",
+        "codemcp-remote source repository",
+        "separately installed tunnel-client"
+    )
+    validation = "Run validate-clean-windows-release.ps1 on a clean Windows host or VM."
+}
+$manifestPath = Join-Path $candidateDir "release-manifest.json"
+$manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+$checksumFiles = @(
+    "codemcp-remote-setup.exe",
+    "validate-clean-windows-release.ps1",
+    "CLEAN-MACHINE-VALIDATION.md",
+    "LICENSE",
+    "release-manifest.json"
+)
+$checksumLines = New-Object System.Collections.Generic.List[string]
+foreach ($name in $checksumFiles) {
+    $path = Join-Path $candidateDir $name
+    $sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumLines.Add(("{0}  {1}" -f $sha256, $name))
+}
+$candidateChecksumPath = Join-Path $candidateDir "SHA256SUMS.txt"
+$checksumLines | Set-Content -LiteralPath $candidateChecksumPath -Encoding ASCII
+
+Compress-Archive -Path (Join-Path $candidateDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
+$zipSha256 = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+("{0}  {1}" -f $zipSha256, (Split-Path -Leaf $zipPath)) |
+    Set-Content -LiteralPath $zipHashPath -Encoding ASCII
+
+[ordered]@{
+    status = "ok"
+    phase = "5"
+    candidate_dir = $candidateDir
+    candidate_zip = $zipPath
+    candidate_zip_sha256 = $zipSha256
+    candidate_zip_sha256_file = $zipHashPath
+    installer_sha256 = $actualInstallerSha256
+    authenticode_status = $signatureStatus
+    clean_machine_script = (Join-Path $candidateDir "validate-clean-windows-release.ps1")
+    clean_machine_document = (Join-Path $candidateDir "CLEAN-MACHINE-VALIDATION.md")
+} | ConvertTo-Json -Depth 5

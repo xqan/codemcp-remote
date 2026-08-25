@@ -112,8 +112,29 @@ Expected final JSON includes:
 - The exact Windows x64 installer is validated here. Windows Arm64 is outside the current packaging target.
 - Final acceptance on a fresh Windows 11 machine without Python, uv, WSL2, or developer tooling remains Packaging Phase 5.
 
-## Current validation state
+## Final validation state
 
-Implementation is complete but Packaging Phase 4 is not closed until the Windows host build above returns `status: "ok"` and `smoke: "passed"` with a concrete installer SHA-256.
+Packaging Phase 4 passed on Windows 11.
 
-Do not enter Packaging Phase 5 until the installer build and isolated install/uninstall smoke pass.
+Observed final result:
+
+- Packaging Phase 3 staging EXE build: PASS.
+- Frozen worker smoke: PASS.
+- Isolated lifecycle status smoke: PASS.
+- Inno Setup 7 compilation: PASS.
+- Isolated silent install: PASS.
+- Installed `codemcp-remote.exe 0.1.0`: PASS.
+- Installed lifecycle `status`: PASS (`status: stopped` in the isolated runtime root).
+- Silent uninstall: PASS.
+- Required-file removal verification: PASS.
+- Installer Authenticode state: `NotSigned`.
+- Bundled `tunnel-client`: `v0.0.12`, Apache-2.0.
+- Bundled `tunnel-client.exe` SHA-256: `6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8`.
+- Final installer SHA-256: `659651d9c0c1f333c39bf1ae4cee107c99bf147487f855aca4600309ec39c37c`.
+- Final installer: `.local\installer-dist\codemcp-remote-setup.exe`.
+- Checksum manifest: `.local\installer-dist\SHA256SUMS.txt`.
+- Final smoke status: `passed`.
+
+The installer smoke also confirmed cleanup of stale isolated smoke state without touching the active development lifecycle.
+
+Packaging Phase 4 is closed. Do not enter Packaging Phase 5 without an explicit next-phase instruction.
