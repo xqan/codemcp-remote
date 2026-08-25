@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Prepare", "Start", "Cleanup")]
+    [ValidateSet("Prepare", "Start", "Cleanup", "Reset")]
     [string]$Action = "Prepare",
     [string]$InstallerPath,
     [string]$ExpectedInstallerSha256,
@@ -96,8 +96,7 @@ function Set-RuntimeIsolationPath {
     $entries = @(
         $InstallDir,
         (Split-Path -Parent $GitPath),
-        (Join-Path $env:SystemRoot "System32"),
-        $env:SystemRoot
+        (Join-Path $env:SystemRoot "System32")
     )
     $unique = New-Object System.Collections.Generic.List[string]
     foreach ($entry in $entries) {
@@ -275,12 +274,60 @@ function Invoke-Cleanup {
     } | ConvertTo-Json -Depth 5
 }
 
+function Remove-Phase5AcceptanceTree {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\")
+    $allowedPaths = @(
+        [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "codemcp-remote")).TrimEnd("\"),
+        [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5")).TrimEnd("\")
+    )
+    if ($allowedPaths -notcontains $fullPath) {
+        throw "Reset refused to remove a path outside the fixed Phase 5 acceptance roots: $fullPath"
+    }
+    if (-not (Test-Path -LiteralPath $fullPath)) {
+        return
+    }
+
+    $item = Get-Item -LiteralPath $fullPath -Force
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Reset refused to remove a reparse-point acceptance root: $fullPath"
+    }
+    Remove-Item -LiteralPath $fullPath -Recurse -Force
+}
+
+function Invoke-Reset {
+    if (Test-Path -LiteralPath $UninstallKey) {
+        throw "Reset requires codemcp-remote to be uninstalled first; run Action=Cleanup"
+    }
+
+    $appRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+    $acceptanceRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5"
+    Remove-Phase5AcceptanceTree -Path $appRoot
+    Remove-Phase5AcceptanceTree -Path $acceptanceRoot
+
+    [ordered]@{
+        status = "ok"
+        phase = "5"
+        action = "reset"
+        removed = @($appRoot, $acceptanceRoot)
+        note = "Phase 5 acceptance-only runtime and disposable project state removed"
+    } | ConvertTo-Json -Depth 5
+}
+
 if ($Action -eq "Start") {
     Invoke-Start
     exit 0
 }
 if ($Action -eq "Cleanup") {
     Invoke-Cleanup
+    exit 0
+}
+if ($Action -eq "Reset") {
+    Invoke-Reset
     exit 0
 }
 

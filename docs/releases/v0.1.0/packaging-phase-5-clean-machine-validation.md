@@ -162,6 +162,27 @@ powershell.exe -ExecutionPolicy Bypass -File .\validate-clean-windows-release.ps
 
 Cleanup stops the installed lifecycle and runs the Inno Setup uninstaller. It intentionally preserves `%LOCALAPPDATA%\codemcp-remote` and the disposable project because the product uninstall contract preserves user/runtime data.
 
+### 4. Reset for acceptance retries only
+
+`Reset` is not part of normal product uninstall behavior. It exists only so the same clean Windows VM can safely retry Phase 5 after a failed acceptance attempt.
+
+Run it only after `Cleanup`:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\validate-clean-windows-release.ps1 -Action Reset
+```
+
+`Reset` fails if codemcp-remote is still installed. It can remove only these fixed acceptance roots:
+
+```text
+%LOCALAPPDATA%\codemcp-remote
+%LOCALAPPDATA%\codemcp-remote-phase5
+```
+
+It refuses other paths and refuses reparse-point roots. A custom `-ProjectRoot` outside the default acceptance tree is never deleted automatically.
+
+The first clean-machine attempt on 2026-08-25 exposed a harness-only isolation defect: the PATH gate kept both `System32` and `%SystemRoot%`, which reintroduced the Windows Python Launcher at `C:\Windows\py.exe`. The product installer had already succeeded, but `Prepare` correctly stopped before initialization. The harness now keeps only the installed product directory, the resolved Git directory, and `System32`; `%SystemRoot%` is no longer added.
+
 ## Disposable repository
 
 Default project identity:
