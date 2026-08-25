@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.4 complete; 5.5.5 implementation is complete but installer acceptance is BLOCKED by missing Inno Setup 7; 5.5.6 is NOT STARTED**
+Status: **IN PROGRESS — 5.5.1 through 5.5.5 complete; 5.5.6 is NOT STARTED**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are complete. Phase 5.5.5 code/package integration is implemented, but its native installer acceptance remains blocked only by the local absence of Inno Setup 7 `ISCC.exe`; Phase 5.5.6 has not started.
+Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are complete. Phase 5.5.5 Windows installer integration and native acceptance are also complete. Phase 5.5.6 has not started.
 
 ## 1. Context
 
@@ -747,12 +747,13 @@ Implemented on 2026-08-25:
 Validation on 2026-08-25:
 
 - full registered regression before native installer acceptance: `201 passed, 4 skipped, 4 failed`; all five new Phase 5.5.5 packaging-contract tests passed and the same four inherited Windows/symlink/Maven/CRLF failures remained;
-- native acceptance reached and passed the scoped Ruff gate, all 11 Phase 3 lifecycle tests, PyInstaller onedir build, frozen version/check smoke, and frozen worker mutation smoke;
-- the generated frozen executable reported SHA-256 `f4d035c3945f3395d4a293192cc288eeb05b170db96368edec04d4176aab50fd` in that acceptance attempt;
-- installer compilation did not run because this Windows build host has no Inno Setup 7 `ISCC.exe`; therefore install/upgrade/uninstall, final installer SHA-256, and runtime-data-preservation smoke are still unproven;
-- no system package was installed automatically to bypass that build-host prerequisite.
+- native acceptance using `D:\Programs\Inno Setup 7\ISCC.exe` passed the scoped Ruff gate, all 11 Phase 3 lifecycle tests, PyInstaller onedir build, frozen version/check smoke, frozen worker mutation smoke, Inno Setup compilation, install, upgrade, uninstall, and runtime-data-preservation checks;
+- the full registered suite including the one-time native installer acceptance finished at `202 passed, 4 skipped, 4 failed`; the acceptance test passed and the same four inherited baseline failures remained;
+- the generated installer is `.local\installer-dist\codemcp-remote-setup.exe` with SHA-256 `0b49d303dcf1994853866672fe2d7623977429dc86e61a52f29ed797b132093b`;
+- installer payload checks confirmed the pinned `cloudflared 2026.7.3` checksum/version, no staged runtime auth/tunnel configuration or `*.dpapi` secret, and preservation of user runtime data across upgrade and normal uninstall;
+- the temporary acceptance harness was removed from durable history; its partial cleanup operation was reconciled after the repository was manually restored to the pre-operation clean HEAD.
 
-**STOP GATE:** Phase 5.5.5 is not COMPLETE until Inno Setup 7 is available and the native installer acceptance passes. Phase 5.5.6 must not start.
+**STOP GATE:** Phase 5.5.5 is COMPLETE. Phase 5.5.6 remains NOT STARTED and must not start without a new explicit continuation instruction.
 
 Then STOP.
 
