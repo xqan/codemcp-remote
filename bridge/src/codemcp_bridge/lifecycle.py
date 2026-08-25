@@ -17,6 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .resource_auth import (
+    CONTRACT_ID,
+    CONTRACT_VERSION,
+    OAuthResourceServerAuthenticator,
+    OnlineResourceServerValidator,
+    ResourceServerValidationConfig,
+)
 from .settings import PROJECT_ID_PATTERN, SettingsError, load_settings
 from .transports import (
     LifecycleError,
@@ -106,30 +113,40 @@ def _transport_context(paths: RuntimePaths) -> TransportContext:
 
 
 REMOTE_CONFIG_VERSION = 1
+RESOURCE_AUTH_CONFIG_VERSION = 1
+RESOURCE_AUTH_MODE = "oauth-resource-server"
+RESOURCE_AUTH_SECRET_ENV_NAME = "CODEMCP_RS_VERIFICATION_SECRET"
+RESOURCE_AUTH_SECRET_FILE_NAME = "mcp-rs-verification-secret.dpapi"
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceAuthSettings:
+    issuer: str
+    resource: str
+    validation_resource_id: str
+    mode: str = RESOURCE_AUTH_MODE
+    contract_id: str = CONTRACT_ID
+    timeout_seconds: float = 2.0
+
+    def validation_config(self, secret: str) -> ResourceServerValidationConfig:
+        return ResourceServerValidationConfig(
+            issuer=self.issuer,
+            resource=self.resource,
+            validation_resource_id=self.validation_resource_id,
+            validation_secret=secret,
+            timeout_seconds=self.timeout_seconds,
+            contract_version=CONTRACT_VERSION,
+        )
 
 
 def _remote_config_path(paths: RuntimePaths) -> Path:
     return paths.config_dir / "remote.toml"
 
 
-def _write_remote_config(paths: RuntimePaths, provider: RemoteTransportProvider) -> Path:
-    path = _remote_config_path(paths)
-    temporary = path.with_suffix(".toml.tmp")
-    temporary.write_text(
-        "[remote]\n"
-        f"version = {REMOTE_CONFIG_VERSION}\n"
-        f"transport = {_toml_quote(provider.provider_id)}\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    os.replace(temporary, path)
-    return path
-
-
-def load_transport_provider(paths: RuntimePaths) -> tuple[RemoteTransportProvider, str]:
+def _read_remote_config(paths: RuntimePaths) -> dict[str, Any] | None:
     path = _remote_config_path(paths)
     if not path.is_file():
-        return _REMOTE_TRANSPORT, "legacy-default"
+        return None
 
     import tomllib
 
@@ -137,6 +154,43 @@ def load_transport_provider(paths: RuntimePaths) -> tuple[RemoteTransportProvide
         parsed = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise LifecycleError(f"remote transport configuration is invalid: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise LifecycleError("remote transport configuration must be a TOML document")
+    return parsed
+
+
+def _write_remote_config(
+    paths: RuntimePaths,
+    provider: RemoteTransportProvider,
+    auth: ResourceAuthSettings | None = None,
+) -> Path:
+    path = _remote_config_path(paths)
+    temporary = path.with_suffix(".toml.tmp")
+    text = (
+        "[remote]\n"
+        f"version = {REMOTE_CONFIG_VERSION}\n"
+        f"transport = {_toml_quote(provider.provider_id)}\n"
+    )
+    if auth is not None:
+        text += (
+            "\n[auth]\n"
+            f"version = {RESOURCE_AUTH_CONFIG_VERSION}\n"
+            f"mode = {_toml_quote(auth.mode)}\n"
+            f"verification_contract = {_toml_quote(auth.contract_id)}\n"
+            f"authorization_server_issuer = {_toml_quote(auth.issuer)}\n"
+            f"canonical_resource_uri = {_toml_quote(auth.resource)}\n"
+            f"validation_resource_id = {_toml_quote(auth.validation_resource_id)}\n"
+            f"validation_timeout_ms = {int(auth.timeout_seconds * 1000)}\n"
+        )
+    temporary.write_text(text, encoding="utf-8", newline="\n")
+    os.replace(temporary, path)
+    return path
+
+
+def load_transport_provider(paths: RuntimePaths) -> tuple[RemoteTransportProvider, str]:
+    parsed = _read_remote_config(paths)
+    if parsed is None:
+        return _REMOTE_TRANSPORT, "legacy-default"
     remote = parsed.get("remote")
     if not isinstance(remote, dict):
         raise LifecycleError("remote transport configuration must contain [remote]")
@@ -148,6 +202,117 @@ def load_transport_provider(paths: RuntimePaths) -> tuple[RemoteTransportProvide
     if not isinstance(transport, str) or not transport:
         raise LifecycleError("remote.transport must be a non-empty string")
     return get_transport_provider(transport), "config"
+
+
+def _build_resource_auth_settings(
+    *,
+    issuer: str,
+    resource: str,
+    validation_resource_id: str,
+) -> ResourceAuthSettings:
+    try:
+        settings = ResourceAuthSettings(
+            issuer=issuer,
+            resource=resource,
+            validation_resource_id=validation_resource_id,
+        )
+        settings.validation_config("structural-validation-only")
+    except ValueError as exc:
+        raise LifecycleError(f"OAuth Resource Server configuration is invalid: {exc}") from exc
+    return settings
+
+
+def load_resource_auth_settings(paths: RuntimePaths) -> tuple[ResourceAuthSettings | None, str]:
+    parsed = _read_remote_config(paths)
+    if parsed is None:
+        return None, "disabled"
+    auth = parsed.get("auth")
+    if auth is None:
+        return None, "disabled"
+    if not isinstance(auth, dict):
+        raise LifecycleError("remote auth configuration must be a TOML table")
+
+    allowed = {
+        "version",
+        "mode",
+        "verification_contract",
+        "authorization_server_issuer",
+        "canonical_resource_uri",
+        "validation_resource_id",
+        "validation_timeout_ms",
+    }
+    unexpected = sorted(set(auth) - allowed)
+    if unexpected:
+        raise LifecycleError(
+            "remote auth configuration contains unsupported fields: " + ", ".join(unexpected)
+        )
+    if auth.get("version") != RESOURCE_AUTH_CONFIG_VERSION:
+        raise LifecycleError(
+            f"unsupported remote auth configuration version: {auth.get('version')!r}"
+        )
+    if auth.get("mode") != RESOURCE_AUTH_MODE:
+        raise LifecycleError(f"unsupported remote auth mode: {auth.get('mode')!r}")
+    if auth.get("verification_contract") != CONTRACT_ID:
+        raise LifecycleError("remote auth verification_contract must be mcp-rs-verification-v1")
+    if auth.get("validation_timeout_ms") != 2000:
+        raise LifecycleError("remote auth validation_timeout_ms must be exactly 2000")
+
+    issuer = auth.get("authorization_server_issuer")
+    resource = auth.get("canonical_resource_uri")
+    validation_resource_id = auth.get("validation_resource_id")
+    if not all(
+        isinstance(value, str) and value for value in (issuer, resource, validation_resource_id)
+    ):
+        raise LifecycleError(
+            "remote auth issuer, canonical resource URI, and validation resource id are required"
+        )
+    return (
+        _build_resource_auth_settings(
+            issuer=issuer,
+            resource=resource,
+            validation_resource_id=validation_resource_id,
+        ),
+        "config",
+    )
+
+
+def configure_resource_auth(
+    paths: RuntimePaths,
+    *,
+    mode: str,
+    issuer: str | None = None,
+    resource: str | None = None,
+    validation_resource_id: str | None = None,
+) -> dict[str, Any]:
+    provider, _ = load_transport_provider(paths)
+    if mode == "none":
+        if any(value is not None for value in (issuer, resource, validation_resource_id)):
+            raise LifecycleError(
+                "auth fields must not be supplied when --auth-mode none is selected"
+            )
+        auth = None
+    elif mode == RESOURCE_AUTH_MODE:
+        if not all(
+            isinstance(value, str) and value for value in (issuer, resource, validation_resource_id)
+        ):
+            raise LifecycleError(
+                "OAuth Resource Server auth requires issuer, canonical resource URI, "
+                "and validation resource id"
+            )
+        assert issuer is not None and resource is not None and validation_resource_id is not None
+        auth = _build_resource_auth_settings(
+            issuer=issuer,
+            resource=resource,
+            validation_resource_id=validation_resource_id,
+        )
+    else:
+        raise LifecycleError(f"unsupported remote auth mode: {mode!r}")
+    _write_remote_config(paths, provider, auth)
+    return {
+        "status": "ok",
+        "auth_mode": auth.mode if auth is not None else "none",
+        "auth_config": str(_remote_config_path(paths)),
+    }
 
 
 def ensure_runtime_dirs(paths: RuntimePaths) -> None:
@@ -198,6 +363,7 @@ def initialize_runtime(
 ) -> dict[str, Any]:
     ensure_runtime_dirs(paths)
     existing_provider, existing_source = load_transport_provider(paths)
+    existing_auth, _ = load_resource_auth_settings(paths)
     provider = existing_provider if transport is None else get_transport_provider(transport)
     if existing_provider.provider_id != provider.provider_id and not force:
         if existing_source == "config" or paths.tunnel_env.exists():
@@ -239,7 +405,7 @@ def initialize_runtime(
         or not remote_config.is_file()
         or existing_provider.provider_id != provider.provider_id
     ):
-        created.append(str(_write_remote_config(paths, provider)))
+        created.append(str(_write_remote_config(paths, provider, existing_auth)))
 
     return {
         "status": "ok",
@@ -418,6 +584,95 @@ def store_api_key_from_environment(paths: RuntimePaths) -> bool:
     )
 
 
+def _resource_auth_secret_path(paths: RuntimePaths) -> Path:
+    return paths.secret_dir / RESOURCE_AUTH_SECRET_FILE_NAME
+
+
+def _resource_auth_secret_from_runtime(paths: RuntimePaths) -> str | None:
+    value = os.environ.get(RESOURCE_AUTH_SECRET_ENV_NAME)
+    if value:
+        return value
+    secret_path = _resource_auth_secret_path(paths)
+    if secret_path.is_file() and os.name == "nt":
+        return _dpapi_unprotect(secret_path.read_bytes()).decode("utf-8")
+    return None
+
+
+def store_resource_auth_secret_from_environment(paths: RuntimePaths) -> bool:
+    auth, _ = load_resource_auth_settings(paths)
+    if auth is None:
+        raise LifecycleError("OAuth Resource Server auth is not configured")
+    value = os.environ.get(RESOURCE_AUTH_SECRET_ENV_NAME)
+    if not value:
+        raise LifecycleError(f"{RESOURCE_AUTH_SECRET_ENV_NAME} is not set in the current process")
+    if os.name != "nt":
+        raise LifecycleError(
+            "secure Resource Server verification secret storage is currently supported only on Windows"
+        )
+    ensure_runtime_dirs(paths)
+    _resource_auth_secret_path(paths).write_bytes(_dpapi_protect(value.encode("utf-8")))
+    return True
+
+
+def load_request_authenticator(paths: RuntimePaths) -> OAuthResourceServerAuthenticator | None:
+    auth, _ = load_resource_auth_settings(paths)
+    if auth is None:
+        return None
+    secret = _resource_auth_secret_from_runtime(paths)
+    if not secret:
+        raise LifecycleError(
+            f"{RESOURCE_AUTH_SECRET_ENV_NAME} is unavailable; set it in the environment or store it securely"
+        )
+    try:
+        validator = OnlineResourceServerValidator(auth.validation_config(secret))
+    except ValueError as exc:
+        raise LifecycleError(f"OAuth Resource Server configuration is invalid: {exc}") from exc
+    return OAuthResourceServerAuthenticator(validator)
+
+
+def resource_auth_status(paths: RuntimePaths) -> dict[str, Any]:
+    try:
+        auth, source = load_resource_auth_settings(paths)
+    except LifecycleError as exc:
+        return {"status": "invalid", "mode": "unknown", "error": str(exc)}
+    if auth is None:
+        return {"status": "disabled", "mode": "none", "source": source}
+
+    secret_path = _resource_auth_secret_path(paths)
+    secret_source = (
+        "environment"
+        if os.environ.get(RESOURCE_AUTH_SECRET_ENV_NAME)
+        else ("windows-dpapi" if secret_path.is_file() else "none")
+    )
+    try:
+        secret_available = bool(_resource_auth_secret_from_runtime(paths))
+    except (LifecycleError, OSError, UnicodeDecodeError) as exc:
+        return {
+            "status": "invalid",
+            "mode": auth.mode,
+            "source": source,
+            "verification_contract": auth.contract_id,
+            "issuer": auth.issuer,
+            "resource": auth.resource,
+            "validation_endpoint": auth.validation_config("status-only").validation_endpoint,
+            "secret_source": secret_source,
+            "error": str(exc),
+        }
+    return {
+        "status": "ready" if secret_available else "missing",
+        "mode": auth.mode,
+        "source": source,
+        "verification_contract": auth.contract_id,
+        "issuer": auth.issuer,
+        "resource": auth.resource,
+        "validation_endpoint": auth.validation_config("status-only").validation_endpoint,
+        "validation_resource_id": auth.validation_resource_id,
+        "validation_timeout_ms": int(auth.timeout_seconds * 1000),
+        "secret_available": secret_available,
+        "secret_source": secret_source,
+    }
+
+
 def initialize_tunnel_profile(
     paths: RuntimePaths,
     settings: Any,
@@ -506,6 +761,11 @@ def start_services(
     provider, _ = load_transport_provider(paths)
     tunnel = provider.load_settings(_transport_context(paths), env_file=env_file)
     provider.validate_config(tunnel)
+    request_authenticator = load_request_authenticator(paths)
+    if provider.provider_id == "cloudflare" and request_authenticator is None:
+        raise LifecycleError(
+            "cloudflare transport requires OAuth Resource Server auth configuration"
+        )
     secret = _secret_from_runtime(paths, provider)
     if not secret:
         raise LifecycleError(
@@ -536,6 +796,8 @@ def start_services(
                 str(bridge_path),
                 "--projects-config",
                 str(projects_path),
+                "--app-root",
+                str(paths.app_root),
             ],
             cwd=paths.app_root,
             log_path=paths.log_dir / "bridge-supervisor.log",
@@ -608,6 +870,7 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
             "status": "stopped",
             "transport": provider.provider_id,
             "transport_source": transport_source,
+            "auth": resource_auth_status(paths),
             "state_file": str(paths.state_file),
         }
     try:
@@ -635,6 +898,7 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
         "status": "running" if running else "degraded",
         "transport": state.get("transport", provider.provider_id),
         "transport_source": transport_source,
+        "auth": resource_auth_status(paths),
         "bridge": {
             "pid": state.get("bridge_pid"),
             "owned": bridge_owned,
@@ -700,6 +964,18 @@ def doctor_report(
         "source": transport_source,
         "config": str(_remote_config_path(paths)),
     }
+    auth_status = resource_auth_status(paths)
+    if auth_status["status"] == "ready":
+        checks["auth"] = {**auth_status, "status": "ok"}
+    elif auth_status["status"] == "disabled" and provider.provider_id != "cloudflare":
+        checks["auth"] = auth_status
+    else:
+        error = auth_status.get("error")
+        if auth_status["status"] == "disabled":
+            error = "cloudflare transport requires OAuth Resource Server auth configuration"
+        elif auth_status["status"] == "missing":
+            error = f"{RESOURCE_AUTH_SECRET_ENV_NAME} is unavailable"
+        checks["auth"] = {**auth_status, "status": "failed", "error": error}
     secret = _secret_from_runtime(paths, provider)
     secret_path = _provider_secret_path(paths, provider)
     secret_source = (

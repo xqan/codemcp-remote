@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1, 5.5.2, 5.5.3 and 5.5.4A complete; 5.5.4B is unlocked but NOT STARTED**
+Status: **IN PROGRESS — 5.5.1 through 5.5.4 complete; 5.5.5 is NOT STARTED**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; 5.5.3 is now complete and 5.5.4B remains NOT STARTED.
+Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are now complete. Phase 5.5.5 remains NOT STARTED.
 
 ## 1. Context
 
@@ -588,11 +588,11 @@ Make transport selection and external OAuth resource-server validation supported
 Phase 5.5.4 remains split into two independently gated parts:
 
 - **Phase 5.5.4A — transport-only CLI/config**: COMPLETE — versioned transport selection, backward-compatible OpenAI fallback/migration behavior, Cloudflare CLI parameters, provider-specific DPAPI transport secrets, provider-aware start/status/stop/doctor.
-- **Phase 5.5.4B — auth-aware configuration**: **UNLOCKED, NOT STARTED** — persistent configuration/DPAPI wiring for `mcp-rs-verification-v1`, auth-aware doctor/status, and structural validation.
+- **Phase 5.5.4B — auth-aware configuration**: **COMPLETE** — persistent configuration/DPAPI wiring for `mcp-rs-verification-v1`, auth-aware doctor/status, startup wiring, and structural validation.
 
-`mcp-auth-server` Phase 4.1 is now FROZEN, so the previous dependency block is removed. Phase 5.5.4B is still a separate stop-gated sub-phase and must not start automatically when Phase 5.5.3 completes.
+`mcp-auth-server` Phase 4.1 is FROZEN, so the previous dependency block is removed. Phase 5.5.4B completed as a separate stop-gated sub-phase and did not enter Phase 5.5.5.
 
-Phase 5.5.4A implementation completed on 2026-08-25. Completion of 5.5.4A does **not** mark Phase 5.5.4 as fully complete.
+Phase 5.5.4A and 5.5.4B both completed on 2026-08-25. Phase 5.5.4 is now fully complete.
 
 ### CLI target
 
@@ -617,14 +617,14 @@ codemcp-remote init --transport openai-tunnel
 - versioned transport-provider configuration;
 - versioned generic OAuth resource-server configuration;
 - backward-compatible migration for current OpenAI runtime state;
-- generalized local secret storage only for transport credentials that actually require secrecy;
-- public auth metadata configuration for issuer, audience/resource and JWKS/introspection fields proven by Phase 5.5.0;
+- generalized local secret storage for transport credentials and Resource Server verification credentials that actually require secrecy;
+- public auth metadata configuration for exact issuer, canonical resource, validation Resource Server id, frozen verification contract and fixed validation timeout;
 - provider-aware and auth-aware `doctor`;
 - provider-aware and auth-aware JSON status;
 - provider-aware startup errors;
 - provider-specific transport validation;
 - auth-specific structural validation;
-- no provider secret leakage;
+- no provider or Resource Server verification secret leakage;
 - no auth-server private signing material or user/client database copied into the local runtime.
 
 ### Doctor requirements for Cloudflare + external auth
@@ -637,14 +637,37 @@ At minimum report:
 - tunnel credential available from DPAPI;
 - public MCP URL structurally valid;
 - auth mode = oauth-resource-server;
-- issuer/discovery metadata structurally valid;
-- audience/resource identifier structurally valid;
-- JWKS or introspection configuration structurally valid according to the Phase 5.5.0 contract;
+- exact issuer structurally valid;
+- canonical resource identifier structurally valid;
+- `mcp-rs-verification-v1` contract selection, validation endpoint, Resource Server id and fixed 2-second validation timeout structurally valid;
+- Resource Server verification secret availability/source without exposing the secret;
 - no auth-server private signing material is present locally;
 - Git prerequisite available;
 - native worker mode = local.
 
 Do not make successful public internet access, live auth-server reachability, or successful token issuance a prerequisite for an offline configuration check unless the command explicitly performs a network diagnostic.
+
+### Phase 5.5.4B completion evidence
+
+Implemented on 2026-08-25:
+
+- versioned `[auth]` configuration in `remote.toml` for exact issuer, canonical resource, validation Resource Server id, `mcp-rs-verification-v1`, and fixed 2000 ms timeout;
+- strict auth-config parsing that rejects unknown/plaintext secret fields and structurally validates the frozen Resource Server contract;
+- dedicated `CODEMCP_RS_VERIFICATION_SECRET` runtime input with Windows DPAPI persistence in `mcp-rs-verification-secret.dpapi`;
+- auth-aware `status` and offline `doctor` output that reports only public configuration and secret availability/source;
+- Cloudflare startup fail-closed when Resource Server auth configuration or its verification secret is missing;
+- managed `serve` propagation of the lifecycle app root and installation of the configured request authenticator through the frozen `install_request_authenticator()` boundary;
+- explicit CLI wiring for auth mode, issuer, canonical resource, validation Resource Server id, and DPAPI secret storage;
+- regression coverage in `bridge/tests/test_phase55_auth_configuration.py`.
+
+Validation on 2026-08-25:
+
+- all seven Phase 5.5.4B tests passed;
+- full registered suite result: `196 passed, 4 skipped, 4 failed`;
+- the four remaining failures are the inherited baseline: Windows symlink privilege, Maven acceptance, and two Windows CRLF/SHA-256 expectations;
+- the Windows onedir executable build/smoke returned to PASS after formatting the files changed by 5.5.4B;
+- the repository-wide registered `format` command still reports pre-existing formatting debt in seven files outside this sub-phase's change scope, so no repository-wide format PASS is claimed;
+- no live auth-server reachability or token issuance was required for this offline configuration phase.
 
 Then STOP.
 

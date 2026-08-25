@@ -18,9 +18,11 @@ from .lifecycle import (
     DEFAULT_TUNNEL_HEALTH_URL,
     LifecycleError,
     add_project,
+    configure_resource_auth,
     doctor_report,
     initialize_runtime,
     initialize_tunnel_profile,
+    load_request_authenticator,
     load_transport_provider,
     load_tunnel_settings,
     run_tunnel_proxy,
@@ -29,6 +31,7 @@ from .lifecycle import (
     status_services,
     stop_services,
     store_api_key_from_environment,
+    store_resource_auth_secret_from_environment,
     store_transport_secret_from_environment,
 )
 from .logging_utils import configure_logging
@@ -97,6 +100,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--startup-timeout", type=float, default=45)
     parser.add_argument("--store-api-key", action="store_true")
     parser.add_argument("--store-transport-secret", action="store_true")
+    parser.add_argument("--auth-mode", choices=("none", "oauth-resource-server"))
+    parser.add_argument("--authorization-server-issuer")
+    parser.add_argument("--canonical-resource-uri")
+    parser.add_argument("--validation-resource-id")
+    parser.add_argument("--store-auth-secret", action="store_true")
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 
@@ -139,6 +147,25 @@ def main() -> int:
                     metrics_addr=args.metrics_addr,
                     force=args.force,
                 )
+                auth_fields = (
+                    args.authorization_server_issuer,
+                    args.canonical_resource_uri,
+                    args.validation_resource_id,
+                )
+                if args.auth_mode is None and any(value is not None for value in auth_fields):
+                    raise LifecycleError(
+                        "--auth-mode is required when OAuth auth fields are supplied"
+                    )
+                if args.auth_mode is not None:
+                    result.update(
+                        configure_resource_auth(
+                            paths,
+                            mode=args.auth_mode,
+                            issuer=args.authorization_server_issuer,
+                            resource=args.canonical_resource_uri,
+                            validation_resource_id=args.validation_resource_id,
+                        )
+                    )
                 provider, _ = load_transport_provider(paths)
                 if args.store_api_key:
                     if provider.provider_id != "openai-tunnel":
@@ -151,6 +178,9 @@ def main() -> int:
                 if args.store_transport_secret:
                     store_transport_secret_from_environment(paths, provider=provider)
                     result["transport_secret"] = "stored-with-windows-dpapi"
+                if args.store_auth_secret:
+                    store_resource_auth_secret_from_environment(paths)
+                    result["auth_secret"] = "stored-with-windows-dpapi"
                 tunnel = load_tunnel_settings(paths)
                 config = initialize_tunnel_profile(paths, tunnel, force=args.force)
                 result["transport_config"] = str(config)
@@ -216,9 +246,17 @@ def main() -> int:
         )
         return 0
 
+    try:
+        request_authenticator = load_request_authenticator(paths)
+    except LifecycleError as exc:
+        print(f"configuration_error={exc}")
+        return 1
+
     configure_logging(settings.storage.log_dir)
     logging.getLogger(__name__).info("Bridge logging initialized")
     server, service = create_server(settings)
+    if request_authenticator is not None:
+        server._session_manager.install_request_authenticator(request_authenticator)  # noqa: SLF001
     try:
         server.run(transport=settings.server.transport)
     finally:
