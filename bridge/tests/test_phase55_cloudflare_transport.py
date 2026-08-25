@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -323,6 +324,136 @@ def test_versioned_transport_config_selects_cloudflare_and_preserves_legacy_defa
             tunnel_id="tunnel_12345678",
             transport="openai-tunnel",
         )
+
+
+def test_cloudflare_status_requires_owned_and_healthy_provider_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _lifecycle_paths(tmp_path)
+    lifecycle.initialize_runtime(
+        paths,
+        tunnel_id="",
+        transport="cloudflare",
+        public_url="https://mcp.example.com/mcp",
+        origin_url="http://127.0.0.1:46200/mcp",
+        metrics_addr="127.0.0.1:46202",
+    )
+    paths.state_file.parent.mkdir(parents=True, exist_ok=True)
+    paths.state_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "transport": "cloudflare",
+                "bridge_pid": 700,
+                "tunnel_pid": 701,
+                "bridge_process_marker": "bridge-marker",
+                "tunnel_process_marker": "tunnel-marker",
+                "bridge_health_url": "http://127.0.0.1:46200/healthz",
+                "tunnel_ready_url": "http://127.0.0.1:46202/ready",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(lifecycle, "_matches_process_marker", lambda _pid, _marker: True)
+
+    def fake_http_check(url: str, timeout: float = 2.0) -> dict[str, object]:
+        del timeout
+        return {
+            "status": "ok" if url.endswith("/healthz") else "unreachable",
+            "url": url,
+        }
+
+    monkeypatch.setattr(lifecycle, "_http_check", fake_http_check)
+
+    status = lifecycle.status_services(paths)
+
+    assert status["status"] == "degraded"
+    assert status["transport"] == "cloudflare"
+    assert status["bridge"]["owned"] is True
+    assert status["bridge"]["health"]["status"] == "ok"
+    assert status["tunnel"]["owned"] is True
+    assert status["tunnel"]["health"]["status"] == "unreachable"
+
+
+def test_cloudflare_start_replaces_degraded_supervisor_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _lifecycle_paths(tmp_path)
+    lifecycle.initialize_runtime(
+        paths,
+        tunnel_id="",
+        transport="cloudflare",
+        public_url="https://mcp.example.com/mcp",
+        origin_url="http://127.0.0.1:46200/mcp",
+        metrics_addr="127.0.0.1:46202",
+    )
+    lifecycle.configure_resource_auth(
+        paths,
+        mode="oauth-resource-server",
+        issuer="https://auth.example.com",
+        resource="https://mcp.example.com/mcp",
+        validation_resource_id="codemcp-resource",
+    )
+    monkeypatch.setenv(lifecycle.RESOURCE_AUTH_SECRET_ENV_NAME, "auth-secret")
+    monkeypatch.setattr(
+        lifecycle,
+        "_secret_from_runtime",
+        lambda _paths, _provider=None: "transport-secret",
+    )
+    paths.state_file.parent.mkdir(parents=True, exist_ok=True)
+    paths.state_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "transport": "cloudflare",
+                "bridge_pid": 100,
+                "tunnel_pid": 101,
+                "bridge_process_marker": "stale-bridge",
+                "tunnel_process_marker": "stale-tunnel",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(lifecycle, "status_services", lambda _paths: {"status": "degraded"})
+    monkeypatch.setattr(lifecycle, "load_settings", lambda _bridge, _projects: object())
+    monkeypatch.setattr(
+        lifecycle,
+        "_http_check",
+        lambda url, timeout=2.0: {"status": "unreachable", "url": url},
+    )
+
+    processes: list[SimpleNamespace] = []
+
+    def fake_popen(args, *, cwd, log_path, env):
+        del cwd, log_path, env
+        process = SimpleNamespace(
+            pid=700 + len(processes),
+            args=args,
+            poll=lambda: None,
+        )
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(lifecycle, "_popen_background", fake_popen)
+    monkeypatch.setattr(
+        lifecycle,
+        "_wait_endpoint",
+        lambda url, process, timeout: {"status": "ok", "status_code": 200, "url": url},
+    )
+    monkeypatch.setattr(lifecycle, "_process_marker", lambda pid: f"marker-{pid}")
+
+    result = lifecycle.start_services(paths)
+
+    assert result["status"] == "ok"
+    state = json.loads(paths.state_file.read_text(encoding="utf-8"))
+    assert state["transport"] == "cloudflare"
+    assert state["bridge_pid"] == 700
+    assert state["tunnel_pid"] == 701
+    assert state["bridge_process_marker"] == "marker-700"
+    assert state["tunnel_process_marker"] == "marker-701"
+    assert processes[1].args[-2:] == ["--app-root", str(paths.app_root)]
 
 
 def test_cli_accepts_cloudflare_transport_configuration(

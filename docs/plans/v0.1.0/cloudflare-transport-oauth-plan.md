@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.5 complete; 5.5.6 is NOT STARTED**
+Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 is NOT STARTED**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are complete. Phase 5.5.5 Windows installer integration and native acceptance are also complete. Phase 5.5.6 has not started.
+Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are complete. Phase 5.5.5 Windows installer integration and native acceptance are complete. Phase 5.5.6 security/regression validation is also complete. Phase 5.5.7 has not started.
 
 ## 1. Context
 
@@ -820,6 +820,26 @@ Existing OpenAI provider tests continue to pass unless an explicit deprecation d
 - `git diff --check` passes;
 - packaging smoke passes;
 - working tree clean.
+
+### Completion evidence
+
+Phase 5.5.6 is **COMPLETE**.
+
+- Core safety regressions remain covered for path isolation, sensitive-path filtering, mutation locking, clean-worktree and branch policy, checkpoint/CAS behavior, idempotency, audit, approvals, rollback, unknown side effects, and PID reuse protection.
+- Cloudflare-specific coverage proves DPAPI-backed token handling/redaction, loopback-only origin, fixed cloudflared argv, public URL validation, provider ownership/health, degraded-state restart behavior, and rejection of Cloudflare identity headers as an authorization substitute.
+- OAuth Resource Server coverage proves exact `mcp-rs-verification-v1` wire behavior, Bearer extraction, issuer/resource binding, active/expiry handling, wrong-resource rejection, fail-closed validation-service outages, safe identity propagation, and no dependency on auth-server Provider packages or storage/signing internals.
+- OpenAI Tunnel compatibility remains covered and passing.
+- A Windows command-runner compatibility gap found by the regression gate was fixed without introducing shell execution: fixed registered executables are resolved through Windows `PATH`/`PATHEXT` before `subprocess` execution.
+- Historical Windows-only test-environment failures were removed without weakening production policy: symlink tests skip only when the OS account cannot create symlinks, and Git/hash fixtures use stable raw LF bytes.
+- Full regression on the final pre-documentation code state: `211 passed, 5 skipped, 0 failed`; the release-only native installer acceptance run: `212 passed, 5 skipped, 0 failed`.
+- `compileall` and `git diff --check` are persistent Phase 5.5.6 regression checks and passed in the full suite.
+- Current-HEAD native Windows installer build/install/upgrade/uninstall smoke passed with Inno Setup 7.
+- Accepted installer: `codemcp-remote-setup.exe`.
+- Accepted installer SHA-256: `7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93`.
+- The native installer acceptance harness remains in-tree but is release-only by default; set `CODEMCP_RUN_RELEASE_INSTALLER_ACCEPTANCE=1` to opt in, and optionally `CODEMCP_ISCC_PATH` for a non-standard Inno Setup location.
+- Working tree was clean at each completed gate.
+
+**STOP GATE:** Phase 5.5.7 is NOT STARTED and must not begin without explicit user instruction.
 
 Then STOP.
 

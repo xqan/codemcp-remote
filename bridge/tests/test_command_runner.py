@@ -109,9 +109,7 @@ def test_local_windows_resolves_fixed_executable_through_path(
     )
     monkeypatch.setattr(
         "codemcp_bridge.command_runner.shutil.which",
-        lambda executable: r"C:\\Tools\\Maven\\bin\\mvn.cmd"
-        if executable == "mvn"
-        else None,
+        lambda executable: r"C:\Tools\Maven\bin\mvn.cmd" if executable == "mvn" else None,
     )
 
     invocation = build_command_invocation(
