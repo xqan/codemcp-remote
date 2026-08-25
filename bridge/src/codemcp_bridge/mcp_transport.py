@@ -12,8 +12,16 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.types import Receive, Scope, Send
 
+from .resource_auth import (
+    AUTH_SCOPE_KEY,
+    AuthenticatedPrincipal,
+    bind_auth_context,
+    reset_auth_context,
+)
+
 logger = logging.getLogger(__name__)
 
+RequestAuthenticator = Callable[[Scope, Send], Awaitable[bool]]
 _GRACEFUL_CLOSE_TIMEOUT_SECONDS = 1.0
 
 
@@ -35,11 +43,13 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
         *args: object,
         startup_callback: Callable[[], Awaitable[None]] | None = None,
         shutdown_callback: Callable[[], Awaitable[None]] | None = None,
+        request_authenticator: RequestAuthenticator | None = None,
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._startup_callback = startup_callback
         self._shutdown_callback = shutdown_callback
+        self._request_authenticator = request_authenticator
         original_handle_message = self.app._handle_message  # noqa: SLF001
 
         async def tracked_handle_message(
@@ -63,6 +73,14 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
             )
             if started is not None:
                 started.set()
+            principal = (
+                request_scope.get(AUTH_SCOPE_KEY) if isinstance(request_scope, dict) else None
+            )
+            auth_token = (
+                bind_auth_context(principal)
+                if isinstance(principal, AuthenticatedPrincipal)
+                else None
+            )
             try:
                 await original_handle_message(
                     message,
@@ -71,10 +89,19 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
                     raise_exceptions,
                 )
             finally:
+                if auth_token is not None:
+                    reset_auth_context(auth_token)
                 if finished is not None:
                     finished.set()
 
         self.app._handle_message = tracked_handle_message  # type: ignore[method-assign]  # noqa: SLF001
+
+    def install_request_authenticator(self, authenticator: RequestAuthenticator) -> None:
+        """Install the externally configured MCP request authentication gate."""
+
+        if self._request_authenticator is not None:
+            raise RuntimeError("request authenticator is already installed")
+        self._request_authenticator = authenticator
 
     @asynccontextmanager
     async def run(self) -> AsyncIterator[None]:
@@ -93,6 +120,10 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
         receive: Receive,
         send: Send,
     ) -> None:
+        if self._request_authenticator is not None and not await self._request_authenticator(
+            scope, send
+        ):
+            return
         http_transport = StreamableHTTPServerTransport(
             mcp_session_id=None,
             is_json_response_enabled=self.json_response,

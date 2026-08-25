@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1, 5.5.2 and 5.5.4A complete; 5.5.3 waits on the mcp-auth-server Phase 4 verification contract**
+Status: **IN PROGRESS — 5.5.1, 5.5.2, 5.5.3 and 5.5.4A complete; 5.5.4B is unlocked but NOT STARTED**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 3 — Cloudflare OAuth Provider Integration is complete. `codemcp-remote` Phase 5.5.3 remains gated on the auth-server Phase 4 Resource Server Verification Contract freeze.
+Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; 5.5.3 is now complete and 5.5.4B remains NOT STARTED.
 
 ## 1. Context
 
@@ -150,9 +150,9 @@ Minimum Bridge semantics, independent of token representation:
 - fail closed on missing, malformed, expired, revoked, unverifiable, wrong-resource, or wrong-issuer credentials;
 - never trust Cloudflare-specific identity headers as an authorization source.
 
-If the final contract selects signed/self-contained tokens, Phase 5.5.3 may implement JWKS/key discovery, bounded key caching, signature validation and time-claim checks. If it selects Provider-native opaque tokens, Phase 5.5.3 must instead implement the reviewed online validation/introspection contract, including Resource Server authentication, strict timeout, bounded positive caching, revocation semantics and fail-closed network behavior.
+Resource Server Verification Contract v1 is now frozen as **Provider-native opaque bearer + authenticated online validation**. Phase 5.5.3 therefore implements `POST {issuer}/mcp/resource-server/validate` with per-Resource-Server HTTP Basic authentication, a two-second total timeout, no automatic retry, zero positive/negative cross-request cache, exact issuer/resource checks, local expiry recheck, and fail-closed `401`/`503` mapping. JWT/JWKS is not part of v1.
 
-`mcp-auth-server` Phase 3 is now complete. The remaining production integration gate is its Phase 4 Resource Server Verification Contract; Phase 5.5.3 must not guess the token representation or validation endpoint before that contract is frozen.
+`mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 is FROZEN. Phase 5.5.3 consumes only `mcp-rs-verification-v1` and does not parse Provider-private token structure or access Provider storage directly.
 
 ### 4.4 Scope handling
 
@@ -448,7 +448,7 @@ Then STOP.
 
 ## Phase 5.5.3 — MCP OAuth Resource Server verification integration
 
-**Status: BLOCKED — starts only after `mcp-auth-server` Phase 4.1 freezes Resource Server Verification Contract v1.**
+**Status: COMPLETE — 2026-08-25, implemented against frozen `mcp-rs-verification-v1`; live cross-project acceptance remains in the later interoperability/security gates.**
 
 ### Objective
 
@@ -474,17 +474,19 @@ Do not implement from Provider internals that are not part of this frozen contra
 
 ### Configuration model
 
-Configuration contains only the Resource Server-side settings required by the selected contract. Conceptually:
+The frozen v1 consumer requires these Resource Server-side values:
 
-```toml
-[auth]
-mode = "oauth-resource-server"
-issuer = "https://auth.example.com/"
-resource = "https://mcp.example.com/mcp"
-verification = "<frozen-contract-mode>"
+```text
+authorization_server_issuer
+canonical_resource_uri
+validation_endpoint = {issuer}/mcp/resource-server/validate
+validation_resource_id
+validation_secret
+validation_timeout_ms = 2000
+verification_contract_version = 1
 ```
 
-Provider-specific fields such as `jwks_url` or an online validation/introspection endpoint are added only if selected by the Phase 4.1 contract.
+Phase 5.5.3 implements the verification objects and transport installation boundary. Persistent TOML/DPAPI wiring for these values belongs to Phase 5.5.4B and is intentionally not started here. `validation_secret` is a dedicated Resource Server secret and must never be written to ordinary plaintext configuration or logs.
 
 ### Common implementation
 
@@ -499,30 +501,26 @@ Regardless of representation:
 - keep Cloudflare identity headers non-authoritative;
 - fail closed when verification cannot establish an active credential for this exact MCP resource.
 
-### Signed-token path, only if selected
+### Signed-token path
 
-Implement:
+**Not selected for Resource Server Verification Contract v1.** No JWT parser, signature verifier, JWKS dependency, or key cache is added in Phase 5.5.3.
 
-- bounded JWKS/key discovery cache;
-- approved algorithm/key validation;
-- signature validation;
-- issuer/audience/resource validation;
-- expiry/not-before validation;
-- unknown/stale key rejection;
-- key-rotation negative tests.
+### Provider-native opaque-token path — selected v1 implementation
 
-### Provider-native opaque-token path, only if selected
+Implement and preserve the frozen online validation contract:
 
-Implement the reviewed online verification/introspection contract:
-
-- authenticate `codemcp-remote` as a Resource Server using the mechanism defined by the auth server;
-- strict connect/read timeout;
-- fail closed on network/auth-server failure;
-- bounded positive-result cache only when allowed by the contract;
-- no unsafe long-lived negative cache;
-- immediate or contract-defined revocation behavior;
+- `POST {issuer}/mcp/resource-server/validate`;
+- authenticate `codemcp-remote` with HTTP Basic `resource_id:verification_secret`;
+- send only `{token, resource}` as the v1 JSON body;
+- use a two-second **total** validation budget and no automatic retry;
+- follow no redirects;
+- require `200`, JSON, `Cache-Control: no-store`, `contract_version == "1"` and boolean `active`;
+- use zero positive and zero negative cross-request validation cache;
+- map `active: false` to MCP-client `401`;
+- recheck exact issuer, exact canonical resource and `expires_at > now` locally for `active: true`;
+- map validation service/protocol/auth failures to MCP-client `503` fail closed;
 - never send the MCP bearer token anywhere except the designated auth-server verification endpoint;
-- redact the credential from logs/errors/traces.
+- redact bearer credentials, Basic credentials and `verification_secret` from logs/errors/audit.
 
 ### Health endpoint rule
 
@@ -556,6 +554,25 @@ If the frozen contract proves stable scopes, add explicit scope-to-operation enf
 
 If scope semantics are not yet frozen, OAuth establishes caller identity/resource validity while existing Bridge policy remains authoritative for operation authorization. Do not invent scope meanings locally.
 
+### Phase 5.5.3 completion evidence
+
+Implemented:
+
+- `bridge/src/codemcp_bridge/resource_auth.py`;
+- MCP transport pre-dispatch authentication hook with one-time public authenticator installation;
+- authenticated principal propagation into operation execution context;
+- safe `auth.context` audit projection without bearer or verification secrets;
+- idempotency replay binding to stable `(contract_version, issuer, resource, subject, client_id)` identity;
+- frozen-contract tests in `bridge/tests/test_phase55_oauth_resource_server.py`.
+
+Validation on 2026-08-25:
+
+- all Phase 5.5.3 tests passed in the full registered test run;
+- full suite result: `189 passed, 4 skipped, 4 failed`;
+- the four remaining failures are inherited pre-existing Windows/symlink/line-ending/Maven baseline failures and are not introduced by Phase 5.5.3;
+- a registered format invocation was blocked by the connector safety layer, so no format PASS is claimed in this phase;
+- live validation against an implemented `mcp-auth-server` endpoint remains a later cross-project interoperability/security acceptance item because the auth-server Phase 4.2 implementation/acceptance is not part of this sub-phase.
+
 Then STOP.
 
 ---
@@ -568,10 +585,12 @@ Make transport selection and external OAuth resource-server validation supported
 
 ### Parallel execution split
 
-Because the independent `mcp-auth-server` protocol contract is not yet frozen, Phase 5.5.4 is executed in two gated parts:
+Phase 5.5.4 remains split into two independently gated parts:
 
-- **Phase 5.5.4A — transport-only CLI/config**: versioned transport selection, backward-compatible OpenAI fallback/migration behavior, Cloudflare CLI parameters, provider-specific DPAPI transport secrets, provider-aware start/status/stop/doctor. This part may proceed before Phase 5.5.3.
-- **Phase 5.5.4B — auth-aware configuration**: OAuth Resource Server metadata, issuer/resource plus the selected verification-mode settings, auth-aware doctor/status and structural validation. This part remains blocked until `mcp-auth-server` Phase 4.1 freezes Resource Server Verification Contract v1; after that it may proceed alongside 5.5.3 when the config schema can be derived without guessing.
+- **Phase 5.5.4A — transport-only CLI/config**: COMPLETE — versioned transport selection, backward-compatible OpenAI fallback/migration behavior, Cloudflare CLI parameters, provider-specific DPAPI transport secrets, provider-aware start/status/stop/doctor.
+- **Phase 5.5.4B — auth-aware configuration**: **UNLOCKED, NOT STARTED** — persistent configuration/DPAPI wiring for `mcp-rs-verification-v1`, auth-aware doctor/status, and structural validation.
+
+`mcp-auth-server` Phase 4.1 is now FROZEN, so the previous dependency block is removed. Phase 5.5.4B is still a separate stop-gated sub-phase and must not start automatically when Phase 5.5.3 completes.
 
 Phase 5.5.4A implementation completed on 2026-08-25. Completion of 5.5.4A does **not** mark Phase 5.5.4 as fully complete.
 

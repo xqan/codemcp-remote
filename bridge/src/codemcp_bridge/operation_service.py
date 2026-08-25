@@ -10,6 +10,7 @@ from typing import Any
 
 from .db import ActiveOperationConflict, Database, OperationRecord
 from .errors import BridgeError, error_payload
+from .resource_auth import auth_audit_details, current_auth_context
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 REQUEST_HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -35,6 +36,16 @@ def _persistable_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(details, dict):
             details.pop("approval_token", None)
     return persisted
+
+
+def _auth_identity(details: dict[str, Any] | None) -> tuple[str, ...] | None:
+    if details is None:
+        return None
+    keys = ("contract_version", "issuer", "resource", "subject", "client_id")
+    values = tuple(details.get(key) for key in keys)
+    if not all(isinstance(value, str) and value for value in values):
+        return None
+    return values
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +110,17 @@ class OperationService:
                     "state": exc.operation.state,
                 },
             ) from exc
+
+        principal = current_auth_context()
+        current_auth = auth_audit_details(principal) if principal is not None else None
+        stored_auth = self._database.get_operation_auth_context(record.operation_id)
         if existing:
+            if _auth_identity(stored_auth) != _auth_identity(current_auth):
+                raise BridgeError(
+                    "IDEMPOTENCY_CONFLICT",
+                    "client_request_id is bound to a different authenticated identity",
+                    {"operation_id": record.operation_id},
+                )
             if record.request_hash != canonical_request_hash:
                 raise BridgeError(
                     "IDEMPOTENCY_CONFLICT",
@@ -118,6 +139,11 @@ class OperationService:
                 {"operation_id": record.operation_id, "state": record.state},
                 retryable=True,
                 status="running",
+            )
+        if current_auth is not None:
+            self._database.record_operation_auth_context(
+                record.operation_id,
+                details=current_auth,
             )
         record = self._database.transition_operation(
             record.operation_id, "validated", expected_state="received"

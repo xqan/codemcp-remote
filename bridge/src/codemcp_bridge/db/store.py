@@ -987,6 +987,43 @@ class Database:
         assert result is not None
         return result
 
+    def record_operation_auth_context(
+        self,
+        operation_id: str,
+        *,
+        details: dict[str, Any],
+    ) -> None:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM operations WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+            operation = self._operation(row)
+            if operation is None:
+                raise PersistenceError("operation not found")
+            self._audit(
+                connection,
+                operation_id=operation.operation_id,
+                project_id=operation.project_id,
+                session_id=operation.session_id,
+                owner_id=operation.owner_id,
+                event_type="auth.context",
+                from_state=None,
+                to_state=None,
+                details=details,
+            )
+
+    def get_operation_auth_context(self, operation_id: str) -> dict[str, Any] | None:
+        connection = self._require_connection()
+        with self._lock:
+            row = connection.execute(
+                "SELECT details_json FROM audit_events "
+                "WHERE operation_id=? AND event_type='auth.context' "
+                "ORDER BY created_at, event_id LIMIT 1",
+                (operation_id,),
+            ).fetchone()
+        return json.loads(row["details_json"]) if row is not None else None
+
     def create_approval(
         self,
         *,
