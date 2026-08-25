@@ -185,6 +185,7 @@ function Invoke-Start {
     $gitPath = Resolve-Git
     Set-RuntimeIsolationPath -InstallDir $release.install_dir -GitPath $gitPath
 
+    $env:CONTROL_PLANE_API_KEY = $null
     $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
     Assert-DoctorContract -Doctor $doctor
 
