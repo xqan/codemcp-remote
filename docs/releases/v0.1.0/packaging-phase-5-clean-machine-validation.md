@@ -259,6 +259,44 @@ NotSigned
 
 The candidate generation gate also revalidated the clean-machine harness with the Windows PowerShell 5.1 parser. The installer payload itself did not change; only the Phase 5 validation harness and candidate ZIP changed.
 
+## Clean-machine Prepare validation
+
+The final clean-machine `Prepare` gate passed on Windows 11 with the release candidate above.
+
+Recorded result:
+
+```text
+status: ready-for-start
+installer SHA-256:
+659651d9c0c1f333c39bf1ae4cee107c99bf147487f855aca4600309ec39c37c
+install root:
+%LOCALAPPDATA%\Programs\codemcp-remote
+project id:
+phase5-clean
+baseline HEAD:
+7985f14dde3c33762b6e318ec38fc7dbe806fa1b
+worker mode:
+local
+Git:
+D:\soft\PortableGit\bin\git.exe
+API key source:
+windows-dpapi
+tunnel-client:
+bundled installed executable
+python visible on isolated PATH:
+false
+uv visible on isolated PATH:
+false
+pwsh visible on isolated PATH:
+false
+```
+
+`wsl.exe` remained visible as a Windows system component, but the validated Bridge configuration reported `worker_mode=local`; the acceptance path does not configure or invoke the WSL2 worker.
+
+The Git LF-to-CRLF message emitted while creating the disposable repository is an informational Windows Git working-tree conversion warning and does not change the committed baseline identity recorded above.
+
+Bridge and Tunnel remain intentionally stopped after `Prepare`. The next gate is Tunnel cutover, `Start`, and the remote connector contract against `phase5-clean`.
+
 ## Completion criteria
 
 Packaging Phase 5 is PASS only when all of the following are recorded:
