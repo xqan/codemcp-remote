@@ -21,6 +21,7 @@ from .lifecycle import (
     doctor_report,
     initialize_runtime,
     initialize_tunnel_profile,
+    load_transport_provider,
     load_tunnel_settings,
     run_tunnel_proxy,
     runtime_paths,
@@ -28,6 +29,7 @@ from .lifecycle import (
     status_services,
     stop_services,
     store_api_key_from_environment,
+    store_transport_secret_from_environment,
 )
 from .logging_utils import configure_logging
 from .mcp_server import create_server
@@ -83,13 +85,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--projects-config", type=Path)
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--app-root", type=Path)
+    parser.add_argument("--transport", choices=("openai-tunnel", "cloudflare"))
     parser.add_argument("--tunnel-id")
     parser.add_argument("--profile-name", default=DEFAULT_PROFILE)
     parser.add_argument("--bridge-url", default=DEFAULT_BRIDGE_URL)
     parser.add_argument("--tunnel-health-url", default=DEFAULT_TUNNEL_HEALTH_URL)
     parser.add_argument("--health-listen-addr", default=DEFAULT_HEALTH_LISTEN_ADDR)
+    parser.add_argument("--public-url")
+    parser.add_argument("--origin-url", default=DEFAULT_BRIDGE_URL)
+    parser.add_argument("--metrics-addr", default="127.0.0.1:46202")
     parser.add_argument("--startup-timeout", type=float, default=45)
     parser.add_argument("--store-api-key", action="store_true")
+    parser.add_argument("--store-transport-secret", action="store_true")
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 
@@ -126,14 +133,29 @@ def main() -> int:
                     bridge_url=args.bridge_url,
                     tunnel_health_url=args.tunnel_health_url,
                     health_listen_addr=args.health_listen_addr,
+                    transport=args.transport,
+                    public_url=args.public_url or "",
+                    origin_url=args.origin_url,
+                    metrics_addr=args.metrics_addr,
                     force=args.force,
                 )
+                provider, _ = load_transport_provider(paths)
                 if args.store_api_key:
+                    if provider.provider_id != "openai-tunnel":
+                        raise LifecycleError(
+                            "--store-api-key is only valid for the openai-tunnel transport; "
+                            "use --store-transport-secret"
+                        )
                     store_api_key_from_environment(paths)
                     result["api_key"] = "stored-with-windows-dpapi"
+                if args.store_transport_secret:
+                    store_transport_secret_from_environment(paths, provider=provider)
+                    result["transport_secret"] = "stored-with-windows-dpapi"
                 tunnel = load_tunnel_settings(paths)
-                profile = initialize_tunnel_profile(paths, tunnel, force=args.force)
-                result["tunnel_profile"] = str(profile)
+                config = initialize_tunnel_profile(paths, tunnel, force=args.force)
+                result["transport_config"] = str(config)
+                if provider.provider_id == "openai-tunnel":
+                    result["tunnel_profile"] = str(config)
             elif args.command == "project":
                 if args.subcommand != "add" or not args.project_id or not args.project_root:
                     raise LifecycleError(

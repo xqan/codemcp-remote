@@ -24,6 +24,7 @@ from .transports import (
     OpenAITunnelSettings,
     RemoteTransportProvider,
     TransportContext,
+    get_transport_provider,
 )
 from .transports.openai_tunnel import (
     DEFAULT_BRIDGE_URL,
@@ -104,6 +105,51 @@ def _transport_context(paths: RuntimePaths) -> TransportContext:
     )
 
 
+REMOTE_CONFIG_VERSION = 1
+
+
+def _remote_config_path(paths: RuntimePaths) -> Path:
+    return paths.config_dir / "remote.toml"
+
+
+def _write_remote_config(paths: RuntimePaths, provider: RemoteTransportProvider) -> Path:
+    path = _remote_config_path(paths)
+    temporary = path.with_suffix(".toml.tmp")
+    temporary.write_text(
+        "[remote]\n"
+        f"version = {REMOTE_CONFIG_VERSION}\n"
+        f"transport = {_toml_quote(provider.provider_id)}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    os.replace(temporary, path)
+    return path
+
+
+def load_transport_provider(paths: RuntimePaths) -> tuple[RemoteTransportProvider, str]:
+    path = _remote_config_path(paths)
+    if not path.is_file():
+        return _REMOTE_TRANSPORT, "legacy-default"
+
+    import tomllib
+
+    try:
+        parsed = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise LifecycleError(f"remote transport configuration is invalid: {exc}") from exc
+    remote = parsed.get("remote")
+    if not isinstance(remote, dict):
+        raise LifecycleError("remote transport configuration must contain [remote]")
+    if remote.get("version") != REMOTE_CONFIG_VERSION:
+        raise LifecycleError(
+            f"unsupported remote transport configuration version: {remote.get('version')!r}"
+        )
+    transport = remote.get("transport")
+    if not isinstance(transport, str) or not transport:
+        raise LifecycleError("remote.transport must be a non-empty string")
+    return get_transport_provider(transport), "config"
+
+
 def ensure_runtime_dirs(paths: RuntimePaths) -> None:
     for path in (
         paths.config_dir,
@@ -144,9 +190,20 @@ def initialize_runtime(
     bridge_url: str = DEFAULT_BRIDGE_URL,
     tunnel_health_url: str = DEFAULT_TUNNEL_HEALTH_URL,
     health_listen_addr: str = DEFAULT_HEALTH_LISTEN_ADDR,
+    transport: str | None = None,
+    public_url: str = "",
+    origin_url: str = DEFAULT_BRIDGE_URL,
+    metrics_addr: str = "127.0.0.1:46202",
     force: bool = False,
 ) -> dict[str, Any]:
     ensure_runtime_dirs(paths)
+    existing_provider, existing_source = load_transport_provider(paths)
+    provider = existing_provider if transport is None else get_transport_provider(transport)
+    if existing_provider.provider_id != provider.provider_id and not force:
+        if existing_source == "config" or paths.tunnel_env.exists():
+            raise LifecycleError(
+                "remote transport change requires --force so provider configuration is replaced safely"
+            )
 
     template = paths.runtime_root / "config" / "bridge.example.toml"
     if not template.is_file():
@@ -163,18 +220,33 @@ def initialize_runtime(
         created.append(str(paths.projects_config))
 
     created.extend(
-        _REMOTE_TRANSPORT.initialize_config(
+        provider.initialize_config(
             _transport_context(paths),
             tunnel_id=tunnel_id,
             profile_name=profile_name,
             bridge_url=bridge_url,
             tunnel_health_url=tunnel_health_url,
             health_listen_addr=health_listen_addr,
+            public_url=public_url,
+            origin_url=origin_url,
+            metrics_addr=metrics_addr,
             force=force,
         )
     )
+    remote_config = _remote_config_path(paths)
+    if (
+        force
+        or not remote_config.is_file()
+        or existing_provider.provider_id != provider.provider_id
+    ):
+        created.append(str(_write_remote_config(paths, provider)))
 
-    return {"status": "ok", "app_root": str(paths.app_root), "created": created}
+    return {
+        "status": "ok",
+        "app_root": str(paths.app_root),
+        "transport": provider.provider_id,
+        "created": created,
+    }
 
 
 def add_project(paths: RuntimePaths, *, project_id: str, root: Path) -> dict[str, Any]:
@@ -214,15 +286,17 @@ def add_project(paths: RuntimePaths, *, project_id: str, root: Path) -> dict[str
     return {"status": "ok", "project_id": project_id, "root": str(project_root)}
 
 
-def load_tunnel_settings(paths: RuntimePaths, *, env_file: Path | None = None) -> TunnelSettings:
-    return _REMOTE_TRANSPORT.load_settings(
+def load_tunnel_settings(paths: RuntimePaths, *, env_file: Path | None = None) -> Any:
+    provider, _ = load_transport_provider(paths)
+    return provider.load_settings(
         _transport_context(paths),
         env_file=env_file,
     )
 
 
 def find_tunnel_client(paths: RuntimePaths) -> Path:
-    return _REMOTE_TRANSPORT.find_client(_transport_context(paths))
+    provider, _ = load_transport_provider(paths)
+    return provider.find_client(_transport_context(paths))
 
 
 def validate_tunnel_profile(settings: TunnelSettings) -> Path:
@@ -296,7 +370,7 @@ def _provider_secret_path(
     paths: RuntimePaths,
     provider: RemoteTransportProvider | None = None,
 ) -> Path:
-    effective = _REMOTE_TRANSPORT if provider is None else provider
+    effective = load_transport_provider(paths)[0] if provider is None else provider
     filename = effective.secret_file_name
     if not filename or Path(filename).name != filename or filename in {".", ".."}:
         raise LifecycleError("transport provider secret file name is invalid")
@@ -307,7 +381,7 @@ def _secret_from_runtime(
     paths: RuntimePaths,
     provider: RemoteTransportProvider | None = None,
 ) -> str | None:
-    effective = _REMOTE_TRANSPORT if provider is None else provider
+    effective = load_transport_provider(paths)[0] if provider is None else provider
     value = os.environ.get(effective.secret_env_name)
     if value:
         return value
@@ -322,7 +396,7 @@ def store_transport_secret_from_environment(
     *,
     provider: RemoteTransportProvider | None = None,
 ) -> bool:
-    effective = _REMOTE_TRANSPORT if provider is None else provider
+    effective = load_transport_provider(paths)[0] if provider is None else provider
     value = os.environ.get(effective.secret_env_name)
     if not value:
         raise LifecycleError(f"{effective.secret_env_name} is not set in the current process")
@@ -346,31 +420,35 @@ def store_api_key_from_environment(paths: RuntimePaths) -> bool:
 
 def initialize_tunnel_profile(
     paths: RuntimePaths,
-    settings: TunnelSettings,
+    settings: Any,
     *,
     force: bool = False,
 ) -> Path:
-    secret = _secret_from_runtime(paths)
+    provider, _ = load_transport_provider(paths)
+    secret = _secret_from_runtime(paths, provider)
     if not secret:
         raise LifecycleError(
-            f"{_SECRET_NAME} is not available; set it for init or store it with --store-api-key"
+            f"{provider.secret_env_name} is not available; set it for init or store it securely"
         )
-    profile = _REMOTE_TRANSPORT.initialize(
+    config = provider.initialize(
         _transport_context(paths),
         settings,
         secret=secret,
         force=force,
     )
-    if not isinstance(profile, Path):
-        raise LifecycleError("OpenAI tunnel provider did not return a profile path")
-    return profile
+    if not isinstance(config, Path):
+        raise LifecycleError(
+            f"{provider.provider_id} transport did not return a configuration path"
+        )
+    return config
 
 
-def run_tunnel_proxy(paths: RuntimePaths, settings: TunnelSettings) -> int:
-    secret = _secret_from_runtime(paths)
+def run_tunnel_proxy(paths: RuntimePaths, settings: Any) -> int:
+    provider, _ = load_transport_provider(paths)
+    secret = _secret_from_runtime(paths, provider)
     if not secret:
-        raise LifecycleError(f"{_SECRET_NAME} is unavailable")
-    return _REMOTE_TRANSPORT.run(
+        raise LifecycleError(f"{provider.secret_env_name} is unavailable")
+    return provider.run(
         _transport_context(paths),
         settings,
         secret=secret,
@@ -425,12 +503,13 @@ def start_services(
         load_settings(bridge_path, projects_path)
     except SettingsError as exc:
         raise LifecycleError(f"Bridge configuration is invalid: {exc}") from exc
-    tunnel = load_tunnel_settings(paths, env_file=env_file)
-    validate_tunnel_profile(tunnel)
-    secret = _secret_from_runtime(paths)
+    provider, _ = load_transport_provider(paths)
+    tunnel = provider.load_settings(_transport_context(paths), env_file=env_file)
+    provider.validate_config(tunnel)
+    secret = _secret_from_runtime(paths, provider)
     if not secret:
         raise LifecycleError(
-            f"{_SECRET_NAME} is unavailable; set it in the environment or store it securely"
+            f"{provider.secret_env_name} is unavailable; set it in the environment or store it securely"
         )
     if paths.state_file.exists():
         existing = status_services(paths)
@@ -438,8 +517,8 @@ def start_services(
             return existing
         paths.state_file.unlink(missing_ok=True)
 
-    bridge_health = _bridge_health_url(_REMOTE_TRANSPORT.bridge_url(tunnel))
-    tunnel_ready = _REMOTE_TRANSPORT.ready_url(tunnel)
+    bridge_health = _bridge_health_url(provider.bridge_url(tunnel))
+    tunnel_ready = provider.ready_url(tunnel)
     if _http_check(bridge_health)["status"] == "ok":
         raise LifecycleError("Bridge health endpoint is already occupied; refusing unsafe takeover")
     if _http_check(tunnel_ready)["status"] == "ok":
@@ -489,6 +568,7 @@ def start_services(
 
         state = {
             "version": 1,
+            "transport": provider.provider_id,
             "bridge_pid": bridge_process.pid,
             "tunnel_pid": tunnel_process.pid,
             "bridge_process_marker": _process_marker(bridge_process.pid),
@@ -515,8 +595,21 @@ def start_services(
 
 
 def status_services(paths: RuntimePaths) -> dict[str, Any]:
+    try:
+        provider, transport_source = load_transport_provider(paths)
+    except LifecycleError as exc:
+        return {
+            "status": "unknown",
+            "error": str(exc),
+            "state_file": str(paths.state_file),
+        }
     if not paths.state_file.is_file():
-        return {"status": "stopped", "state_file": str(paths.state_file)}
+        return {
+            "status": "stopped",
+            "transport": provider.provider_id,
+            "transport_source": transport_source,
+            "state_file": str(paths.state_file),
+        }
     try:
         state = json.loads(paths.state_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -540,6 +633,8 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
     )
     return {
         "status": "running" if running else "degraded",
+        "transport": state.get("transport", provider.provider_id),
+        "transport_source": transport_source,
         "bridge": {
             "pid": state.get("bridge_pid"),
             "owned": bridge_owned,
@@ -598,15 +693,22 @@ def doctor_report(
         }
     except SettingsError as exc:
         checks["configuration"] = {"status": "failed", "error": str(exc)}
-    secret = _secret_from_runtime(paths)
-    secret_path = _provider_secret_path(paths)
+    provider, transport_source = load_transport_provider(paths)
+    checks["transport"] = {
+        "status": "ok",
+        "provider": provider.provider_id,
+        "source": transport_source,
+        "config": str(_remote_config_path(paths)),
+    }
+    secret = _secret_from_runtime(paths, provider)
+    secret_path = _provider_secret_path(paths, provider)
     secret_source = (
         "environment"
-        if os.environ.get(_REMOTE_TRANSPORT.secret_env_name)
+        if os.environ.get(provider.secret_env_name)
         else ("windows-dpapi" if secret_path.is_file() else "none")
     )
     checks.update(
-        _REMOTE_TRANSPORT.doctor(
+        provider.doctor(
             _transport_context(paths),
             env_file=env_file,
             secret_available=bool(secret),

@@ -250,7 +250,11 @@ server_urls:
         "_http_check",
         lambda url, timeout=2.0: {"status": "unreachable", "url": url},
     )
-    monkeypatch.setattr(lifecycle, "_secret_from_runtime", lambda runtime: "secret")
+    monkeypatch.setattr(
+        lifecycle,
+        "_secret_from_runtime",
+        lambda runtime, provider=None: "secret",
+    )
     monkeypatch.setattr(lifecycle, "_process_marker", lambda pid: f"marker-{pid}")
 
     result = start_services(paths)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import codemcp_bridge.lifecycle as lifecycle
+import codemcp_bridge.main as main_module
 import codemcp_bridge.transports.cloudflare as cloudflare
 from codemcp_bridge.transports import (
     CLOUDFLARE_TUNNEL_PROVIDER,
@@ -270,3 +272,84 @@ def test_cloudflare_tunnel_token_uses_provider_specific_dpapi_file(
         )
         == "phase55-cloudflare-secret"
     )
+
+
+def _lifecycle_paths(tmp_path: Path) -> lifecycle.RuntimePaths:
+    runtime = tmp_path / "runtime"
+    (runtime / "config").mkdir(parents=True)
+    (runtime / "config" / "bridge.example.toml").write_text(
+        "[storage]\n"
+        'data_dir = ".local"\n'
+        'sqlite_file = ".local/bridge.sqlite3"\n'
+        'log_dir = ".local/logs"\n',
+        encoding="utf-8",
+    )
+    return lifecycle.runtime_paths(runtime, app_root=tmp_path / "app")
+
+
+def test_versioned_transport_config_selects_cloudflare_and_preserves_legacy_default(
+    tmp_path: Path,
+) -> None:
+    paths = _lifecycle_paths(tmp_path)
+    provider, source = lifecycle.load_transport_provider(paths)
+    assert provider is OPENAI_TUNNEL_PROVIDER
+    assert source == "legacy-default"
+
+    result = lifecycle.initialize_runtime(
+        paths,
+        tunnel_id="",
+        transport="cloudflare",
+        public_url="https://mcp.example.com/mcp",
+        origin_url="http://127.0.0.1:46200/mcp",
+        metrics_addr="127.0.0.1:46202",
+    )
+
+    assert result["transport"] == "cloudflare"
+    remote = (paths.config_dir / "remote.toml").read_text(encoding="utf-8")
+    assert "version = 1" in remote
+    assert 'transport = "cloudflare"' in remote
+    assert "TUNNEL_TOKEN" not in paths.tunnel_env.read_text(encoding="utf-8")
+    provider, source = lifecycle.load_transport_provider(paths)
+    assert provider is CLOUDFLARE_TUNNEL_PROVIDER
+    assert source == "config"
+    status = lifecycle.status_services(paths)
+    assert status["status"] == "stopped"
+    assert status["transport"] == "cloudflare"
+    assert status["transport_source"] == "config"
+
+    with pytest.raises(LifecycleError, match="requires --force"):
+        lifecycle.initialize_runtime(
+            paths,
+            tunnel_id="tunnel_12345678",
+            transport="openai-tunnel",
+        )
+
+
+def test_cli_accepts_cloudflare_transport_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "codemcp-remote",
+            "init",
+            "--transport",
+            "cloudflare",
+            "--public-url",
+            "https://mcp.example.com/mcp",
+            "--origin-url",
+            "http://127.0.0.1:46200/mcp",
+            "--metrics-addr",
+            "127.0.0.1:46202",
+            "--store-transport-secret",
+        ],
+    )
+
+    args = main_module._parse_args()
+
+    assert args.transport == "cloudflare"
+    assert args.public_url == "https://mcp.example.com/mcp"
+    assert args.origin_url == "http://127.0.0.1:46200/mcp"
+    assert args.metrics_addr == "127.0.0.1:46202"
+    assert args.store_transport_secret is True

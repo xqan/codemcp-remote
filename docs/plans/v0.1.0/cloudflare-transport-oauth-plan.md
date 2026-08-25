@@ -506,6 +506,15 @@ Then STOP.
 
 Make transport selection and external OAuth resource-server validation supported product configuration rather than code-path switches.
 
+### Parallel execution split
+
+Because the independent `mcp-auth-server` protocol contract is not yet frozen, Phase 5.5.4 is executed in two gated parts:
+
+- **Phase 5.5.4A — transport-only CLI/config**: versioned transport selection, backward-compatible OpenAI fallback/migration behavior, Cloudflare CLI parameters, provider-specific DPAPI transport secrets, provider-aware start/status/stop/doctor. This part may proceed before Phase 5.5.3.
+- **Phase 5.5.4B — auth-aware configuration**: OAuth resource-server metadata, issuer/audience/JWKS or introspection settings, auth-aware doctor/status and structural validation. This part remains blocked until the Phase 5.5.0/5.5.3 auth contract is proven.
+
+Phase 5.5.4A implementation completed on 2026-08-25. Completion of 5.5.4A does **not** mark Phase 5.5.4 as fully complete.
+
 ### CLI target
 
 Conceptually:
