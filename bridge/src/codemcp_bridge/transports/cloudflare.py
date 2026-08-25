@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -17,6 +18,8 @@ from .base import LifecycleError, TransportContext
 DEFAULT_PUBLIC_URL = ""
 DEFAULT_ORIGIN_URL = "http://127.0.0.1:46200/mcp"
 DEFAULT_METRICS_ADDR = "127.0.0.1:46202"
+BUNDLED_WINDOWS_AMD64_VERSION = "2026.7.3"
+BUNDLED_WINDOWS_AMD64_SHA256 = "ccb0756de288d3c2c076d19764ca53e0849a10f2dd9c23f8656ac42bdeb45001"
 SECRET_ENV_NAME = "TUNNEL_TOKEN"
 SECRET_FILE_NAME = "cloudflare-tunnel-token.dpapi"
 ALLOWED_ENV_NAMES = {
@@ -91,9 +94,7 @@ def _validate_origin_url(value: str) -> None:
         or parsed.query
         or parsed.fragment
     ):
-        raise LifecycleError(
-            "Cloudflare origin URL must be an HTTP(S) /mcp endpoint on 127.0.0.1"
-        )
+        raise LifecycleError("Cloudflare origin URL must be an HTTP(S) /mcp endpoint on 127.0.0.1")
 
 
 def _validate_metrics_addr(value: str) -> None:
@@ -141,9 +142,7 @@ class CloudflareTunnelProvider:
         env_file: Path | None = None,
     ) -> CloudflareTunnelSettings:
         source = (
-            context.tunnel_env
-            if env_file is None
-            else env_file.expanduser().resolve(strict=False)
+            context.tunnel_env if env_file is None else env_file.expanduser().resolve(strict=False)
         )
         values = _parse_env_file(source)
         public_url = values.get("CLOUDFLARE_PUBLIC_URL", DEFAULT_PUBLIC_URL)
@@ -170,9 +169,7 @@ class CloudflareTunnelProvider:
             )
         content = settings.env_file.read_text(encoding="utf-8", errors="replace")
         if re.search(r"(?mi)^\s*TUNNEL_TOKEN\s*=", content):
-            raise LifecycleError(
-                f"{SECRET_ENV_NAME} must never be stored in {settings.env_file}"
-            )
+            raise LifecycleError(f"{SECRET_ENV_NAME} must never be stored in {settings.env_file}")
         return settings.env_file
 
     def find_client(self, context: TransportContext) -> Path:
@@ -190,6 +187,15 @@ class CloudflareTunnelProvider:
 
     def client_version(self, context: TransportContext) -> str:
         client = self.find_client(context)
+        bundled_windows = os.name == "nt" and client == (
+            context.runtime_root / "cloudflared.exe"
+        ).resolve(strict=False)
+        if bundled_windows:
+            digest = hashlib.sha256(client.read_bytes()).hexdigest()
+            if digest.lower() != BUNDLED_WINDOWS_AMD64_SHA256:
+                raise LifecycleError(
+                    "bundled cloudflared SHA-256 does not match the pinned release"
+                )
         try:
             completed = subprocess.run(
                 [str(client), "--version"],
@@ -212,7 +218,10 @@ class CloudflareTunnelProvider:
         match = _VERSION_PATTERN.search(output)
         if match is None:
             raise LifecycleError("cloudflared version output is not recognized")
-        return match.group(1)
+        version = match.group(1)
+        if bundled_windows and version != BUNDLED_WINDOWS_AMD64_VERSION:
+            raise LifecycleError("bundled cloudflared version does not match the pinned release")
+        return version
 
     def redact(self, value: str) -> str:
         redacted = _REDACT_BEARER.sub("Bearer <redacted>", value)

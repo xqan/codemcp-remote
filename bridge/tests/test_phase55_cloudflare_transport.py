@@ -118,6 +118,16 @@ def test_cloudflared_discovery_prefers_bundled_binary(
     assert CLOUDFLARE_TUNNEL_PROVIDER.find_client(context) == bundled.resolve()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="bundled Windows cloudflared pin is Windows-specific")
+def test_bundled_cloudflared_sha256_mismatch_fails_closed(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    bundled = context.runtime_root / "cloudflared.exe"
+    bundled.write_bytes(b"tampered-cloudflared")
+
+    with pytest.raises(LifecycleError, match="SHA-256"):
+        CLOUDFLARE_TUNNEL_PROVIDER.client_version(context)
+
+
 def test_cloudflared_missing_and_bad_version_fail_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

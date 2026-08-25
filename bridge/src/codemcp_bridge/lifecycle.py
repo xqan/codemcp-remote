@@ -325,11 +325,11 @@ def store_transport_secret_from_environment(
     effective = _REMOTE_TRANSPORT if provider is None else provider
     value = os.environ.get(effective.secret_env_name)
     if not value:
-        raise LifecycleError(
-            f"{effective.secret_env_name} is not set in the current process"
-        )
+        raise LifecycleError(f"{effective.secret_env_name} is not set in the current process")
     if os.name != "nt":
-        raise LifecycleError("secure transport secret storage is currently supported only on Windows")
+        raise LifecycleError(
+            "secure transport secret storage is currently supported only on Windows"
+        )
     ensure_runtime_dirs(paths)
     secret_path = _provider_secret_path(paths, effective)
     encrypted = _dpapi_protect(value.encode("utf-8"))
