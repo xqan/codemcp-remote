@@ -1,12 +1,14 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **PLANNED — implementation not started**
+Status: **IN PROGRESS — 5.5.1, 5.5.2 and 5.5.4A complete; 5.5.3 waits on the mcp-auth-server Phase 4 verification contract**
 
 Target release: `v0.1.0`
 
 Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
+
+Dependency status: `mcp-auth-server` Phase 3 — Cloudflare OAuth Provider Integration is complete. `codemcp-remote` Phase 5.5.3 remains gated on the auth-server Phase 4 Resource Server Verification Contract freeze.
 
 ## 1. Context
 
@@ -132,35 +134,25 @@ ChatGPT
   -> codemcp-remote Bridge resource-server validation
 ```
 
-`mcp-auth-server` is the OAuth authorization server. It owns the protocol responsibilities that must remain outside `codemcp-remote`, including the final supported subset of:
+`mcp-auth-server` is the OAuth authorization layer and uses `@cloudflare/workers-oauth-provider` as its generic OAuth 2.1 protocol engine. The auth-server project owns MCP-specific Resource Registry / issuer / scope / audience policy, while the Provider owns the standards OAuth state machine such as Authorization Code + PKCE, client/grant lifecycle, token issuance, refresh and revoke.
 
-- authorization endpoint and user login/consent;
-- Authorization Code flow;
-- PKCE S256;
-- client metadata handling/CIMD compatibility;
-- Dynamic Client Registration when required;
-- client and redirect-URI registration;
-- access-token issuance;
-- refresh-token issuance/rotation where supported;
-- token revocation/expiry;
-- OAuth discovery metadata;
-- user/client/grant persistence.
+`codemcp-remote` is an OAuth Resource Server only. It accepts MCP requests after validating the externally issued access token according to the **versioned Resource Server Verification Contract** frozen by `mcp-auth-server` Phase 4. Cloudflare Tunnel remains transport only and is not an identity authority.
 
-`codemcp-remote` is an OAuth resource server only. It accepts MCP requests after validating the externally issued access token. Cloudflare Tunnel is transport only and is not an identity authority.
+Minimum Bridge semantics, independent of token representation:
 
-Minimum Bridge validation requirements:
+- extract the standard Bearer token from the HTTP Authorization header;
+- validate token authenticity/active state using only the frozen Resource Server Verification Contract;
+- require the configured authorization-server issuer/binding;
+- require exact canonical MCP resource/audience matching;
+- enforce expiry/revocation semantics defined by the contract;
+- extract only documented caller/client identity fields;
+- consume only documented scopes and never infer authorization from token presence;
+- fail closed on missing, malformed, expired, revoked, unverifiable, wrong-resource, or wrong-issuer credentials;
+- never trust Cloudflare-specific identity headers as an authorization source.
 
-- Bearer token extraction from the standard HTTP authorization path proven by the spike;
-- signature verification for signed tokens;
-- issuer validation;
-- audience/resource validation;
-- expiration/not-before validation;
-- required subject/identity claims;
-- key discovery and bounded caching when JWKS is used;
-- fail closed on missing, malformed, expired, forged, or wrong-audience tokens;
-- no trust in Cloudflare-specific identity headers.
+If the final contract selects signed/self-contained tokens, Phase 5.5.3 may implement JWKS/key discovery, bounded key caching, signature validation and time-claim checks. If it selects Provider-native opaque tokens, Phase 5.5.3 must instead implement the reviewed online validation/introspection contract, including Resource Server authentication, strict timeout, bounded positive caching, revocation semantics and fail-closed network behavior.
 
-The exact OAuth discovery, protected-resource metadata, DCR/CIMD, token format, JWKS, issuer, audience/resource and refresh behavior must be confirmed in Phase 5.5.0 against the independent auth server before production implementation.
+`mcp-auth-server` Phase 3 is now complete. The remaining production integration gate is its Phase 4 Resource Server Verification Contract; Phase 5.5.3 must not guess the token representation or validation endpoint before that contract is frozen.
 
 ### 4.4 Scope handling
 
@@ -189,24 +181,44 @@ The integration contract must be protocol-based, not source-based:
 
 ```text
 codemcp-remote
-  -> issuer / discovery metadata
-  -> JWKS or other standards-based verification material
-  -> audience/resource identifier
-  -> documented claims/scopes
+  -> authorization-server issuer / metadata
+  -> canonical MCP resource identifier
+  -> versioned Resource Server Verification Contract
+       -> JWT/JWKS verification, OR
+       -> authenticated online validation/introspection
+  -> documented identity/scopes/error semantics
 ```
 
 `codemcp-remote` must not:
 
-- import auth-server packages;
-- read the auth-server database;
-- depend on auth-server filesystem state;
-- share private signing keys;
+- import auth-server or Provider packages;
+- read the auth-server D1/KV/provider storage directly;
+- depend on auth-server filesystem/runtime state;
+- share Provider storage secrets or private signing keys;
 - require the auth server to run on the same machine;
 - proxy login/consent pages.
 
-Prefer asymmetric signed access tokens with public verification keys when the spike proves that contract. If the auth server ultimately uses opaque tokens, token introspection must be explicitly designed and validated before use.
+The token representation is not selected in this repository. `codemcp-remote` consumes the contract frozen by `mcp-auth-server` Phase 4 and implements only the selected Resource Server verification mode.
 
-The independent auth-server project may be developed in parallel, but Phase 5.5 production integration cannot proceed beyond the spike until a testable auth-server endpoint and stable protocol contract exist.
+Cross-project execution gate:
+
+```text
+mcp-auth-server Phase 3  Cloudflare OAuth Provider integration       COMPLETE
+codemcp-remote 5.5.1     transport abstraction                      COMPLETE
+codemcp-remote 5.5.2     Cloudflare transport provider              COMPLETE
+codemcp-remote 5.5.4A    transport CLI/config                       COMPLETE
+
+mcp-auth-server Phase 4.0  characterize Provider token behavior
+mcp-auth-server Phase 4.1  freeze Resource Server Verification Contract v1
+                              |
+                              +--> unlock codemcp-remote 5.5.3
+                              +--> unlock codemcp-remote 5.5.4B
+
+mcp-auth-server Phase 5/6 and codemcp-remote 5.5.3/5.5.4B may then proceed in parallel.
+mcp-auth-server Phase 7 is the hardened integration guide/reference layer, not the first contract-definition gate.
+```
+
+Phase 5.5.3 must not begin from assumptions about `@cloudflare/workers-oauth-provider` token internals. It begins only after the auth-server Phase 4.1 handoff is versioned and testable.
 
 ### 4.6 Cloudflare tunnel credential
 
@@ -245,9 +257,11 @@ Each sub-phase is independently gated.
 
 ## Phase 5.5.0 — External MCP Auth + HTTP MCP compatibility spike
 
+**Status: PARTIAL — preliminary protocol evidence recorded; final token-verification/interoperability acceptance waits on `mcp-auth-server` Phase 4.1.**
+
 ### Objective
 
-Prove the standards contract among ChatGPT, the independent `mcp-auth-server`, Cloudflare transport, and the MCP resource server before changing production code.
+Prove the standards contract among ChatGPT, the independent `mcp-auth-server`, Cloudflare transport, and the MCP Resource Server before starting auth-dependent production integration.
 
 This phase is an interoperability gate, not an implementation phase for either project.
 
@@ -302,11 +316,13 @@ Stop Phase 5.5 before production refactoring if any of these cannot be proven:
 
 Do not fall back to a shared static bearer secret merely to pass the spike.
 
-No production refactor starts before this spike is PASS.
+Transport-only work that does not depend on the auth contract (`5.5.1`, `5.5.2`, `5.5.4A`) is explicitly allowed to proceed in parallel and is already complete. **No auth production integration (`5.5.3` or `5.5.4B`) starts until `mcp-auth-server` Phase 4.1 freezes a testable Resource Server Verification Contract and the relevant Phase 5.5.0 interoperability checks pass.**
 
 ---
 
 ## Phase 5.5.1 — Transport provider abstraction
+
+**Status: COMPLETE — 2026-08-25.**
 
 ### Objective
 
@@ -369,6 +385,8 @@ Then STOP.
 
 ## Phase 5.5.2 — Cloudflare transport provider
 
+**Status: COMPLETE — 2026-08-25.**
+
 ### Objective
 
 Add `cloudflare` as a second remote transport.
@@ -428,73 +446,115 @@ Then STOP.
 
 ---
 
-## Phase 5.5.3 — Generic MCP OAuth resource-server integration
+## Phase 5.5.3 — MCP OAuth Resource Server verification integration
+
+**Status: BLOCKED — starts only after `mcp-auth-server` Phase 4.1 freezes Resource Server Verification Contract v1.**
 
 ### Objective
 
-Make tokens issued by the independent `mcp-auth-server` cryptographically enforceable at the Bridge without coupling authentication to Cloudflare or to auth-server internals.
+Make credentials issued by the independent `mcp-auth-server` enforceable at the Bridge without coupling `codemcp-remote` to Cloudflare OAuth Provider internals, D1/KV storage, or auth-server source code.
 
-### Work
+### Input contract
 
-Add an authentication layer for MCP requests when generic OAuth resource-server mode is enabled.
+Phase 5.5.3 consumes exactly one versioned handoff from `mcp-auth-server` Phase 4.1. The handoff must define at least:
 
-Configuration should contain only public/non-secret validation metadata derived from the Phase 5.5.0 contract, conceptually:
+- canonical authorization-server issuer;
+- canonical MCP resource identifier and exact audience semantics;
+- token representation;
+- verification mode: local signed-token verification or authenticated online validation/introspection;
+- token lifetime and revocation semantics;
+- Resource Server authentication requirements for online verification, if any;
+- stable identity fields;
+- stable scope representation;
+- 401/403 behavior;
+- cache and failure semantics;
+- test vectors for wrong-resource and revoked/invalid credentials.
+
+Do not implement from Provider internals that are not part of this frozen contract.
+
+### Configuration model
+
+Configuration contains only the Resource Server-side settings required by the selected contract. Conceptually:
 
 ```toml
 [auth]
 mode = "oauth-resource-server"
 issuer = "https://auth.example.com/"
-audience = "https://mcp.example.com/mcp"
-jwks_url = "https://auth.example.com/.well-known/jwks.json"
+resource = "https://mcp.example.com/mcp"
+verification = "<frozen-contract-mode>"
 ```
 
-The exact fields and whether `jwks_url`, protected-resource metadata, or introspection settings are required are decided only from Phase 5.5.0 evidence.
+Provider-specific fields such as `jwks_url` or an online validation/introspection endpoint are added only if selected by the Phase 4.1 contract.
 
-For signed/self-contained access tokens implement:
+### Common implementation
 
-- standard Bearer token extraction;
-- key discovery and bounded cache;
+Regardless of representation:
+
+- extract the standard Bearer token;
+- reject duplicate/conflicting credentials;
+- validate issuer/resource/audience exactly;
+- enforce active/expiry/revocation semantics;
+- propagate documented identity into request/audit context;
+- extract only documented scopes;
+- keep Cloudflare identity headers non-authoritative;
+- fail closed when verification cannot establish an active credential for this exact MCP resource.
+
+### Signed-token path, only if selected
+
+Implement:
+
+- bounded JWKS/key discovery cache;
+- approved algorithm/key validation;
 - signature validation;
-- issuer validation;
-- audience/resource validation;
+- issuer/audience/resource validation;
 - expiry/not-before validation;
-- subject/identity extraction;
-- optional scope extraction only when proven;
-- request-context propagation;
-- structured authentication failures;
-- audit-event identity attachment where appropriate.
+- unknown/stale key rejection;
+- key-rotation negative tests.
 
-If Phase 5.5.0 proves that opaque access tokens are required, do not emulate JWT validation. Add a separately reviewed introspection design with timeout, fail-closed behavior, authentication of the introspection call, caching rules and negative tests before implementation.
+### Provider-native opaque-token path, only if selected
+
+Implement the reviewed online verification/introspection contract:
+
+- authenticate `codemcp-remote` as a Resource Server using the mechanism defined by the auth server;
+- strict connect/read timeout;
+- fail closed on network/auth-server failure;
+- bounded positive-result cache only when allowed by the contract;
+- no unsafe long-lived negative cache;
+- immediate or contract-defined revocation behavior;
+- never send the MCP bearer token anywhere except the designated auth-server verification endpoint;
+- redact the credential from logs/errors/traces.
 
 ### Health endpoint rule
 
 Local lifecycle health checks must keep working without making `/healthz` a public privileged path.
 
-The public tunnel should expose only what is required for MCP operation and OAuth discovery/protected-resource metadata if the final contract requires it.
+The public tunnel exposes only the MCP/auth-discovery surface required by the final contract; local lifecycle diagnostics remain loopback-safe.
 
 ### Negative tests
 
-Must include:
+Must include representation-independent cases:
 
 - no Authorization header;
-- malformed Bearer header;
-- malformed token;
-- expired token;
-- not-yet-valid token;
+- malformed/duplicate Bearer header;
+- malformed/invalid credential;
+- expired credential;
+- revoked/inactive credential;
 - wrong issuer;
-- wrong audience/resource;
-- forged signature;
-- unknown/stale signing key;
-- token issued for a different MCP resource;
-- duplicate/conflicting authorization credentials;
+- wrong canonical audience/resource;
+- token/credential issued for a different MCP resource;
 - spoofed Cloudflare identity headers having no authorization effect;
-- auth-server/JWKS or introspection unavailability failing closed according to the final contract.
+- verification dependency unavailable -> fail closed.
+
+Additionally:
+
+- signed mode: forged signature, unknown/stale key, invalid time claims;
+- opaque mode: invalid introspection/validation response, Resource Server authentication failure, timeout, revoked token and cache-expiry behavior.
 
 ### Scope gate
 
-If Phase 5.5.0 proves stable scopes, add explicit scope-to-operation enforcement here with tests for read/write/execute/checkpoint boundaries.
+If the frozen contract proves stable scopes, add explicit scope-to-operation enforcement with tests for read/write/execute/checkpoint boundaries.
 
-If not, explicitly document that OAuth authenticates the caller while existing Bridge policy authorizes operations.
+If scope semantics are not yet frozen, OAuth establishes caller identity/resource validity while existing Bridge policy remains authoritative for operation authorization. Do not invent scope meanings locally.
 
 Then STOP.
 
@@ -511,7 +571,7 @@ Make transport selection and external OAuth resource-server validation supported
 Because the independent `mcp-auth-server` protocol contract is not yet frozen, Phase 5.5.4 is executed in two gated parts:
 
 - **Phase 5.5.4A — transport-only CLI/config**: versioned transport selection, backward-compatible OpenAI fallback/migration behavior, Cloudflare CLI parameters, provider-specific DPAPI transport secrets, provider-aware start/status/stop/doctor. This part may proceed before Phase 5.5.3.
-- **Phase 5.5.4B — auth-aware configuration**: OAuth resource-server metadata, issuer/audience/JWKS or introspection settings, auth-aware doctor/status and structural validation. This part remains blocked until the Phase 5.5.0/5.5.3 auth contract is proven.
+- **Phase 5.5.4B — auth-aware configuration**: OAuth Resource Server metadata, issuer/resource plus the selected verification-mode settings, auth-aware doctor/status and structural validation. This part remains blocked until `mcp-auth-server` Phase 4.1 freezes Resource Server Verification Contract v1; after that it may proceed alongside 5.5.3 when the config schema can be derived without guessing.
 
 Phase 5.5.4A implementation completed on 2026-08-25. Completion of 5.5.4A does **not** mark Phase 5.5.4 as fully complete.
 
@@ -609,7 +669,7 @@ The installed Windows payload still requires locally only:
 - Git for Windows;
 - user-owned Cloudflare account/domain/tunnel configuration for the Cloudflare path.
 
-To use the authenticated ChatGPT path, the user must additionally have access to a compatible external `mcp-auth-server` deployment matching the Phase 5.5.0 protocol contract. That auth server is a network dependency, not a bundled local runtime dependency.
+To use the authenticated ChatGPT path, the user must additionally have access to a compatible external `mcp-auth-server` deployment implementing the versioned Resource Server Verification Contract frozen in auth-server Phase 4.1. That auth server is a network dependency, not a bundled local runtime dependency.
 
 Installed release must still not require or bundle:
 
@@ -670,19 +730,19 @@ Prove the transport refactor did not weaken core safety properties.
 - tunnel restart behavior;
 - no Cloudflare identity header is trusted for authorization.
 
-#### Generic OAuth resource-server-specific
+#### Generic OAuth Resource Server-specific
 
 - Bearer token extraction;
-- signature/JWKS validation or explicitly designed introspection;
+- verification mode exactly matches `mcp-auth-server` Resource Server Verification Contract v1;
 - issuer validation;
-- audience/resource validation;
-- expiry/not-before validation;
+- exact canonical audience/resource validation;
+- expiry/revocation/active-state validation defined by the contract;
 - auth fail closed;
-- wrong-resource token rejection;
-- auth-server/JWKS/introspection outage behavior;
+- wrong-resource credential rejection;
+- JWKS or online-validation dependency outage behavior defined by the contract;
 - identity propagation into request/audit context;
-- scope enforcement only when proven by Phase 5.5.0;
-- no dependency on auth-server private keys, database, filesystem or source code.
+- scope enforcement only when frozen and proven end-to-end;
+- no dependency on auth-server Provider packages, private keys, D1/KV, filesystem or source code.
 
 #### OpenAI provider compatibility
 
@@ -752,10 +812,10 @@ Prove:
 2. OAuth authorization succeeds.
 3. DCR/CIMD/redirect-URI behavior matches the Phase 5.5.0 contract.
 4. PKCE behavior matches the Phase 5.5.0 contract when required.
-5. an access token issued for this MCP resource is accepted.
-6. a token for the wrong audience/resource is rejected.
-7. expired/invalid authorization is rejected without Git state change.
-8. refresh/session renewal behavior works as specified by the interoperability contract.
+5. a credential issued under the exact `mcp-auth-server` Resource Server Verification Contract version used for acceptance is accepted for this MCP resource.
+6. a credential for the wrong canonical audience/resource is rejected.
+7. expired, revoked, inactive or otherwise invalid authorization is rejected without Git state change.
+8. refresh/session renewal behavior works as specified by the auth-server interoperability contract and does not weaken Resource Server validation.
 9. tool discovery succeeds.
 10. `project_open phase5-clean` succeeds.
 11. `project_status.development_ready == true`.
@@ -839,9 +899,10 @@ This list is planning guidance, not authorization to modify all listed files.
 
 Mitigation:
 
-- Phase 5.5.0 records issuer and audience/resource semantics;
-- Bridge validates the exact resource binding before any tool dispatch;
-- negative tests cover tokens minted for a different MCP server;
+- `mcp-auth-server` Phase 4.1 freezes issuer/resource/audience semantics and reusable wrong-resource test vectors;
+- Phase 5.5.0 verifies those semantics through the ChatGPT interoperability path;
+- Bridge validates the exact canonical resource binding before any tool dispatch;
+- negative tests cover credentials issued for a different MCP server;
 - no fallback to token-presence-only authentication.
 
 ### High — authorization-server internals leak into codemcp-remote
