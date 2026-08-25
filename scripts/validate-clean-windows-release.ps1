@@ -140,12 +140,14 @@ This disposable repository exists only to validate the packaged Windows release.
 "@ | Set-Content -LiteralPath (Join-Path $Root "README.md") -Encoding UTF8
 
     @"
-project_prompt = "Operate only on this disposable Phase 5 acceptance repository."
-"@ | Set-Content -LiteralPath (Join-Path $Root "codemcp.toml") -Encoding UTF8
+[project]
+name = "codemcp-remote-phase5-acceptance"
+version = "0.0.0"
+"@ | Set-Content -LiteralPath (Join-Path $Root "pyproject.toml") -Encoding ASCII
 
     "phase5-clean-machine" | Set-Content -LiteralPath (Join-Path $Root "PHASE5_ACCEPTANCE.txt") -Encoding ASCII
 
-    & $GitPath -C $Root add README.md codemcp.toml PHASE5_ACCEPTANCE.txt
+    & $GitPath -C $Root add README.md pyproject.toml PHASE5_ACCEPTANCE.txt
     if ($LASTEXITCODE -ne 0) { throw "git add failed" }
     & $GitPath -C $Root commit -q -m "chore: create phase5 acceptance baseline"
     if ($LASTEXITCODE -ne 0) { throw "git baseline commit failed" }

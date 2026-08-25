@@ -197,9 +197,11 @@ The harness creates and commits:
 
 ```text
 README.md
-codemcp.toml
+pyproject.toml
 PHASE5_ACCEPTANCE.txt
 ```
+
+`pyproject.toml` is a metadata-only marker that lets the Bridge deterministically detect the disposable repository as the built-in `python` profile. The acceptance contract does not execute Python commands on the clean machine; Python remains absent from the isolated runtime `PATH`. The project intentionally omits `codemcp.toml` so the Bridge can validate its generated fixed command catalog without PowerShell 5.1 UTF-8 BOM ambiguity.
 
 The baseline commit hash is returned by `Prepare` and persisted in the Phase 5 validation state.
 
