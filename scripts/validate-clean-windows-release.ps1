@@ -126,11 +126,11 @@ function Prepare-AcceptanceProject {
     }
     New-Item -ItemType Directory -Force -Path $Root | Out-Null
 
-    & $GitPath -C $Root init 2>&1 | Out-Null
+    & $GitPath -C $Root init -q --initial-branch=main
     if ($LASTEXITCODE -ne 0) { throw "git init failed" }
-    & $GitPath -C $Root config user.name "codemcp-remote Phase 5" 2>&1 | Out-Null
+    & $GitPath -C $Root config user.name "codemcp-remote Phase 5"
     if ($LASTEXITCODE -ne 0) { throw "git user.name configuration failed" }
-    & $GitPath -C $Root config user.email "phase5@localhost.invalid" 2>&1 | Out-Null
+    & $GitPath -C $Root config user.email "phase5@localhost.invalid"
     if ($LASTEXITCODE -ne 0) { throw "git user.email configuration failed" }
 
     @"
@@ -145,9 +145,9 @@ project_prompt = "Operate only on this disposable Phase 5 acceptance repository.
 
     "phase5-clean-machine" | Set-Content -LiteralPath (Join-Path $Root "PHASE5_ACCEPTANCE.txt") -Encoding ASCII
 
-    & $GitPath -C $Root add README.md codemcp.toml PHASE5_ACCEPTANCE.txt 2>&1 | Out-Null
+    & $GitPath -C $Root add README.md codemcp.toml PHASE5_ACCEPTANCE.txt
     if ($LASTEXITCODE -ne 0) { throw "git add failed" }
-    & $GitPath -C $Root commit -m "chore: create phase5 acceptance baseline" 2>&1 | Out-Null
+    & $GitPath -C $Root commit -q -m "chore: create phase5 acceptance baseline"
     if ($LASTEXITCODE -ne 0) { throw "git baseline commit failed" }
 
     $head = (& $GitPath -C $Root rev-parse HEAD | Out-String).Trim()
