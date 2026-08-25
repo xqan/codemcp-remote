@@ -239,6 +239,26 @@ Use a separate OpenAI Tunnel ID and connector for the clean-machine host. This a
 
 Do not run two active clients for the same acceptance path when the result would be ambiguous.
 
+## Current release candidate
+
+The Phase 5 release-candidate package was regenerated after the clean-machine PATH isolation and reset-harness fixes.
+
+```text
+candidate:
+codemcp-remote-v0.1.0-windows-x64.zip
+
+candidate ZIP SHA-256:
+baf9de2b57cb3d8bf1af47cf80330ecc3496012fce1ab674b2f3118c583d0b42
+
+installer SHA-256:
+659651d9c0c1f333c39bf1ae4cee107c99bf147487f855aca4600309ec39c37c
+
+authenticode:
+NotSigned
+```
+
+The candidate generation gate also revalidated the clean-machine harness with the Windows PowerShell 5.1 parser. The installer payload itself did not change; only the Phase 5 validation harness and candidate ZIP changed.
+
 ## Completion criteria
 
 Packaging Phase 5 is PASS only when all of the following are recorded:
