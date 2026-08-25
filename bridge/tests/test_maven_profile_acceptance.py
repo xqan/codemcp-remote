@@ -58,12 +58,15 @@ async def test_root_only_maven_profile_runs_doctor_compile_and_test(
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    fake_maven = bin_dir / "mvn"
+    fake_maven = bin_dir / ("mvn.cmd" if os.name == "nt" else "mvn")
     fake_maven.write_text(
-        "#!/bin/sh\nprintf 'FAKE_MVN:%s\\n' \"$*\"\n",
+        "@echo off\necho FAKE_MVN:%*\n"
+        if os.name == "nt"
+        else "#!/bin/sh\nprintf 'FAKE_MVN:%s\\n' \"$*\"\n",
         encoding="utf-8",
     )
-    fake_maven.chmod(0o755)
+    if os.name != "nt":
+        fake_maven.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
 
     config_dir = tmp_path / "config"

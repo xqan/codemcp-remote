@@ -95,6 +95,37 @@ def test_local_python_src_test_prepends_src_to_pythonpath(tmp_path: Path) -> Non
     assert invocation.environment["PYTHONPATH"].split(os.pathsep)[0] == str(project.root / "src")
 
 
+def test_local_windows_resolves_fixed_executable_through_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, _ = _python_project(tmp_path)
+    command = CommandSpec(
+        command_id="doctor",
+        kind="doctor",
+        argv=("mvn", "--version"),
+        timeout_seconds=60,
+        approval="not-required",
+    )
+    monkeypatch.setattr(
+        "codemcp_bridge.command_runner.shutil.which",
+        lambda executable: r"C:\\Tools\\Maven\\bin\\mvn.cmd"
+        if executable == "mvn"
+        else None,
+    )
+
+    invocation = build_command_invocation(
+        _settings(tmp_path, project, "local"),
+        project,
+        command,
+        os_name="nt",
+    )
+
+    assert invocation.executable == r"C:\Tools\Maven\bin\mvn.cmd"
+    assert invocation.arguments == ("--version",)
+    assert invocation.cwd == project.root
+
+
 def test_local_windows_migrates_legacy_wsl_self_repository_tools(tmp_path: Path) -> None:
     root = tmp_path / "project"
     (root / "bridge").mkdir(parents=True)

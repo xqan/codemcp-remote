@@ -144,7 +144,12 @@ def test_existing_symlink_config_is_rejected(tmp_path: Path) -> None:
     project = _maven_project(tmp_path)
     target = tmp_path / "outside.toml"
     target.write_text('[commands.test]\ncommand = ["mvn", "test"]\n', encoding="utf-8")
-    project.codemcp_config.symlink_to(target)
+    try:
+        project.codemcp_config.symlink_to(target)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("symlink creation is not permitted by this Windows account")
+        raise
 
     with pytest.raises(BridgeError) as rejected:
         with materialize_generated_codemcp_config(project, _test_command(project)):

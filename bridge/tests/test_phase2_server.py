@@ -321,7 +321,7 @@ def git_project(tmp_path: Path) -> Path:
     project = tmp_path / "phase2 project"
     project.mkdir()
     (project / "src").mkdir()
-    (project / "src" / "hello.txt").write_text("hello\n", encoding="utf-8")
+    (project / "src" / "hello.txt").write_bytes(b"hello\n")
     (project / "src" / "binary.bin").write_bytes(b"header\x00binary\n")
     (project / "src" / "large.txt").write_text("x" * 1025, encoding="utf-8")
     (project / "codemcp.toml").write_text(

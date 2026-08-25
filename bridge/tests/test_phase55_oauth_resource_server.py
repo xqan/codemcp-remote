@@ -399,6 +399,32 @@ async def test_authenticator_maps_bearer_and_service_outcomes() -> None:
     assert messages == []
 
 
+@pytest.mark.asyncio
+async def test_cloudflare_identity_headers_do_not_authenticate_without_bearer() -> None:
+    messages: list[dict[str, Any]] = []
+
+    async def send(message: dict[str, Any]) -> None:
+        messages.append(message)
+
+    class RejectingValidator:
+        async def validate(self, token: str) -> AuthenticatedPrincipal | None:
+            pytest.fail(f"validator must not receive Cloudflare identity headers as bearer: {token}")
+
+    authenticator = OAuthResourceServerAuthenticator(RejectingValidator())  # type: ignore[arg-type]
+    scope = {
+        "type": "http",
+        "headers": [
+            (b"cf-access-authenticated-user-email", b"user@example.com"),
+            (b"cf-access-jwt-assertion", b"cloudflare-access-token"),
+            (b"x-forwarded-user", b"subject-a"),
+        ],
+    }
+
+    assert not await authenticator(scope, send)  # type: ignore[arg-type]
+    assert messages[0]["status"] == 401
+    assert AUTH_SCOPE_KEY not in scope
+
+
 def test_operation_idempotency_is_bound_to_stable_authenticated_identity(tmp_path: Path) -> None:
     database = Database(tmp_path / "bridge.sqlite3")
     database.initialize()

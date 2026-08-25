@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import signal
 import subprocess
 from dataclasses import dataclass
@@ -83,6 +84,10 @@ def build_command_invocation(
         migrated_argv = _migrate_legacy_wsl_bridge_command(project, command.argv)
         if migrated_argv is not None:
             local_argv = migrated_argv
+        else:
+            resolved_executable = shutil.which(local_argv[0])
+            if resolved_executable is not None:
+                local_argv = (resolved_executable, *local_argv[1:])
 
     environment: dict[str, str] | None = None
     if python_src_test:
