@@ -4,6 +4,14 @@ param(
     [string]$Action = "Prepare",
     [string]$InstallerPath,
     [string]$ExpectedInstallerSha256,
+    [ValidateSet("cloudflare", "openai-tunnel")]
+    [string]$Transport = "cloudflare",
+    [string]$PublicUrl,
+    [string]$AuthorizationServerIssuer,
+    [string]$CanonicalResourceUri,
+    [string]$ValidationResourceId = "codemcp-resource",
+    [string]$OriginUrl = "http://127.0.0.1:46200/mcp",
+    [string]$MetricsAddr = "127.0.0.1:46202",
     [string]$TunnelId,
     [string]$ProjectId = "phase5-clean",
     [string]$ProjectRoot
@@ -174,11 +182,73 @@ function Assert-DoctorContract {
     if ($Doctor.checks.git.status -ne "ok") {
         throw "doctor cannot find Git after runtime PATH isolation"
     }
+
+    $provider = [string]$Doctor.checks.transport.provider
+    if ($provider -eq "cloudflare") {
+        if ($Doctor.checks.cloudflare_settings.status -ne "ok") {
+            throw "doctor did not validate Cloudflare transport settings"
+        }
+        if ([string]$Doctor.checks.cloudflare_settings.origin_url -ne "http://127.0.0.1:46200/mcp") {
+            throw "Cloudflare origin is not the fixed loopback MCP endpoint"
+        }
+        if ($Doctor.checks.cloudflared.status -ne "ok") {
+            throw "doctor cannot find the bundled cloudflared"
+        }
+        if (
+            $Doctor.checks.tunnel_token.status -ne "ok" -or
+            $Doctor.checks.tunnel_token.source -ne "windows-dpapi"
+        ) {
+            throw "doctor did not prove Cloudflare tunnel-token DPAPI recovery"
+        }
+        if (
+            $Doctor.checks.auth.status -ne "ok" -or
+            $Doctor.checks.auth.mode -ne "oauth-resource-server" -or
+            $Doctor.checks.auth.verification_contract -ne "mcp-rs-verification-v1" -or
+            $Doctor.checks.auth.secret_source -ne "windows-dpapi"
+        ) {
+            throw "doctor did not prove the external OAuth Resource Server contract and DPAPI secret recovery"
+        }
+        if ([string]$Doctor.checks.auth.resource -ne [string]$Doctor.checks.cloudflare_settings.public_url) {
+            throw "OAuth canonical resource does not match the Cloudflare public MCP URL"
+        }
+        return
+    }
+
+    if ($provider -ne "openai-tunnel") {
+        throw "doctor reported an unsupported transport provider: $provider"
+    }
     if ($Doctor.checks.api_key.status -ne "ok" -or $Doctor.checks.api_key.source -ne "windows-dpapi") {
         throw "doctor did not prove Windows DPAPI secret recovery"
     }
     if ($Doctor.checks.tunnel_client.status -ne "ok") {
         throw "doctor cannot find the bundled tunnel-client"
+    }
+}
+
+function Assert-NoEmbeddedAuthServerState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
+        return
+    }
+    $forbiddenPatterns = @(
+        "*mcp-auth-server*",
+        "*signing-key*",
+        "*private-key*",
+        "*users*.sqlite*",
+        "*clients*.sqlite*",
+        "*refresh-token*"
+    )
+    foreach ($pattern in $forbiddenPatterns) {
+        $found = Get-ChildItem -LiteralPath $AppRoot -Recurse -Force -ErrorAction Stop |
+            Where-Object { $_.Name -like $pattern } |
+            Select-Object -First 1
+        if ($null -ne $found) {
+            throw "codemcp-remote runtime unexpectedly contains auth-server private state: $($found.FullName)"
+        }
     }
 }
 
@@ -188,8 +258,12 @@ function Invoke-Start {
     Set-RuntimeIsolationPath -InstallDir $release.install_dir -GitPath $gitPath
 
     $env:CONTROL_PLANE_API_KEY = $null
+    $env:TUNNEL_TOKEN = $null
+    $env:CODEMCP_RS_VERIFICATION_SECRET = $null
     $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
     Assert-DoctorContract -Doctor $doctor
+    $appRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+    Assert-NoEmbeddedAuthServerState -AppRoot $appRoot
 
     $start = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("start", "--startup-timeout", "45")
     if ($start.status -ne "ok") {
@@ -215,9 +289,21 @@ function Invoke-Start {
         }
     }
 
+    $provider = [string]$doctor.checks.transport.provider
+    $transportSecretSource = if ($provider -eq "cloudflare") {
+        [string]$doctor.checks.tunnel_token.source
+    } else {
+        [string]$doctor.checks.api_key.source
+    }
+    $transportClientPath = if ($provider -eq "cloudflare") {
+        [string]$doctor.checks.cloudflared.path
+    } else {
+        [string]$doctor.checks.tunnel_client.path
+    }
+
     [ordered]@{
         status = "ready-for-remote-verification"
-        phase = "5"
+        phase = "5.5.7"
         action = "start"
         install_dir = $release.install_dir
         app_root = (Join-Path $env:LOCALAPPDATA "codemcp-remote")
@@ -226,15 +312,20 @@ function Invoke-Start {
         baseline_head = if ($null -ne $phase5) { [string]$phase5.baseline_head } else { $null }
         worker_mode = [string]$doctor.checks.configuration.worker_mode
         git_path = $gitPath
-        api_key_source = [string]$doctor.checks.api_key.source
-        tunnel_client_path = [string]$doctor.checks.tunnel_client.path
+        transport = $provider
+        transport_secret_source = $transportSecretSource
+        transport_client_path = $transportClientPath
+        public_url = if ($provider -eq "cloudflare") { [string]$doctor.checks.cloudflare_settings.public_url } else { $null }
+        auth_issuer = if ($provider -eq "cloudflare") { [string]$doctor.checks.auth.issuer } else { $null }
+        canonical_resource_uri = if ($provider -eq "cloudflare") { [string]$doctor.checks.auth.resource } else { $null }
+        auth_secret_source = if ($provider -eq "cloudflare") { [string]$doctor.checks.auth.secret_source } else { $null }
         bridge_health = [string]$status.bridge.health.status
         tunnel_health = [string]$status.tunnel.health.status
         python_visible_on_isolated_path = ($null -ne (Get-Command python.exe -ErrorAction SilentlyContinue))
         uv_visible_on_isolated_path = ($null -ne (Get-Command uv.exe -ErrorAction SilentlyContinue))
         pwsh_visible_on_isolated_path = ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue))
         wsl_command_visible = ($null -ne (Get-Command wsl.exe -ErrorAction SilentlyContinue))
-        next = "Use the ChatGPT connector to open the Phase 5 project and run the remote contract before cleanup."
+        next = "Use the ChatGPT connector through the authenticated Cloudflare MCP URL and run the Phase 5.5.7 remote contract before cleanup."
     } | ConvertTo-Json -Depth 7
 }
 
@@ -342,11 +433,29 @@ if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
 if ($ExpectedInstallerSha256 -notmatch "^[0-9a-fA-F]{64}$") {
     throw "-ExpectedInstallerSha256 must be a 64-character SHA-256 digest"
 }
-if ([string]::IsNullOrWhiteSpace($TunnelId)) {
-    throw "-TunnelId is required for Action=Prepare"
-}
-if ([string]::IsNullOrWhiteSpace($env:CONTROL_PLANE_API_KEY)) {
-    throw "Set CONTROL_PLANE_API_KEY in this process before running Phase 5; never pass the secret on the command line"
+if ($Transport -eq "cloudflare") {
+    if ([string]::IsNullOrWhiteSpace($PublicUrl)) {
+        throw "-PublicUrl is required for Cloudflare Action=Prepare"
+    }
+    if ([string]::IsNullOrWhiteSpace($AuthorizationServerIssuer)) {
+        throw "-AuthorizationServerIssuer is required for Cloudflare Action=Prepare"
+    }
+    if ([string]::IsNullOrWhiteSpace($CanonicalResourceUri)) {
+        $CanonicalResourceUri = $PublicUrl
+    }
+    if ([string]::IsNullOrWhiteSpace($env:TUNNEL_TOKEN)) {
+        throw "Set TUNNEL_TOKEN in this process before Cloudflare Action=Prepare; never pass the secret on the command line"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:CODEMCP_RS_VERIFICATION_SECRET)) {
+        throw "Set CODEMCP_RS_VERIFICATION_SECRET in this process before Cloudflare Action=Prepare; never pass the secret on the command line"
+    }
+} else {
+    if ([string]::IsNullOrWhiteSpace($TunnelId)) {
+        throw "-TunnelId is required for openai-tunnel Action=Prepare"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:CONTROL_PLANE_API_KEY)) {
+        throw "Set CONTROL_PLANE_API_KEY in this process before openai-tunnel Action=Prepare; never pass the secret on the command line"
+    }
 }
 
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
@@ -382,8 +491,10 @@ if ($release.install_dir.TrimEnd("\") -ne $expectedInstallDir.TrimEnd("\")) {
 }
 
 $tunnelExe = Join-Path $release.install_dir "tunnel-client.exe"
+$cloudflaredExe = Join-Path $release.install_dir "cloudflared.exe"
 foreach ($required in @(
     $release.exe,
+    $cloudflaredExe,
     $tunnelExe,
     (Join-Path $release.install_dir "LICENSE"),
     (Join-Path $release.install_dir "THIRD_PARTY_NOTICES.txt")
@@ -405,16 +516,36 @@ if ($LASTEXITCODE -ne 0 -or $versionText -notmatch "0\.1\.0") {
     throw "installed codemcp-remote version check failed: $versionText"
 }
 
-$init = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @(
-    "init",
-    "--tunnel-id", $TunnelId,
-    "--store-api-key"
-)
+$initArgs = if ($Transport -eq "cloudflare") {
+    @(
+        "init",
+        "--transport", "cloudflare",
+        "--public-url", $PublicUrl,
+        "--origin-url", $OriginUrl,
+        "--metrics-addr", $MetricsAddr,
+        "--store-transport-secret",
+        "--auth-mode", "oauth-resource-server",
+        "--authorization-server-issuer", $AuthorizationServerIssuer,
+        "--canonical-resource-uri", $CanonicalResourceUri,
+        "--validation-resource-id", $ValidationResourceId,
+        "--store-auth-secret"
+    )
+} else {
+    @(
+        "init",
+        "--transport", "openai-tunnel",
+        "--tunnel-id", $TunnelId,
+        "--store-api-key"
+    )
+}
+$init = Invoke-JsonCommand -FilePath $release.exe -ArgumentList $initArgs
 if ($init.status -ne "ok") {
     throw "codemcp-remote init did not report status=ok"
 }
 
 $env:CONTROL_PLANE_API_KEY = $null
+$env:TUNNEL_TOKEN = $null
+$env:CODEMCP_RS_VERIFICATION_SECRET = $null
 $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
 Assert-DoctorContract -Doctor $doctor
 
@@ -431,13 +562,33 @@ Assert-DoctorContract -Doctor $doctorAfterProject
 if ([int]$doctorAfterProject.checks.configuration.projects -lt 1) {
     throw "doctor did not observe the registered Phase 5 project"
 }
+$appRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+Assert-NoEmbeddedAuthServerState -AppRoot $appRoot
+
+$provider = [string]$doctorAfterProject.checks.transport.provider
+$transportSecretSource = if ($provider -eq "cloudflare") {
+    [string]$doctorAfterProject.checks.tunnel_token.source
+} else {
+    [string]$doctorAfterProject.checks.api_key.source
+}
+$transportClientPath = if ($provider -eq "cloudflare") {
+    [string]$doctorAfterProject.checks.cloudflared.path
+} else {
+    [string]$doctorAfterProject.checks.tunnel_client.path
+}
 
 $phase5State = [ordered]@{
+    phase = "5.5.7"
     project_id = $ProjectId
     project_root = $projectRootPath
     baseline_head = $baselineHead
     installer_sha256 = $actualInstallerSha256
     install_dir = $release.install_dir
+    transport = $provider
+    public_url = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.cloudflare_settings.public_url } else { $null }
+    auth_issuer = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.auth.issuer } else { $null }
+    canonical_resource_uri = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.auth.resource } else { $null }
+    validation_resource_id = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.auth.validation_resource_id } else { $null }
 }
 $stateParent = Split-Path -Parent $Phase5StateFile
 New-Item -ItemType Directory -Force -Path $stateParent | Out-Null
@@ -445,22 +596,27 @@ $phase5State | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Phase5StateFi
 
 [ordered]@{
     status = "ready-for-start"
-    phase = "5"
+    phase = "5.5.7"
     action = "prepare"
     installer_sha256 = $actualInstallerSha256
     install_dir = $release.install_dir
-    app_root = (Join-Path $env:LOCALAPPDATA "codemcp-remote")
+    app_root = $appRoot
     phase5_state_file = $Phase5StateFile
     project_id = $ProjectId
     project_root = $projectRootPath
     baseline_head = $baselineHead
     worker_mode = [string]$doctorAfterProject.checks.configuration.worker_mode
     git_path = $gitPath
-    api_key_source = [string]$doctorAfterProject.checks.api_key.source
-    tunnel_client_path = [string]$doctorAfterProject.checks.tunnel_client.path
+    transport = $provider
+    transport_secret_source = $transportSecretSource
+    transport_client_path = $transportClientPath
+    public_url = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.cloudflare_settings.public_url } else { $null }
+    auth_issuer = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.auth.issuer } else { $null }
+    canonical_resource_uri = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.auth.resource } else { $null }
+    auth_secret_source = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.auth.secret_source } else { $null }
     python_visible_on_isolated_path = ($null -ne (Get-Command python.exe -ErrorAction SilentlyContinue))
     uv_visible_on_isolated_path = ($null -ne (Get-Command uv.exe -ErrorAction SilentlyContinue))
     pwsh_visible_on_isolated_path = ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue))
     wsl_command_visible = ($null -ne (Get-Command wsl.exe -ErrorAction SilentlyContinue))
-    next = "Coordinate the Tunnel cutover, then run this script again with -Action Start."
+    next = "Run Action=Start, then connect ChatGPT to the authenticated Cloudflare MCP URL and execute the Phase 5.5.7 remote contract."
 } | ConvertTo-Json -Depth 7

@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 is NOT STARTED**
+Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 repository-side acceptance is READY, LIVE Cloudflare + external OAuth + ChatGPT proof is BLOCKED/PENDING**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are complete. Phase 5.5.5 Windows installer integration and native acceptance are complete. Phase 5.5.6 security/regression validation is also complete. Phase 5.5.7 has not started.
+Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side integration through `codemcp-remote` Phase 5.5.6 is complete. Phase 5.5.7 repository work is ready. The live gate is blocked until an exact clean `mcp-auth-server` build is deployed with a real canonical issuer and formal public-domain identity/session support; the currently observed `0.1.0` code baseline at `83167bcc5834c357432236da7c69ceb91292047f` is not a live deployment identity because its staging issuer remains `.invalid` and deployment-profile files are dirty.
 
 ## 1. Context
 
@@ -847,6 +847,8 @@ Then STOP.
 
 ## Phase 5.5.7 — Final ChatGPT + external OAuth + clean Windows acceptance
 
+**Status: IN PROGRESS — repository-side Cloudflare-first clean-machine harness is READY and full regression is `217 passed / 6 skipped / 0 failed`; LIVE external deployment/ChatGPT acceptance is BLOCKED/PENDING.**
+
 ### Objective
 
 Replace the interrupted Phase 5 acceptance with the final proof of Cloudflare transport plus independent MCP OAuth authentication.
@@ -894,8 +896,8 @@ Prove:
 
 1. ChatGPT discovers the intended auth server/resource metadata.
 2. OAuth authorization succeeds.
-3. DCR/CIMD/redirect-URI behavior matches the Phase 5.5.0 contract.
-4. PKCE behavior matches the Phase 5.5.0 contract when required.
+3. CIMD/static-public-client/redirect-URI behavior matches the **currently frozen `mcp-auth-server` trust profile**. Public DCR is disabled; if ChatGPT cannot interoperate through CIMD or an explicitly pre-registered public client, record a blocker rather than re-enable DCR merely to pass acceptance.
+4. PKCE S256 behavior matches the frozen auth-server contract.
 5. a credential issued under the exact `mcp-auth-server` Resource Server Verification Contract version used for acceptance is accepted for this MCP resource.
 6. a credential for the wrong canonical audience/resource is rejected.
 7. expired, revoked, inactive or otherwise invalid authorization is rejected without Git state change.
