@@ -248,7 +248,7 @@ candidate:
 codemcp-remote-v0.1.0-windows-x64.zip
 
 candidate ZIP SHA-256:
-baf9de2b57cb3d8bf1af47cf80330ecc3496012fce1ab674b2f3118c583d0b42
+1bf134469909b69940655dd215a0402ce44eebcfd8d7cf93be0a991b629b16e5
 
 installer SHA-256:
 659651d9c0c1f333c39bf1ae4cee107c99bf147487f855aca4600309ec39c37c
