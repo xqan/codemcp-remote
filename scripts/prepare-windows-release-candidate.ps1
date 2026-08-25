@@ -83,13 +83,35 @@ $manifest = [ordered]@{
     product = "codemcp-remote"
     version = $Version
     platform = "windows-x64"
-    phase = 5
+    phase = "5.5.5"
     installer_sha256 = $actualInstallerSha256
     authenticode_status = $signatureStatus
+    recommended_transport = "cloudflare"
+    bundled_transports = @(
+        [ordered]@{
+            provider = "cloudflare"
+            executable = "cloudflared.exe"
+            version = "2026.7.3"
+            sha256 = "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841"
+            license = "Apache-2.0"
+        },
+        [ordered]@{
+            provider = "openai-tunnel"
+            executable = "tunnel-client.exe"
+            version = "v0.0.12"
+            license = "Apache-2.0"
+            role = "optional compatibility provider"
+        }
+    )
     runtime_prerequisites = @(
         "Windows 11 x64-compatible",
-        "Git for Windows",
-        "OpenAI Tunnel ID and account/workspace permission"
+        "Git for Windows"
+    )
+    cloudflare_path_requires = @(
+        "user-owned Cloudflare account/domain/tunnel configuration"
+    )
+    authenticated_chatgpt_path_requires = @(
+        "compatible external mcp-auth-server deployment implementing mcp-rs-verification-v1"
     )
     not_required_at_runtime = @(
         "Python",
@@ -97,7 +119,9 @@ $manifest = [ordered]@{
         "PowerShell 7",
         "WSL2",
         "codemcp-remote source repository",
-        "separately installed tunnel-client"
+        "separately installed cloudflared",
+        "separately installed tunnel-client",
+        "local or bundled mcp-auth-server runtime"
     )
     validation = "Run validate-clean-windows-release.ps1 on a clean Windows host or VM."
 }

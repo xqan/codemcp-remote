@@ -4,6 +4,7 @@ param(
     [string]$ISCCPath,
     [string]$AppVersion = "0.1.0",
     [string]$TunnelClientVersion = "v0.0.12",
+    [string]$CloudflaredVersion = "2026.7.3",
     [switch]$SkipAppBuild,
     [switch]$SkipSmoke,
     [switch]$ForceTunnelDownload
@@ -89,29 +90,31 @@ $prepareArgs = @(
     "-NoLogo",
     "-NoProfile",
     "-NonInteractive",
-    "-File", (Join-Path $repositoryRoot "scripts\prepare-tunnel-client.ps1"),
+    "-File", (Join-Path $repositoryRoot "scripts\prepare-remote-transport.ps1"),
     "-DestinationDir", $appDir,
-    "-Version", $TunnelClientVersion
+    "-CloudflaredVersion", $CloudflaredVersion,
+    "-OpenAITunnelClientVersion", $TunnelClientVersion
 )
 if ($ForceTunnelDownload) {
     $prepareArgs += "-ForceDownload"
 }
-$tunnelJson = (& pwsh @prepareArgs | Out-String).Trim()
+$transportJson = (& pwsh @prepareArgs | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) {
-    throw "tunnel-client preparation failed with exit code $LASTEXITCODE"
+    throw "remote transport preparation failed with exit code $LASTEXITCODE"
 }
 try {
-    $tunnelInfo = $tunnelJson | ConvertFrom-Json
+    $transportInfo = $transportJson | ConvertFrom-Json
 } catch {
-    throw "tunnel-client preparation did not return valid JSON: $tunnelJson"
+    throw "remote transport preparation did not return valid JSON: $transportJson"
 }
-if ($tunnelInfo.status -ne "ok") {
-    throw "tunnel-client preparation did not report status=ok"
+if ($transportInfo.status -ne "ok" -or $transportInfo.recommended_provider -ne "cloudflare") {
+    throw "remote transport preparation did not report the expected Cloudflare-ready payload"
 }
 
 $forbiddenPayloadPaths = @(
     (Join-Path $appDir "config\tunnel-profile.local.env"),
-    (Join-Path $appDir "secrets\control-plane-api-key.dpapi"),
+    (Join-Path $appDir "config\remote.toml"),
+    (Join-Path $appDir "config\tunnel.env"),
     (Join-Path $appDir "run\state.json"),
     (Join-Path $appDir "data\bridge.sqlite3"),
     (Join-Path $appDir ".local\bridge.sqlite3"),
@@ -119,6 +122,10 @@ $forbiddenPayloadPaths = @(
 )
 $forbiddenPayload = @(
     $forbiddenPayloadPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+)
+$forbiddenPayload += @(
+    Get-ChildItem -LiteralPath $appDir -Recurse -File -Filter "*.dpapi" -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.FullName }
 )
 if ($forbiddenPayload.Count -gt 0) {
     throw "installer payload contains runtime/secret files: $($forbiddenPayload -join ', ')"
@@ -244,11 +251,15 @@ if (-not $SkipSmoke) {
 
         $installedMain = Join-Path $installedLocation "codemcp-remote.exe"
         $installedTunnel = Join-Path $installedLocation "tunnel-client.exe"
+        $installedCloudflared = Join-Path $installedLocation "cloudflared.exe"
         $requiredFiles = @(
             $installedMain,
+            $installedCloudflared,
             $installedTunnel,
             (Join-Path $installedLocation "LICENSE"),
             (Join-Path $installedLocation "THIRD_PARTY_NOTICES.txt"),
+            (Join-Path $installedLocation "THIRD_PARTY\cloudflared\LICENSE"),
+            (Join-Path $installedLocation "THIRD_PARTY\cloudflared\NOTICE.txt"),
             (Join-Path $installedLocation "THIRD_PARTY\tunnel-client\LICENSE")
         )
         foreach ($required in $requiredFiles) {
@@ -261,14 +272,47 @@ if (-not $SkipSmoke) {
         if ($LASTEXITCODE -ne 0) {
             throw "installed codemcp-remote version smoke failed"
         }
+        $installedCloudflaredVersion = (& $installedCloudflared --version 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or
+            $installedCloudflaredVersion -notmatch [regex]::Escape($CloudflaredVersion)) {
+            throw "installed cloudflared version smoke failed: $installedCloudflaredVersion"
+        }
+        $installedCloudflaredSha256 = (
+            Get-FileHash -Algorithm SHA256 -LiteralPath $installedCloudflared
+        ).Hash.ToLowerInvariant()
+        if ($installedCloudflaredSha256 -ne [string]$transportInfo.cloudflare.executable_sha256) {
+            throw "installed cloudflared checksum differs from the verified staging payload"
+        }
         $installedTunnelVersion = (& $installedTunnel --version 2>&1 | Out-String).Trim()
         if ($LASTEXITCODE -ne 0 -or
             $installedTunnelVersion -notmatch [regex]::Escape($TunnelClientVersion.TrimStart("v"))) {
             throw "installed tunnel-client version smoke failed: $installedTunnelVersion"
         }
+
+        New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+        $runtimeSentinel = Join-Path $runtimeDir "preserve-on-upgrade-and-uninstall.txt"
+        "phase-5.5.5-runtime-preservation" |
+            Set-Content -LiteralPath $runtimeSentinel -Encoding ascii
         & $installedMain status --app-root $runtimeDir
         if ($LASTEXITCODE -ne 0) {
             throw "installed lifecycle status smoke failed"
+        }
+
+        $upgradeExit = Invoke-GuiProcessAndWait `
+            -FilePath $setupPath `
+            -ArgumentList @(
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                "/NOSTOPLIFECYCLE",
+                ('/DIR="{0}"' -f $installDir),
+                "/MERGETASKS=!addtopath"
+            )
+        if ($upgradeExit -ne 0) {
+            throw "silent installer upgrade smoke failed with exit code $upgradeExit"
+        }
+        if (-not (Test-Path -LiteralPath $runtimeSentinel -PathType Leaf)) {
+            throw "installer upgrade removed user runtime data"
         }
 
         $uninstallers = @(
@@ -291,6 +335,9 @@ if (-not $SkipSmoke) {
         if (Test-Path -LiteralPath $installedMain -PathType Leaf) {
             throw "silent uninstall left codemcp-remote.exe behind"
         }
+        if (-not (Test-Path -LiteralPath $runtimeSentinel -PathType Leaf)) {
+            throw "silent uninstall removed user runtime data"
+        }
         $smokeStatus = "passed"
     } finally {
         if ($smokeStatus -eq "passed") {
@@ -303,7 +350,7 @@ if (-not $SkipSmoke) {
 
 [ordered]@{
     status = "ok"
-    phase = "4"
+    phase = "5.5.5"
     app_version = $AppVersion
     installer_builder = "Inno Setup 7"
     iscc = $iscc
@@ -311,8 +358,12 @@ if (-not $SkipSmoke) {
     sha256 = $setupSha256
     sha256_file = $checksumPath
     authenticode_status = $signatureStatus
-    tunnel_client_version = $TunnelClientVersion
-    tunnel_client_sha256 = [string]$tunnelInfo.executable_sha256
-    tunnel_client_license = [string]$tunnelInfo.license
+    recommended_transport = [string]$transportInfo.recommended_provider
+    cloudflared_version = [string]$transportInfo.cloudflare.version
+    cloudflared_sha256 = [string]$transportInfo.cloudflare.executable_sha256
+    cloudflared_license = [string]$transportInfo.cloudflare.license
+    tunnel_client_version = [string]$transportInfo.openai_tunnel.version
+    tunnel_client_sha256 = [string]$transportInfo.openai_tunnel.executable_sha256
+    tunnel_client_license = [string]$transportInfo.openai_tunnel.license
     smoke = $smokeStatus
 } | ConvertTo-Json -Depth 4

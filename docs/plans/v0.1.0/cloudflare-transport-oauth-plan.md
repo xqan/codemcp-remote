@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.4 complete; 5.5.5 is NOT STARTED**
+Status: **IN PROGRESS — 5.5.1 through 5.5.4 complete; 5.5.5 implementation is complete but installer acceptance is BLOCKED by missing Inno Setup 7; 5.5.6 is NOT STARTED**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are now complete. Phase 5.5.5 remains NOT STARTED.
+Dependency status: `mcp-auth-server` Phase 4.0 is VERIFIED and Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`). That handoff unlocked `codemcp-remote` Phase 5.5.3 and 5.5.4B; both are complete. Phase 5.5.5 code/package integration is implemented, but its native installer acceptance remains blocked only by the local absence of Inno Setup 7 `ISCC.exe`; Phase 5.5.6 has not started.
 
 ## 1. Context
 
@@ -732,6 +732,27 @@ Installed release must still not require or bundle:
 - installer install/upgrade/uninstall smoke;
 - no secret in installer;
 - no user runtime data deletion on normal uninstall.
+
+### Phase 5.5.5 implementation and validation state
+
+Implemented on 2026-08-25:
+
+- added `scripts/prepare-cloudflared.ps1` with a hard pin for official `cloudflared` Windows amd64 `2026.7.3`, exact SHA-256 verification before staging, version smoke, and Apache-2.0 license/provenance files;
+- corrected the runtime bundled-cloudflared SHA-256 pin to the official `2026.7.3` Windows amd64 digest `8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841`;
+- added `scripts/prepare-remote-transport.ps1` so the Windows payload stages Cloudflare as the recommended provider while retaining the OpenAI tunnel client as an optional compatibility provider;
+- updated `scripts/build-windows-installer.ps1` to package both transport binaries, reject runtime `remote.toml`/`tunnel.env`, reject every staged `*.dpapi` secret, verify the installed cloudflared version/hash, and define install -> upgrade -> uninstall runtime-data-preservation smoke;
+- updated the release-candidate manifest to declare Cloudflare as recommended, record bundled transport provenance, and keep `mcp-auth-server` an external network dependency rather than a bundled runtime;
+- added five persistent packaging-contract tests in `bridge/tests/test_phase55_windows_installer.py`.
+
+Validation on 2026-08-25:
+
+- full registered regression before native installer acceptance: `201 passed, 4 skipped, 4 failed`; all five new Phase 5.5.5 packaging-contract tests passed and the same four inherited Windows/symlink/Maven/CRLF failures remained;
+- native acceptance reached and passed the scoped Ruff gate, all 11 Phase 3 lifecycle tests, PyInstaller onedir build, frozen version/check smoke, and frozen worker mutation smoke;
+- the generated frozen executable reported SHA-256 `f4d035c3945f3395d4a293192cc288eeb05b170db96368edec04d4176aab50fd` in that acceptance attempt;
+- installer compilation did not run because this Windows build host has no Inno Setup 7 `ISCC.exe`; therefore install/upgrade/uninstall, final installer SHA-256, and runtime-data-preservation smoke are still unproven;
+- no system package was installed automatically to bypass that build-host prerequisite.
+
+**STOP GATE:** Phase 5.5.5 is not COMPLETE until Inno Setup 7 is available and the native installer acceptance passes. Phase 5.5.6 must not start.
 
 Then STOP.
 
