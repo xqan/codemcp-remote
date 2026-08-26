@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 RFC 9728 repository fix is READY; installed live binary is STALE; ChatGPT proof remains pending**
+Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 RFC 9728 repository fix is PASS and new installer candidate is READY; live reinstall and ChatGPT proof remain pending**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side integration through `codemcp-remote` Phase 5.5.6 is complete. Phase 5.5.7 found a live RFC 9728 metadata/challenge blocker on 2026-08-26; the repository fix is ready, but the accepted installed binary predates it and is stale. The live staging issuer is `https://auth-staging.quickclip.cc`; the Cloudflare-published MCP resource is `https://codemcp.quickclip.cc/mcp`; the current clean `mcp-auth-server` repository HEAD observed for this gate is `b2372b61cf702874c6cae438ba504efe8bc0b4e6`. Final PASS still requires rebuilding and reinstalling `codemcp-remote`, repeating public metadata/challenge curl checks, capturing the deployed Worker version, then completing the ChatGPT OAuth/mutation/replay/restore/cleanup matrix.
+Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side integration through `codemcp-remote` Phase 5.5.6 is complete. Phase 5.5.7 found a live RFC 9728 metadata/challenge blocker on 2026-08-26; repository fix commit `91017a0402656a773737209321bd66634828f295` is included in new installer candidate SHA-256 `ead65eceea08b97f13c46710b7301b086217712da896e3f71951356f1d9809ed`. The currently installed binary still predates the fix. The live staging issuer is `https://auth-staging.quickclip.cc`; the Cloudflare-published MCP resource is `https://codemcp.quickclip.cc/mcp`; the current clean `mcp-auth-server` repository HEAD observed for this gate is `b2372b61cf702874c6cae438ba504efe8bc0b4e6`. Final PASS still requires reinstalling the new candidate, repeating public metadata/challenge curl checks, capturing the deployed Worker version, then completing the ChatGPT OAuth/mutation/replay/restore/cleanup matrix.
 
 ## 1. Context
 
@@ -847,7 +847,7 @@ Then STOP.
 
 ## Phase 5.5.7 — Final ChatGPT + external OAuth + clean Windows acceptance
 
-**Status: IN PROGRESS — RFC 9728 repository fix is READY with `219 passed / 6 skipped / 0 failed`; accepted installed binary is STALE; LIVE external deployment/ChatGPT acceptance remains BLOCKED/PENDING.**
+**Status: IN PROGRESS — RFC 9728 repository fix is PASS and new installer candidate is READY; live installed binary requires reinstall; LIVE external deployment/ChatGPT acceptance remains BLOCKED/PENDING.**
 
 ### 2026-08-26 RFC 9728 live blocker
 
@@ -857,10 +857,12 @@ The live installed binary returned `404` for
 Metadata from the configured canonical resource and includes the same metadata URL in Bearer
 challenges without changing `mcp-rs-verification-v1` validation or fail-closed semantics.
 
-Repository fix status is **READY**. The accepted installer SHA-256
-`7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93` does not contain the fix and
-is **STALE / needs rebuild**. Do not mark the live discovery item PASS until a new installer completes
-clean `Prepare`/`Start` and both public curl checks return the expected metadata and challenge.
+Repository fix status is **PASS**. New installer candidate SHA-256
+`ead65eceea08b97f13c46710b7301b086217712da896e3f71951356f1d9809ed` contains the fix and passed
+packaged-runtime RFC 9728 smoke plus the 41-test post-build regression. The installed old SHA-256
+`7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93` remains **STALE**. Do not mark
+the live discovery item PASS until the new candidate completes clean `Prepare`/`Start` and both public
+curl checks return the expected metadata and challenge.
 
 ### Objective
 

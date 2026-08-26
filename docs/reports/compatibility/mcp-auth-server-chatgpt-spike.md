@@ -1,6 +1,6 @@
 # Phase 5.5.7 — mcp-auth-server + ChatGPT Live Interoperability Acceptance
 
-Status: **IN PROGRESS — RFC 9728 repository fix READY; installed live binary STALE and ChatGPT proof pending**
+Status: **IN PROGRESS — RFC 9728 repository fix PASS; new installer candidate READY; live reinstall and ChatGPT proof pending**
 
 Date: 2026-08-26
 
@@ -121,9 +121,69 @@ The repository fix is now **READY**:
 
 Repository validation is `219 passed / 6 skipped / 0 failed`. This is not LIVE proof. Installer
 SHA-256 `7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93` predates the fix and is
-**STALE / needs rebuild** for this acceptance. ChatGPT OAuth discovery remains blocked until a new
-installer is built, hashed, installed through clean `Prepare`/`Start`, and both public curl checks are
-repeated successfully.
+**STALE** for this acceptance. ChatGPT OAuth discovery remains blocked until the replacement
+candidate below is installed through clean `Prepare`/`Start` and both public curl checks are repeated
+successfully.
+
+## 2026-08-26 Windows installer candidate refresh
+
+Build baseline:
+
+```text
+branch: codex/20260824
+repository fix commit: 91017a0402656a773737209321bd66634828f295
+working tree before build: clean
+```
+
+The frozen Windows packaging workflow removed the previous installer work directory, ran PyInstaller
+with `--clean`, rebuilt the onedir runtime from the baseline above, restaged both frozen transport
+clients, and recompiled the Inno Setup installer. The existing installed copy at
+`%LOCALAPPDATA%\Programs\codemcp-remote` was deliberately not upgraded or removed: the installer
+workflow rejected its isolated install/upgrade/uninstall smoke because that copy is outside the
+workflow-owned `.local\installer-smoke` directory. The candidate was therefore compiled with the
+workflow's supported `-SkipSmoke` option after the clean-built payload was complete.
+
+New candidate:
+
+```text
+installer:
+.local\installer-dist\codemcp-remote-setup.exe
+
+NEW CANDIDATE SHA-256:
+ead65eceea08b97f13c46710b7301b086217712da896e3f71951356f1d9809ed
+
+OLD STALE SHA-256:
+7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93
+
+release-candidate ZIP SHA-256:
+0c31e53df630f4dd1ea588377e4030791fbbd3c29994f9e99fccb66e58379fbe
+```
+
+The packaged executable in the exact Inno Setup source payload returned `200 application/json` for
+`GET /.well-known/oauth-protected-resource/mcp` with resource
+`https://resource.example.com/mcp`, Authorization Server `https://auth.example.com`, and bearer method
+`header`. A missing-bearer `GET /mcp` returned `401`, `Cache-Control: no-store`, and:
+
+```text
+WWW-Authenticate: Bearer resource_metadata="https://resource.example.com/.well-known/oauth-protected-resource/mcp"
+```
+
+Post-build regression is `41 passed`: 5 Windows installer tests, 6 Phase 5.5.7 clean Windows harness
+tests, and 30 OAuth Resource Server tests. Payload checks reconfirmed pinned cloudflared `2026.7.3`,
+the optional tunnel-client `0.0.12` compatibility payload, matching installer/checksum/release
+manifests, and no bundled runtime state, DPAPI files, external auth-server state, or verification
+secret.
+
+| Phase 5.5.7 state | Result |
+|---|---|
+| Repository fix | PASS |
+| New installer candidate | READY |
+| Live installed binary | PENDING REINSTALL |
+| Live RFC 9728 verification | PENDING |
+| ChatGPT OAuth | PENDING |
+
+This candidate has not completed user clean Windows `Prepare`/`Start`, public curl verification, or
+ChatGPT OAuth E2E. The LIVE blocker is not PASS.
 
 ## Client-policy correction from the historical spike
 
@@ -151,7 +211,7 @@ Meaningful custom OAuth scope-to-tool enforcement remains **NOT PROVEN** and is 
 
 | Requirement | Result | Evidence / remaining work |
 |---|---|---|
-| Installer hash / packaging | PASS | Accepted SHA-256 recorded |
+| Installer hash / packaging | NEW CANDIDATE READY | SHA-256 `ead65eceea08b97f13c46710b7301b086217712da896e3f71951356f1d9809ed`; reinstall pending |
 | Native local worker / isolated PATH | PASS | Clean harness + prior native packaging acceptance |
 | Cloudflared bundled / fixed transport | PASS | Packaging and regression gates |
 | Loopback-only Bridge origin | PASS | Provider + harness contract |
@@ -166,7 +226,7 @@ Meaningful custom OAuth scope-to-tool enforcement remains **NOT PROVEN** and is 
 | codemcp Resource Registry entry | PASS | resource_id `0a8721b3-8944-47a5-b1ce-7351963fcb71`; resource `https://codemcp.quickclip.cc/mcp` |
 | Clean Windows Prepare | LIVE PASS | installer SHA `7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93`; project `phase5-clean`; baseline `87fca7ed129cd2493e6b872331873a4664077128`; worker `local`; tunnel/auth secrets recovered from `windows-dpapi`; isolated PATH excludes Python/uv/pwsh |
 | Exact deployed auth-server commit/build | PARTIAL | Clean repo HEAD `b2372b61cf702874c6cae438ba504efe8bc0b4e6`; deployed Worker version still must be captured |
-| ChatGPT OAuth discovery | BLOCKED — REPOSITORY FIX READY / LIVE BINARY STALE | RFC 9728 metadata/challenge fix requires a new installer and repeated public curl proof |
+| ChatGPT OAuth discovery | BLOCKED — CANDIDATE READY / LIVE REINSTALL PENDING | Install the new candidate and repeat public RFC 9728 curl proof before OAuth E2E |
 | CIMD/static-client interoperability | PENDING LIVE | Use current ChatGPT UI values |
 | Authorization Code + PKCE | PENDING LIVE | Requires real identity/session |
 | Refresh/session renewal | PENDING LIVE | Must preserve exact resource binding |
