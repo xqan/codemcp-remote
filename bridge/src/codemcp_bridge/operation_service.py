@@ -10,7 +10,14 @@ from typing import Any
 
 from .db import ActiveOperationConflict, Database, OperationRecord
 from .errors import BridgeError, error_payload
-from .resource_auth import auth_audit_details, current_auth_context
+from .resource_auth import (
+    AuthenticatedPrincipal,
+    auth_audit_details,
+    auth_context_identity,
+    auth_replay_namespace,
+    current_auth_context,
+    encode_replay_key,
+)
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 REQUEST_HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -39,13 +46,7 @@ def _persistable_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _auth_identity(details: dict[str, Any] | None) -> tuple[str, ...] | None:
-    if details is None:
-        return None
-    keys = ("contract_version", "issuer", "resource", "subject", "client_id")
-    values = tuple(details.get(key) for key in keys)
-    if not all(isinstance(value, str) and value for value in values):
-        return None
-    return values
+    return auth_context_identity(details)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,18 +90,55 @@ class OperationService:
                 "request_hash does not match the canonical operation input",
                 {"field": "request_hash"},
             )
-        try:
-            record, existing = self._database.create_operation(
-                operation_id=operation_id,
+
+        principal = current_auth_context()
+        current_auth = auth_audit_details(principal) if principal is not None else None
+        replay_namespace = auth_replay_namespace(principal) if principal is not None else None
+        storage_client_request_id = encode_replay_key(replay_namespace, client_request_id)
+        scoped_record = self._database.get_operation_by_client_request_id(
+            project_id=project_id,
+            session_id=session_id,
+            client_request_id=storage_client_request_id,
+        )
+
+        # Operations created before the namespace was introduced used the raw
+        # client request ID.  Preserve their OAuth replay behavior, while
+        # never applying this compatibility lookup to the network-trusted
+        # namespace.
+        legacy_record = None
+        if scoped_record is None and isinstance(principal, AuthenticatedPrincipal):
+            candidates = self._database.get_operations_by_client_request_id(
                 project_id=project_id,
                 session_id=session_id,
-                owner_id="local-policy",
                 client_request_id=client_request_id,
-                request_hash=canonical_request_hash,
-                kind=kind,
-                mutation=mutation,
-                input_data=input_data,
             )
+            for candidate in candidates:
+                stored_identity = _auth_identity(
+                    self._database.get_operation_auth_context(candidate.operation_id)
+                )
+                # Preserve the original OAuth binding behavior across the
+                # namespace rollout, but keep network-trusted operations
+                # isolated from OAuth replay lookup.
+                if stored_identity is None or stored_identity[0] == "oauth-resource-server":
+                    legacy_record = candidate
+                    break
+        try:
+            if scoped_record is not None:
+                record, existing = scoped_record, True
+            elif legacy_record is not None:
+                record, existing = legacy_record, True
+            else:
+                record, existing = self._database.create_operation(
+                    operation_id=operation_id,
+                    project_id=project_id,
+                    session_id=session_id,
+                    owner_id="local-policy",
+                    client_request_id=storage_client_request_id,
+                    request_hash=canonical_request_hash,
+                    kind=kind,
+                    mutation=mutation,
+                    input_data=input_data,
+                )
         except ActiveOperationConflict as exc:
             raise BridgeError(
                 "OPERATION_BLOCKED",
@@ -111,8 +149,6 @@ class OperationService:
                 },
             ) from exc
 
-        principal = current_auth_context()
-        current_auth = auth_audit_details(principal) if principal is not None else None
         stored_auth = self._database.get_operation_auth_context(record.operation_id)
         if existing:
             if _auth_identity(stored_auth) != _auth_identity(current_auth):

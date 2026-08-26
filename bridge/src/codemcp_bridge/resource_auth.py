@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextvars
+import hashlib
 import json
 import time
 import urllib.error
@@ -21,6 +22,14 @@ VALIDATION_PATH = "/mcp/resource-server/validate"
 AUTH_SCOPE_KEY = "codemcp.auth.principal"
 MAX_VALIDATION_RESPONSE_BYTES = 64 * 1024
 PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
+
+NETWORK_TRUST_AUTH_KIND = "network-trusted"
+NETWORK_TRUST_AUTH_TYPE = "network-trusted"
+NETWORK_TRUST_PROFILE = "cloudflare-chatgpt"
+NETWORK_TRUST_ISSUER = "network-trust://cloudflare-chatgpt"
+NETWORK_TRUST_PRINCIPAL = "network-chatgpt-v1"
+NETWORK_TRUST_REPLAY_NAMESPACE = "network-chatgpt-v1"
+REPLAY_KEY_SEPARATOR = "\x1f"
 
 
 class ResourceAuthError(RuntimeError):
@@ -54,11 +63,15 @@ class ResourceServerValidationConfig:
             or ":" in self.validation_resource_id
             or any(ord(character) < 0x20 for character in self.validation_resource_id)
         ):
-            raise ValueError("validation_resource_id must be a non-empty Basic-auth username without ':'")
+            raise ValueError(
+                "validation_resource_id must be a non-empty Basic-auth username without ':'"
+            )
         if not self.validation_secret or any(
             ord(character) < 0x20 for character in self.validation_secret
         ):
-            raise ValueError("validation_secret must be a non-empty value without control characters")
+            raise ValueError(
+                "validation_secret must be a non-empty value without control characters"
+            )
         if self.timeout_seconds != 2.0:
             raise ValueError("Resource Server Verification Contract v1 requires a 2 second timeout")
         if self.contract_version != CONTRACT_VERSION:
@@ -96,6 +109,59 @@ class AuthenticatedPrincipal:
     scopes: tuple[str, ...]
     issued_at: int
     expires_at: int
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkTrustedPrincipal:
+    """Synthetic deployment identity for an explicitly trusted network path.
+
+    This principal represents the configured network-trust profile only.  It
+    does not identify a ChatGPT user, workspace, account, or conversation, and
+    it is never produced from a request header.
+    """
+
+    resource: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.resource is not None:
+            if not isinstance(self.resource, str):
+                raise ValueError("resource must be a canonical HTTPS URI")
+            _validate_resource(self.resource)
+
+    @property
+    def auth_kind(self) -> str:
+        return NETWORK_TRUST_AUTH_KIND
+
+    @property
+    def auth_type(self) -> str:
+        return NETWORK_TRUST_AUTH_TYPE
+
+    @property
+    def trust_profile(self) -> str:
+        return NETWORK_TRUST_PROFILE
+
+    @property
+    def identity_level(self) -> str:
+        return "network-only"
+
+    @property
+    def principal(self) -> str:
+        return NETWORK_TRUST_PRINCIPAL
+
+    @property
+    def issuer(self) -> str:
+        return NETWORK_TRUST_ISSUER
+
+    @property
+    def subject(self) -> str:
+        return NETWORK_TRUST_PRINCIPAL
+
+    @property
+    def replay_namespace(self) -> str:
+        return NETWORK_TRUST_REPLAY_NAMESPACE
+
+
+AuthContext = AuthenticatedPrincipal | NetworkTrustedPrincipal
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +210,9 @@ def _validate_issuer(value: str) -> None:
         or parsed.fragment
         or value.endswith("/")
     ):
-        raise ValueError("authorization_server_issuer must be a canonical HTTPS origin without a trailing slash")
+        raise ValueError(
+            "authorization_server_issuer must be a canonical HTTPS origin without a trailing slash"
+        )
 
 
 def _validate_resource(value: str) -> None:
@@ -186,9 +254,7 @@ def _default_requester(
     resource: str,
     timeout_seconds: float,
 ) -> ValidationHTTPResponse:
-    credentials = base64.b64encode(
-        f"{resource_id}:{verification_secret}".encode("utf-8")
-    ).decode("ascii")
+    credentials = base64.b64encode(f"{resource_id}:{verification_secret}".encode()).decode("ascii")
     body = json.dumps(
         {"token": token, "resource": resource},
         ensure_ascii=False,
@@ -219,7 +285,9 @@ def _default_requester(
         raise
     except urllib.error.HTTPError as exc:
         # HTTP failures are infrastructure/protocol failures, not bearer verdicts.
-        raise VerificationServiceUnavailable("validation service returned a non-200 response") from exc
+        raise VerificationServiceUnavailable(
+            "validation service returned a non-200 response"
+        ) from exc
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         raise VerificationServiceUnavailable("validation service is unavailable") from exc
 
@@ -266,19 +334,27 @@ class OnlineResourceServerValidator:
             raise VerificationServiceUnavailable("validation service returned a non-200 response")
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if content_type != "application/json":
-            raise VerificationServiceUnavailable("validation service returned an unexpected content type")
+            raise VerificationServiceUnavailable(
+                "validation service returned an unexpected content type"
+            )
         cache_control = response.headers.get("cache-control", "")
         directives = {item.strip().lower() for item in cache_control.split(",") if item.strip()}
         if "no-store" not in directives:
-            raise VerificationServiceUnavailable("validation response is missing Cache-Control: no-store")
+            raise VerificationServiceUnavailable(
+                "validation response is missing Cache-Control: no-store"
+            )
         try:
             payload = json.loads(response.body)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise VerificationServiceUnavailable("validation service returned malformed JSON") from exc
+            raise VerificationServiceUnavailable(
+                "validation service returned malformed JSON"
+            ) from exc
         if not isinstance(payload, dict):
             raise VerificationServiceUnavailable("validation response must be a JSON object")
         if payload.get("contract_version") != CONTRACT_VERSION:
-            raise VerificationServiceUnavailable("validation response contract version is unsupported")
+            raise VerificationServiceUnavailable(
+                "validation response contract version is unsupported"
+            )
         active = payload.get("active")
         if not isinstance(active, bool):
             raise VerificationServiceUnavailable("validation response active field is invalid")
@@ -293,7 +369,9 @@ class OnlineResourceServerValidator:
         issued_at = payload.get("issued_at")
         expires_at = payload.get("expires_at")
         if issuer != self.config.issuer or resource != self.config.resource:
-            raise VerificationServiceUnavailable("validation response identity does not match local configuration")
+            raise VerificationServiceUnavailable(
+                "validation response identity does not match local configuration"
+            )
         if not isinstance(subject, str) or not subject:
             raise VerificationServiceUnavailable("validation response subject is invalid")
         if not isinstance(client_id, str) or not client_id:
@@ -325,29 +403,140 @@ class OnlineResourceServerValidator:
         )
 
 
-_current_principal: contextvars.ContextVar[AuthenticatedPrincipal | None] = contextvars.ContextVar(
+_current_principal: contextvars.ContextVar[AuthContext | None] = contextvars.ContextVar(
     "codemcp_authenticated_principal",
     default=None,
 )
 
 
 def bind_auth_context(
-    principal: AuthenticatedPrincipal,
-) -> contextvars.Token[AuthenticatedPrincipal | None]:
+    principal: AuthContext,
+) -> contextvars.Token[AuthContext | None]:
     return _current_principal.set(principal)
 
 
-def reset_auth_context(token: contextvars.Token[AuthenticatedPrincipal | None]) -> None:
+def reset_auth_context(token: contextvars.Token[AuthContext | None]) -> None:
     _current_principal.reset(token)
 
 
-def current_auth_context() -> AuthenticatedPrincipal | None:
+def current_auth_context() -> AuthContext | None:
     return _current_principal.get()
 
 
-def auth_audit_details(principal: AuthenticatedPrincipal) -> dict[str, Any]:
+def _oauth_identity_values(principal: AuthenticatedPrincipal) -> tuple[str, ...]:
+    return (
+        principal.contract_version,
+        principal.issuer,
+        principal.resource,
+        principal.subject,
+        principal.client_id,
+    )
+
+
+def _oauth_replay_namespace(values: tuple[str, ...]) -> str:
+    digest = hashlib.sha256(
+        json.dumps(values, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"oauth-{digest}"
+
+
+def auth_replay_namespace(principal: AuthContext) -> str:
+    """Return the stable, non-user-visible replay namespace for one context."""
+
+    if isinstance(principal, NetworkTrustedPrincipal):
+        return principal.replay_namespace
+    if isinstance(principal, AuthenticatedPrincipal):
+        return _oauth_replay_namespace(_oauth_identity_values(principal))
+    raise TypeError("unsupported authentication context")
+
+
+def auth_context_identity(details: dict[str, Any] | None) -> tuple[str, ...] | None:
+    """Project persisted auth details into a collision-resistant identity tuple."""
+
+    if not isinstance(details, dict):
+        return None
+
+    auth_kind = details.get("auth_kind")
+    if auth_kind == NETWORK_TRUST_AUTH_KIND:
+        if (
+            details.get("auth_type") != NETWORK_TRUST_AUTH_TYPE
+            or details.get("trust_profile") != NETWORK_TRUST_PROFILE
+            or details.get("principal") != NETWORK_TRUST_PRINCIPAL
+            or details.get("issuer") != NETWORK_TRUST_ISSUER
+            or details.get("subject") != NETWORK_TRUST_PRINCIPAL
+            or details.get("replay_namespace") != NETWORK_TRUST_REPLAY_NAMESPACE
+            or details.get("identity_level") != "network-only"
+        ):
+            return None
+        return (NETWORK_TRUST_AUTH_KIND, NETWORK_TRUST_REPLAY_NAMESPACE)
+
+    # ``auth_kind`` was added after the original OAuth audit projection.  The
+    # legacy shape is therefore accepted as OAuth, but its namespace is always
+    # recomputed from the frozen principal fields instead of trusting storage.
+    if auth_kind not in {None, "oauth-resource-server"}:
+        return None
+    values = tuple(
+        details.get(key)
+        for key in ("contract_version", "issuer", "resource", "subject", "client_id")
+    )
+    if not all(isinstance(value, str) and value for value in values):
+        return None
+    namespace = _oauth_replay_namespace(values)
+    persisted_namespace = details.get("replay_namespace")
+    if persisted_namespace is not None and persisted_namespace != namespace:
+        return None
+    return ("oauth-resource-server", namespace)
+
+
+def auth_identity(principal: AuthContext | None) -> tuple[str, ...] | None:
+    if principal is None:
+        return None
+    return auth_context_identity(auth_audit_details(principal))
+
+
+def encode_replay_key(namespace: str | None, client_request_id: str) -> str:
+    """Add a security namespace without changing the external request ID."""
+
+    if namespace is None:
+        return client_request_id
+    if (
+        not namespace
+        or REPLAY_KEY_SEPARATOR in namespace
+        or REPLAY_KEY_SEPARATOR in client_request_id
+    ):
+        raise ValueError("replay namespace and client request ID must not contain the separator")
+    return f"{namespace}{REPLAY_KEY_SEPARATOR}{client_request_id}"
+
+
+def decode_replay_key(value: str) -> str:
+    """Restore the caller-visible request ID from the persisted composite key."""
+
+    _, separator, client_request_id = value.partition(REPLAY_KEY_SEPARATOR)
+    return client_request_id if separator else value
+
+
+def auth_audit_details(principal: AuthContext) -> dict[str, Any]:
+    if isinstance(principal, NetworkTrustedPrincipal):
+        details: dict[str, Any] = {
+            "auth_kind": principal.auth_kind,
+            "auth_type": principal.auth_type,
+            "trust_profile": principal.trust_profile,
+            "identity_level": principal.identity_level,
+            "principal": principal.principal,
+            "issuer": principal.issuer,
+            "subject": principal.subject,
+            "replay_namespace": principal.replay_namespace,
+        }
+        if principal.resource is not None:
+            details["resource"] = principal.resource
+        return details
+
+    replay_namespace = auth_replay_namespace(principal)
     return {
         "contract_version": principal.contract_version,
+        "auth_kind": "oauth-resource-server",
+        "auth_type": "oauth",
+        "replay_namespace": replay_namespace,
         "issuer": principal.issuer,
         "resource": principal.resource,
         "subject": principal.subject,

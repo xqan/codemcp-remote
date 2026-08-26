@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + Network Trust + Optional OAuth
 
-Status: **PHASE B COMPLETE — auth none + Cloudflare network-trust configuration/model/validation implemented; phases C-H are NOT STARTED; existing OAuth evidence and 5.5.7B work remain preserved**
+Status: **PHASE C COMPLETE — auth none + Cloudflare network-trust configuration, exact Host/Origin enforcement, synthetic network principal, and OAuth/network replay-session isolation implemented; phases D-H are NOT STARTED; existing OAuth evidence and 5.5.7B work remain preserved**
 
 Target release: `v0.1.0`
 
@@ -18,7 +18,7 @@ The sections below retain historical Phase 5.5 implementation evidence. The Phas
 **Review branch:** `codex/phase-a-network-trust-review`
 **Review baseline:** repository HEAD `65853c0` before the review-record commit
 **Scope:** read-only inspection of repository rules, runtime configuration, authentication, transport, lifecycle, replay/session ownership, tests, Windows acceptance harness, and current documentation.
-**Implementation status:** no runtime source, test, deployment configuration, secret, Cloudflare account state, or live endpoint was changed. Phase B has not started.
+**Implementation status:** no runtime source, test, deployment configuration, secret, Cloudflare account state, or live endpoint was changed during this review. At review time, Phase B had not started; subsequent phase results are recorded below.
 
 ### A.1 Executive conclusion
 
@@ -188,7 +188,7 @@ Each item is a separate stop-gated phase. No later phase starts automatically:
 
 ### B.1 Scope
 
-This phase implements only the configuration/model/schema/validation foundation for the two security profiles. The lifecycle start gate, doctor output, CLI flags, HTTP middleware, synthetic principal, replay/session identity, Windows harness, WAF, IP manifest, and live endpoint work remain deferred to later phases.
+This phase implemented only the configuration/model/schema/validation foundation for the two security profiles. At B completion, the lifecycle start gate, doctor output, CLI flags, HTTP middleware, synthetic principal, replay/session identity, Windows harness, WAF, IP manifest, and live endpoint work remained deferred; Phase C implementation is recorded below.
 
 The lifecycle-owned, versioned `config/remote.toml` remains the canonical persisted runtime configuration. Authentication and network trust are separate tables and separate models:
 
@@ -227,7 +227,7 @@ validation_timeout_ms = 2000
 - Explicit `auth.mode = "none"` requires a valid `network_trust` table with `mode = "cloudflare-chatgpt"` and non-empty `allowed_hosts`. Missing or invalid trust policy fails closed during combined configuration loading.
 - `auth.mode = "oauth-resource-server"` continues to validate the existing issuer/resource/contract fields and does not require `network_trust`.
 - `configure_network_trust()` persists canonical values while preserving an existing OAuth configuration. `configure_resource_auth(mode="none")` persists an explicit No-Auth mode only when a valid network-trust policy already exists.
-- No `anonymous` principal, OAuth principal change, replay namespace change, session owner change, audit principal change, HTTP middleware, or public-start enforcement was added.
+- No `anonymous` principal, OAuth principal change, replay namespace change, session owner change, audit principal change, HTTP middleware, or public-start enforcement was added in Phase B.
 
 ### B.3 Backward compatibility
 
@@ -256,7 +256,56 @@ Validation on 2026-08-26:
 - Python `compileall`: PASS;
 - `git diff --check`: PASS.
 
-**STOP GATE:** Phase B is COMPLETE. Phase C (Host/Origin HTTP middleware and synthetic principal/replay design) has not started and requires a new explicit `继续` instruction.
+**STOP GATE:** Phase B is COMPLETE. Phase C is recorded below; Phase D still requires a new explicit `继续` instruction.
+
+## Phase C — Host/Origin enforcement, network principal, and replay/session isolation
+
+**Status:** **COMPLETE — 2026-08-26.**
+
+### C.1 Scope
+
+Phase C adds the request-time boundaries and common security context required by the explicit `network-trusted` profile. It does not add CLI/init flags, doctor output, public-start lifecycle enforcement, Windows acceptance, Cloudflare WAF/API integration, IP-manifest synchronization, or live endpoint behavior.
+
+The network-trust middleware is an outer ASGI boundary on the Bridge application. It therefore protects `/mcp`, `/healthz`, metadata, and future HTTP routes before route dispatch. It uses the actual request `Host` or protocol authority, with exact case-insensitive hostname matching against the validated `allowed_hosts` configuration. An absent port and literal `:443` canonicalize to the same hostname; other ports, malformed authorities, duplicate/conflicting Host or authority values, subdomains, suffix attacks, and forwarded-host overrides are rejected. `X-Forwarded-Host`, `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, and `Cf-Access-*` are not authorization inputs.
+
+Origin is an auxiliary if-present check. A missing Origin is accepted; a present value must exactly match the canonical `allowed_origins` HTTPS list. Default `:443` is canonicalized, while HTTP, subdomain, suffix-attack, path/query/credential, `null`, malformed, or duplicate values are rejected. Origin is not an authentication boundary and does not identify a caller.
+
+Rejected requests receive a fixed JSON `403` response with `Cache-Control: no-store`; raw Host/Origin values are not reflected in the response or denial log. A valid request receives a deterministic `NetworkTrustedPrincipal` through the existing auth-context scope. Its audit projection is explicitly network-only:
+
+```text
+auth_kind = network-trusted
+auth_type = network-trusted
+trust_profile = cloudflare-chatgpt
+principal = network-chatgpt-v1
+issuer = network-trust://cloudflare-chatgpt
+subject = network-chatgpt-v1
+identity_level = network-only
+replay_namespace = network-chatgpt-v1
+```
+
+This synthetic principal is only an internal deployment/network identity for audit, operation ownership, session binding, and replay partitioning. It is not a ChatGPT user, Workspace, account, conversation, or WAF attestation. The OpenAI/ChatGPT egress IP allowlist remains an external Cloudflare Edge/WAF network trust boundary; no client IP is evaluated in Python.
+
+### C.2 OAuth compatibility and isolation
+
+The existing `mcp-rs-verification-v1` OAuth Resource Server path remains unchanged as a separately installable profile. Its `AuthenticatedPrincipal`, Bearer challenge/validation behavior, OAuth subject/client/scope fields, RFC 9728 metadata, and external `mcp-auth-server` boundary remain available. Network trust and OAuth installation are mutually exclusive on one Bridge server, and a network-profile request's `Authorization` header is not routed to an OAuth verifier.
+
+The common auth context accepts either the existing OAuth principal or the new network principal. Network operations use the fixed `network-chatgpt-v1` replay namespace. OAuth operations use `oauth-<stable-digest>` derived from the frozen OAuth identity tuple `(contract_version, issuer, resource, subject, client_id)`. The namespace is stored in the existing text `client_request_id` column with an internal control-character separator, while `OperationRecord.client_request_id` continues to expose the caller's original ID. Thus OAuth and network-trusted calls cannot share a replay namespace or idempotency record. Existing raw OAuth replay keys remain readable through a conservative compatibility lookup; they are never reinterpreted as network-trusted records. No database schema migration is required.
+
+Session auth context is recorded as an `auth.session.context` audit event in the same transaction as session creation. Active-session checks and reconcile successor checks require the current auth context to match the persisted context. The existing `local-policy` owner remains the storage/daemon owner and is not used as caller identity. Malformed persisted auth-context JSON fails closed.
+
+### C.3 Integration surface and validation
+
+The Bridge server factory accepts the optional `network_trust` configuration and canonical resource, and `install_network_trust()` supports installation before ASGI app creation. The default server factory and OAuth installation remain backward compatible. Phase C tests cover the exact Host/authority matrix, forwarded-header rejection, Origin if-present semantics, fixed denial responses, `/healthz` protection, no-Auth MCP access, deterministic principal/audit fields, OAuth/network replay isolation, legacy OAuth replay readability, session isolation, and profile-installation exclusion.
+
+Validation on 2026-08-26:
+
+- Phase C runtime matrix: `45 passed`;
+- existing OAuth Resource Server regression: `30 passed`;
+- Phase B configuration plus OAuth, Cloudflare, security-gate, Phase 3 persistence/lifecycle regression: `150 passed`;
+- related Phase 2 MCP server integration regression: `19 passed`;
+- Python `compileall`, Ruff format check, Ruff check, and `git diff --check`: PASS.
+
+**STOP GATE:** Phase C is COMPLETE. Phase D (CLI/init, doctor, public-start fail-closed enforcement, and health lifecycle routing) has not started and requires a new explicit `继续` instruction.
 
 ## 1. Context
 

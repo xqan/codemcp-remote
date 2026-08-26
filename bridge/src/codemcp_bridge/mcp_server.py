@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from typing import Any, Protocol
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -27,6 +28,7 @@ from .db import CheckpointRecord, Database, OperationRecord, SessionRecord
 from .errors import BridgeError, error_payload, success_payload
 from .git_guard import CommitMode, GitGuard
 from .mcp_transport import BridgeStreamableHTTPSessionManager
+from .network_trust import NetworkTrustConfig, NetworkTrustMiddleware
 from .operation_service import OperationService
 from .operation_service import request_hash as calculate_request_hash
 from .policy_engine import PolicyEngine
@@ -70,6 +72,37 @@ class AdapterLike(Protocol):
 
 
 Operation = Callable[[str], Awaitable[_Outcome]]
+
+
+class BridgeFastMCP(FastMCP):
+    """FastMCP adapter that installs the Bridge-wide network trust boundary."""
+
+    def __init__(
+        self,
+        *args: Any,
+        network_trust: NetworkTrustConfig | None = None,
+        network_resource: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if network_trust is not None and not isinstance(network_trust, NetworkTrustConfig):
+            raise TypeError("network_trust requires NetworkTrustConfig")
+        self._codemcp_network_trust_config = network_trust
+        self._codemcp_network_resource = network_resource
+        if network_trust is not None:
+            kwargs["transport_security"] = TransportSecuritySettings(
+                enable_dns_rebinding_protection=False
+            )
+        super().__init__(*args, **kwargs)
+
+    def streamable_http_app(self) -> Any:
+        app = super().streamable_http_app()
+        if self._codemcp_network_trust_config is not None:
+            app.add_middleware(
+                NetworkTrustMiddleware,
+                config=self._codemcp_network_trust_config,
+                resource=self._codemcp_network_resource,
+            )
+        return app
 
 
 def _is_codemcp_error(result: Any) -> bool:
@@ -421,6 +454,7 @@ class BridgeService:
             or origin.owner_id != successor.owner_id
             or origin.status != "blocked"
             or origin.reason != "bridge_restart"
+            or not self.sessions.auth_contexts_match(origin.session_id, successor.session_id)
         ):
             raise BridgeError(
                 "OPERATION_NOT_FOUND",
@@ -578,7 +612,7 @@ class BridgeService:
                 raise BridgeError("INVALID_REQUEST", "limit must be between 0 and 10000")
             project, target, _ = self.registry.resolve_path(project_id, path)
             self.policy.require_regular_file(target)
-            file_size = self.policy.validate_file_size(target)
+            self.policy.validate_file_size(target)
             self.policy.require_text_file(target)
             try:
                 before_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
@@ -2091,7 +2125,8 @@ class BridgeService:
             if decision not in {"failed", "succeeded"}:
                 raise BridgeError(
                     "RECONCILE_REQUIRED",
-                    "decision must explicitly confirm whether the unknown mutation failed or succeeded",
+                    "decision must explicitly confirm whether the unknown mutation "
+                    "failed or succeeded",
                 )
             if not evidence or len(evidence) > 1000:
                 raise BridgeError("INVALID_REQUEST", "evidence must be 1-1000 characters")
@@ -2201,6 +2236,9 @@ class BridgeService:
 def create_server(
     settings: BridgeSettings,
     adapter: AdapterLike | None = None,
+    *,
+    network_trust: NetworkTrustConfig | None = None,
+    network_resource: str | None = None,
 ) -> tuple[FastMCP, BridgeService]:
     service = BridgeService(settings, adapter)
 
@@ -2208,7 +2246,7 @@ def create_server(
     async def lifespan(_: FastMCP):
         yield
 
-    server = FastMCP(
+    server = BridgeFastMCP(
         "codemcp-remote-bridge",
         instructions="ChatGPT-only local policy bridge; codemcp is an execution backend.",
         host=settings.server.host,
@@ -2217,6 +2255,8 @@ def create_server(
         stateless_http=True,
         json_response=True,
         lifespan=lifespan,
+        network_trust=network_trust,
+        network_resource=network_resource,
     )
     # MCP 1.x closes stateless transports from the HTTP request task. Use the
     # local compatibility manager so responder cancel scopes unwind cleanly.
@@ -2597,7 +2637,13 @@ def install_resource_server_auth(
 ) -> None:
     """Install MCP authentication and its public RFC 9728 metadata route."""
 
+    if getattr(server, "_codemcp_network_trust_config", None) is not None:  # noqa: SLF001
+        raise RuntimeError(
+            "network trust and OAuth resource-server authentication are mutually exclusive"
+        )
+
     server._session_manager.install_request_authenticator(authenticator)  # noqa: SLF001
+    server._codemcp_resource_auth_installed = True  # noqa: SLF001
 
     @server.custom_route(
         authenticator.protected_resource_metadata_path,
@@ -2608,11 +2654,47 @@ def install_resource_server_auth(
         return JSONResponse(authenticator.protected_resource_metadata())
 
 
+def install_network_trust(
+    server: FastMCP,
+    config: NetworkTrustConfig,
+    *,
+    resource: str | None = None,
+) -> None:
+    """Install the explicit network-trust profile on a Bridge server."""
+
+    if not isinstance(config, NetworkTrustConfig):
+        raise TypeError("network trust requires NetworkTrustConfig")
+    if not isinstance(server, BridgeFastMCP):
+        raise TypeError("network trust requires a BridgeFastMCP server")
+    if getattr(server, "_codemcp_resource_auth_installed", False):  # noqa: SLF001
+        raise RuntimeError(
+            "network trust and OAuth resource-server authentication are mutually exclusive"
+        )
+    if server._codemcp_network_trust_config is not None:  # noqa: SLF001
+        raise RuntimeError("network trust is already installed")
+    if getattr(server._session_manager, "_request_authenticator", None) is not None:  # noqa: SLF001
+        raise RuntimeError("network trust cannot replace an installed request authenticator")
+
+    server._codemcp_network_trust_config = config  # noqa: SLF001
+    server._codemcp_network_resource = resource  # noqa: SLF001
+    transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    server.settings.transport_security = transport_security
+    server._session_manager.security_settings = transport_security  # noqa: SLF001
+
+
 def create_app(
     settings: BridgeSettings,
     adapter: AdapterLike | None = None,
+    *,
+    network_trust: NetworkTrustConfig | None = None,
+    network_resource: str | None = None,
 ) -> tuple[Any, BridgeService]:
     """Create the ASGI app and service for local contract tests."""
 
-    server, service = create_server(settings, adapter)
+    server, service = create_server(
+        settings,
+        adapter,
+        network_trust=network_trust,
+        network_resource=network_resource,
+    )
     return server.streamable_http_app(), service

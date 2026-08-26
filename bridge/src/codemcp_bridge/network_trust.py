@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit
+
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from .resource_auth import AUTH_SCOPE_KEY, NetworkTrustedPrincipal
 
 NetworkTrustMode = Literal["cloudflare-chatgpt"]
 NETWORK_TRUST_MODE = "cloudflare-chatgpt"
@@ -18,6 +24,9 @@ _NETWORK_TRUST_FIELDS = frozenset({"mode", "allowed_hosts", "allowed_origins"})
 
 class NetworkTrustConfigError(ValueError):
     """Raised when a network-trust configuration is structurally unsafe."""
+
+
+logger = logging.getLogger(__name__)
 
 
 def _require_text(value: Any, *, field: str) -> str:
@@ -189,3 +198,155 @@ class NetworkTrustConfig:
             "allowed_hosts": list(self.allowed_hosts),
             "allowed_origins": list(self.allowed_origins),
         }
+
+
+def _header_text(value: object) -> str | None:
+    if isinstance(value, bytes):
+        return value.decode("latin-1")
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _header_values(scope: Scope, name: str) -> list[str | None]:
+    values: list[str | None] = []
+    for item in scope.get("headers", []):
+        if not isinstance(item, (tuple, list)) or len(item) != 2:
+            values.append(None)
+            continue
+        raw_name, raw_value = item
+        header_name = _header_text(raw_name)
+        if header_name is not None and header_name.lower() == name:
+            values.append(_header_text(raw_value))
+    return values
+
+
+def _canonicalize_request_host(value: str | None) -> str | None:
+    if value is None or not value or value != value.strip():
+        return None
+
+    colon_count = value.count(":")
+    if colon_count == 0:
+        hostname = value
+    elif colon_count == 1:
+        hostname, port = value.rsplit(":", 1)
+        if port != "443":
+            return None
+    else:
+        # The configured v1 allowlist accepts hostnames only.  Reject IPv6 and
+        # ambiguous authorities rather than attempting to infer an authority.
+        return None
+
+    try:
+        return canonicalize_allowed_host(hostname)
+    except NetworkTrustConfigError:
+        return None
+
+
+def _request_host(scope: Scope) -> str | None:
+    host_values = _header_values(scope, "host")
+    authority_values = _header_values(scope, ":authority")
+    scoped_authority = _header_text(scope.get("authority"))
+    if scoped_authority is not None:
+        authority_values.append(scoped_authority)
+
+    # A protocol may expose authority separately from Host, but repeated
+    # values are ambiguous and must not be selected by first-header behavior.
+    if len(host_values) > 1 or len(authority_values) > 1:
+        return None
+    if not host_values and not authority_values:
+        return None
+
+    host = _canonicalize_request_host(host_values[0]) if host_values else None
+    authority = _canonicalize_request_host(authority_values[0]) if authority_values else None
+    if host_values and host is None:
+        return None
+    if authority_values and authority is None:
+        return None
+    if host is not None and authority is not None and host != authority:
+        return None
+    return host or authority
+
+
+def _request_origin_allowed(scope: Scope, allowed_origins: tuple[str, ...]) -> bool:
+    values = _header_values(scope, "origin")
+    if not values:
+        return True
+    if len(values) != 1 or values[0] is None:
+        return False
+    try:
+        canonical = canonicalize_allowed_origin(values[0])
+    except NetworkTrustConfigError:
+        return False
+    return canonical in allowed_origins
+
+
+async def _send_rejection(
+    scope: Scope,
+    receive: Receive,
+    send: Send,
+    *,
+    error: str,
+) -> None:
+    response = JSONResponse(
+        {"error": error},
+        status_code=403,
+        headers={"Cache-Control": "no-store"},
+    )
+    await response(scope, receive, send)
+
+
+class NetworkTrustMiddleware:
+    """Enforce the configured Host/Origin boundary before any Bridge route."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        config: NetworkTrustConfig,
+        resource: str | None = None,
+    ) -> None:
+        if not isinstance(config, NetworkTrustConfig):
+            raise TypeError("network trust middleware requires NetworkTrustConfig")
+        self.app = app
+        self.config = config
+        self._principal = NetworkTrustedPrincipal(resource=resource)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        normalized_host = _request_host(scope)
+        if normalized_host is None or normalized_host not in self.config.allowed_hosts:
+            logger.warning(
+                "network_trust_denied event=host_not_allowed trust_profile=%s",
+                self.config.mode,
+            )
+            await _send_rejection(
+                scope,
+                receive,
+                send,
+                error="host_not_allowed",
+            )
+            return
+
+        if not _request_origin_allowed(scope, self.config.allowed_origins):
+            logger.warning(
+                "network_trust_denied event=origin_not_allowed trust_profile=%s normalized_host=%s",
+                self.config.mode,
+                normalized_host,
+            )
+            await _send_rejection(
+                scope,
+                receive,
+                send,
+                error="origin_not_allowed",
+            )
+            return
+
+        # This is a deterministic deployment/network identity.  It is not a
+        # user identity and does not attest that the WAF actually admitted the
+        # request; the WAF remains the external IP enforcement boundary.
+        scope[AUTH_SCOPE_KEY] = self._principal
+        await self.app(scope, receive, send)

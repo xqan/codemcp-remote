@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..resource_auth import REPLAY_KEY_SEPARATOR, decode_replay_key
 from .schema import MIGRATIONS, SCHEMA_VERSION
 
 SESSION_STATUSES = {"created", "active", "closing", "closed", "blocked"}
@@ -317,7 +318,7 @@ class Database:
             project_id=row["project_id"],
             session_id=row["session_id"],
             owner_id=row["owner_id"],
-            client_request_id=row["client_request_id"],
+            client_request_id=decode_replay_key(row["client_request_id"]),
             request_hash=row["request_hash"],
             kind=row["kind"],
             state=row["state"],
@@ -353,7 +354,14 @@ class Database:
             updated_at=row["updated_at"],
         )
 
-    def create_session(self, session_id: str, project_id: str, owner_id: str) -> SessionRecord:
+    def create_session(
+        self,
+        session_id: str,
+        project_id: str,
+        owner_id: str,
+        *,
+        auth_details: dict[str, Any] | None = None,
+    ) -> SessionRecord:
         now = utc_now()
         with self._transaction() as connection:
             connection.execute(
@@ -388,6 +396,18 @@ class Database:
                 to_state="active",
                 details={},
             )
+            if auth_details is not None:
+                self._audit(
+                    connection,
+                    operation_id=None,
+                    project_id=project_id,
+                    session_id=session_id,
+                    owner_id=owner_id,
+                    event_type="auth.session.context",
+                    from_state=None,
+                    to_state=None,
+                    details=auth_details,
+                )
             row = connection.execute(
                 "SELECT * FROM sessions WHERE session_id=?", (session_id,)
             ).fetchone()
@@ -402,6 +422,25 @@ class Database:
                 "SELECT * FROM sessions WHERE session_id=?", (session_id,)
             ).fetchone()
         return self._session(row)
+
+    def get_session_auth_context(self, session_id: str) -> dict[str, Any] | None:
+        connection = self._require_connection()
+        with self._lock:
+            row = connection.execute(
+                "SELECT details_json FROM audit_events "
+                "WHERE session_id=? AND event_type='auth.session.context' "
+                "ORDER BY created_at, event_id LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            details = json.loads(row["details_json"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise PersistenceError("session auth context is malformed") from exc
+        if not isinstance(details, dict):
+            raise PersistenceError("session auth context must be a JSON object")
+        return details
 
     def transition_session(
         self, session_id: str, to_state: str, *, reason: str | None = None
@@ -680,6 +719,56 @@ class Database:
                 "SELECT * FROM operations WHERE operation_id=?", (operation_id,)
             ).fetchone()
         return self._operation(row)
+
+    def get_operation_by_client_request_id(
+        self,
+        *,
+        project_id: str,
+        session_id: str | None,
+        client_request_id: str,
+    ) -> OperationRecord | None:
+        """Find one exact persisted replay key, including legacy unscoped keys."""
+
+        connection = self._require_connection()
+        with self._lock:
+            row = connection.execute(
+                "SELECT * FROM operations WHERE project_id=? AND session_id IS ? "
+                "AND client_request_id=?",
+                (project_id, session_id, client_request_id),
+            ).fetchone()
+        return self._operation(row)
+
+    def get_operations_by_client_request_id(
+        self,
+        *,
+        project_id: str,
+        session_id: str | None,
+        client_request_id: str,
+    ) -> list[OperationRecord]:
+        """Find all namespace variants for legacy OAuth identity checks."""
+
+        connection = self._require_connection()
+        escaped_request_id = (
+            client_request_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        with self._lock:
+            rows = connection.execute(
+                "SELECT * FROM operations WHERE project_id=? AND session_id IS ? "
+                "AND (client_request_id=? OR client_request_id LIKE ? ESCAPE '\\') "
+                "ORDER BY created_at, operation_id",
+                (
+                    project_id,
+                    session_id,
+                    client_request_id,
+                    f"%{REPLAY_KEY_SEPARATOR}{escaped_request_id}",
+                ),
+            ).fetchall()
+        records = [self._operation(row) for row in rows]
+        return [
+            record
+            for record in records
+            if record is not None and record.client_request_id == client_request_id
+        ]
 
     def create_checkpoint(
         self,
@@ -1022,7 +1111,15 @@ class Database:
                 "ORDER BY created_at, event_id LIMIT 1",
                 (operation_id,),
             ).fetchone()
-        return json.loads(row["details_json"]) if row is not None else None
+        if row is None:
+            return None
+        try:
+            details = json.loads(row["details_json"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise PersistenceError("operation auth context is malformed") from exc
+        if not isinstance(details, dict):
+            raise PersistenceError("operation auth context must be a JSON object")
+        return details
 
     def create_approval(
         self,

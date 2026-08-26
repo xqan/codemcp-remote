@@ -15,6 +15,7 @@ from starlette.types import Receive, Scope, Send
 from .resource_auth import (
     AUTH_SCOPE_KEY,
     AuthenticatedPrincipal,
+    NetworkTrustedPrincipal,
     bind_auth_context,
     reset_auth_context,
 )
@@ -78,7 +79,7 @@ class BridgeStreamableHTTPSessionManager(StreamableHTTPSessionManager):
             )
             auth_token = (
                 bind_auth_context(principal)
-                if isinstance(principal, AuthenticatedPrincipal)
+                if isinstance(principal, (AuthenticatedPrincipal, NetworkTrustedPrincipal))
                 else None
             )
             try:
