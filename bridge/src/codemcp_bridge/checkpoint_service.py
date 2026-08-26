@@ -99,10 +99,7 @@ class CheckpointService:
         after = await self._git.snapshot(project.root)
         if expected_after_head is not None and (
             after.head.lower() != expected_after_head.lower()
-            or (
-                expected_after_branch is not None
-                and after.branch != expected_after_branch
-            )
+            or (expected_after_branch is not None and after.branch != expected_after_branch)
         ):
             raise BridgeError(
                 "CHECKPOINT_CONFLICT",
@@ -130,12 +127,8 @@ class CheckpointService:
                 head=expected_after_head,
             )
             confirmed = await self._git.snapshot(project.root)
-            if (
-                confirmed.head.lower() != expected_after_head.lower()
-                or (
-                    expected_after_branch is not None
-                    and confirmed.branch != expected_after_branch
-                )
+            if confirmed.head.lower() != expected_after_head.lower() or (
+                expected_after_branch is not None and confirmed.branch != expected_after_branch
             ):
                 raise BridgeError(
                     "CHECKPOINT_CONFLICT",

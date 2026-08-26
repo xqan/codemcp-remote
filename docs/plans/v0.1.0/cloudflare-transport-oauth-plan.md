@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + Network Trust + Optional OAuth
 
-Status: **PHASE C COMPLETE — auth none + Cloudflare network-trust configuration, exact Host/Origin enforcement, synthetic network principal, and OAuth/network replay-session isolation implemented; phases D-H are NOT STARTED; existing OAuth evidence and 5.5.7B work remain preserved**
+Status: **PHASE G COMPLETE — recommended 5.5.7A No-Auth + Cloudflare network-trust path, optional 5.5.7B OAuth path, lifecycle/CLI gates, Windows acceptance profiles, documentation, and local regression gates are complete; Phase H live acceptance is prepared but not executed**
 
 Target release: `v0.1.0`
 
@@ -11,6 +11,78 @@ External dependency: a separately developed, general-purpose `mcp-auth-server` p
 Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side OAuth Resource Server integration through Phase 5.5.6 is complete. That implementation is retained as the optional advanced OAuth profile. The earlier Phase 5.5.7 RFC 9728 metadata/challenge and managed reinstall fixes remain historical acceptance evidence; they are not invalidated by the new personal-deployment profile. The live OAuth staging issuer is `https://auth-staging.quickclip.cc`; the Cloudflare-published MCP resource is `https://codemcp.quickclip.cc/mcp`.
 
 The sections below retain historical Phase 5.5 implementation evidence. The Phase A contract in the next section is authoritative for the remaining work: Cloudflare network trust is the recommended single-user path, while OAuth Resource Server interoperability remains an optional advanced/enterprise path.
+
+## Current accelerated closeout status
+
+This section supersedes earlier “not started” statements retained in the historical sections below.
+
+| Phase | Status | Evidence |
+| --- | --- | --- |
+| A | COMPLETE | Read-only architecture/config/security review; commit `b8c7531` |
+| B | COMPLETE | Independent auth/network-trust models and fail-closed config validation; commit `f2209d3` |
+| C | COMPLETE | Exact Host/Origin boundary, network-trusted principal, and OAuth replay/session isolation; commit `8481995` |
+| D | COMPLETE | `--home`/`CODEMCP_HOME`, profile-aware CLI/doctor/status, Cloudflare public-start gate; commit `4761621` |
+| E | COMPLETE | Clean Windows 5.5.7A/5.5.7B acceptance profiles and DPAPI/home wiring; commit `c74a639` |
+| F | COMPLETE | Cloudflare deployment/WAF boundary is external operator state; this closeout does not call the Cloudflare API, hardcode IP ranges, or duplicate live provisioning |
+| G | COMPLETE | Documentation alignment, installer smoke impact review, full local regression/lint/compile evidence; current closeout commit is recorded with this update |
+| H | READY, NOT RUN | Live stopped/blocked/allowed/connector/security-event acceptance instructions only; no endpoint or account mutation was executed |
+
+### Recommended v0.1.0 personal profile
+
+```text
+ChatGPT Connector (Authentication = No authentication)
+  -> OpenAI/ChatGPT Connector egress network
+  -> Cloudflare Edge/WAF IP List + whole-host block rule
+  -> https://codemcp.quickclip.cc/mcp
+  -> Cloudflare Tunnel
+  -> 127.0.0.1:46200
+  -> codemcp-remote network-trusted Bridge
+  -> project / operation / approval / checkpoint / Git CAS / restore / audit policy
+```
+
+Profile A is configured as:
+
+```toml
+[auth]
+mode = "none"
+
+[network_trust]
+mode = "cloudflare-chatgpt"
+allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_origins = ["https://chatgpt.com"] # optional, if-present validation
+```
+
+Cloudflare’s IP allowlist is a `network trust boundary` / `ChatGPT egress network restriction`, not authentication, user identity, or strong identity. It proves only that the request arrived from a configured OpenAI/ChatGPT Connector egress range; it does not identify a ChatGPT user, Workspace, account, or conversation. The Bridge never authorizes from `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*`.
+
+Profile B remains available for multi-user, enterprise, or subject/scope-aware deployments:
+
+```toml
+[auth]
+mode = "oauth-resource-server"
+issuer = "https://<authorization-server>"
+canonical_resource_uri = "https://<mcp-host>/mcp"
+validation_resource_id = "<resource-id>"
+```
+
+Profile B retains `mcp-rs-verification-v1`, RFC 9728 metadata/challenges, OAuth subject/client/scope semantics, and the independent `mcp-auth-server` boundary. OAuth was moved to an optional advanced profile; it was not abandoned or deleted.
+
+### Current implementation contract
+
+- `auth.mode = "none"` is persisted explicitly and is valid only with `network_trust.mode = "cloudflare-chatgpt"` and non-empty canonical `allowed_hosts`.
+- Missing/invalid trust policy, unknown auth/trust modes, or Cloudflare public No-Auth without trust fails closed with `PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST`.
+- Host policy is exact hostname matching; runtime `:443` canonicalization is implemented in the request boundary. Origin is validated only when present.
+- Profile A does not install an OAuth bearer authenticator and reports `identity_level = network-only`.
+- Profile A uses the deterministic internal principal/replay namespace `network-chatgpt-v1`; OAuth uses a separate `oauth-<digest>` namespace. Neither claims to identify a human user.
+- Bridge and Tunnel remain loopback-bound; Cloudflare ingress must target `127.0.0.1:46200` and `/healthz` must not be exposed as an unintended public endpoint.
+- `--home` takes precedence over `CODEMCP_HOME`; legacy `--app-root` remains supported for existing installations. Runtime data, checkpoints, logs, and secrets are derived from the selected home without destructive migration.
+
+### Local evidence and live boundary
+
+The accelerated closeout validates source-mode behavior, package/harness contracts, PowerShell parsing, installer script impact, full Python regression, full Ruff check/format validation, and `compileall`. On 2026-08-26 the complete local suite reported `312 passed, 6 skipped`; the skipped cases are environment/profile-specific and are recorded in the acceptance plan.
+
+It does not prove that a real Cloudflare WAF rule currently allows ChatGPT Connector traffic, blocks an ordinary public IP, or that a real ChatGPT Connector can complete the remote contract. Those are Phase H live-only checks and must be recorded with non-sensitive evidence before any release freeze.
+
+The deployment runbook is [`docs/guides/cloudflare-tunnel-setup.md`](../../guides/cloudflare-tunnel-setup.md). It covers manual IP List/WAF provisioning, Profile A initialization, negative testing, Profile B, rollback, and the explicit limitation that IP allowlisting does not identify an individual ChatGPT user.
 
 ## Phase A — Architecture/config/security review
 

@@ -208,9 +208,7 @@ def test_protected_resource_metadata_is_derived_from_auth_config() -> None:
     assert config.protected_resource_metadata_url == (
         "https://resource.example.com/.well-known/oauth-protected-resource/mcp"
     )
-    assert config.protected_resource_metadata_path == (
-        "/.well-known/oauth-protected-resource/mcp"
-    )
+    assert config.protected_resource_metadata_path == ("/.well-known/oauth-protected-resource/mcp")
     assert config.protected_resource_metadata() == {
         "resource": "https://resource.example.com/mcp",
         "authorization_servers": ["https://auth.example.com"],
@@ -280,9 +278,7 @@ def test_default_requester_matches_frozen_wire_contract(
         timeout_seconds=2.0,
     )
 
-    expected_basic = base64.b64encode(
-        b"resource-code:verification-secret-value"
-    ).decode("ascii")
+    expected_basic = base64.b64encode(b"resource-code:verification-secret-value").decode("ascii")
     assert captured["url"] == "https://auth.example.com/mcp/resource-server/validate"
     assert captured["method"] == "POST"
     assert captured["timeout"] == 2.0
@@ -460,7 +456,9 @@ async def test_cloudflare_identity_headers_do_not_authenticate_without_bearer() 
         config = _config()
 
         async def validate(self, token: str) -> AuthenticatedPrincipal | None:
-            pytest.fail(f"validator must not receive Cloudflare identity headers as bearer: {token}")
+            pytest.fail(
+                f"validator must not receive Cloudflare identity headers as bearer: {token}"
+            )
 
     authenticator = OAuthResourceServerAuthenticator(RejectingValidator())  # type: ignore[arg-type]
     scope = {
@@ -563,9 +561,7 @@ async def test_mcp_transport_enforces_auth_and_propagates_safe_audit_identity(
         ) as anonymous:
             health = await anonymous.get("/healthz")
             assert health.status_code == 200
-            metadata = await anonymous.get(
-                "/.well-known/oauth-protected-resource/mcp"
-            )
+            metadata = await anonymous.get("/.well-known/oauth-protected-resource/mcp")
             assert metadata.status_code == 200
             assert metadata.headers["content-type"].split(";", 1)[0] == "application/json"
             assert metadata.json() == {

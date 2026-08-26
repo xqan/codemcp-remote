@@ -1,6 +1,8 @@
 # Packaging Phase 5 — Clean Windows Release Validation
 
-Date: 2026-08-25
+Date: 2026-08-26
+
+Status: **LOCAL GATES READY; Phase H live Cloudflare/ChatGPT acceptance has not been executed**
 
 ## Objective
 
@@ -10,16 +12,41 @@ Packaging Phase 5 must prove that the installed product can:
 
 1. install from the Phase 4 installer;
 2. run without Python, `uv`, PowerShell 7, or WSL2 on the product runtime `PATH`;
-3. initialize its own writable runtime/configuration under `%LOCALAPPDATA%\codemcp-remote`;
-4. store `CONTROL_PLANE_API_KEY` with Windows DPAPI and continue after the plaintext process environment value is removed;
-5. use the bundled OpenAI `tunnel-client`;
-6. use the native local codemcp worker;
-7. register and operate on a disposable local Git repository;
-8. start an owned, healthy Bridge and Tunnel;
-9. complete the remote ChatGPT connector contract against that clean-machine repository;
-10. stop and uninstall without deleting preserved runtime/user data.
+3. initialize a selected writable runtime home using `--home` or `CODEMCP_HOME`;
+4. use Profile A (`auth.mode = none` + Cloudflare network trust) without an OAuth verification secret;
+5. store the Cloudflare `TUNNEL_TOKEN` with Windows DPAPI and continue after the plaintext process environment value is removed;
+6. preserve the optional Profile B OAuth Resource Server path and its DPAPI verification secret behavior;
+7. use the native local codemcp worker and bundled transport clients;
+8. register and operate on a disposable local Git repository;
+9. start an owned, healthy Bridge and Tunnel;
+10. complete the remote ChatGPT Connector contract against that clean-machine repository when Phase H is authorized;
+11. stop and uninstall without deleting preserved runtime/user data.
 
-Phase 5 does not change the application architecture or installer payload unless clean-machine validation exposes a release blocker.
+Phase 5 does not change the application architecture or installer payload unless clean-machine validation exposes a release blocker. Cloudflare WAF/IP List state is external deployment state and is not provisioned by the installer.
+
+## Current acceptance profiles
+
+The clean Windows harness supports two explicit Cloudflare profiles:
+
+| Profile | Purpose | Required configuration | Secret requirement |
+| --- | --- | --- | --- |
+| `5.5.7A` | Recommended personal deployment | `auth.mode = "none"`, `network_trust.mode = "cloudflare-chatgpt"`, non-empty exact `allowed_hosts` | `TUNNEL_TOKEN` only; stored with Windows DPAPI |
+| `5.5.7B` | Optional advanced/enterprise interoperability | existing `auth.mode = "oauth-resource-server"`, issuer/resource/validation contract | `TUNNEL_TOKEN` plus `CODEMCP_RS_VERIFICATION_SECRET`, both DPAPI-backed |
+
+Profile A uses ChatGPT Connector `Authentication = No authentication`. The Cloudflare IP List/WAF rule is a network trust boundary, not authentication or user identity; it cannot identify a ChatGPT user, Workspace, account, or conversation. Profile B retains `mcp-rs-verification-v1`, RFC 9728 behavior, and external OAuth subject/client/scope semantics. Existing 5.5.7B evidence is preserved and is not marked failed.
+
+The harness defaults to `5.5.7A`:
+
+```powershell
+pwsh -NoLogo -NoProfile -File .\scripts\validate-clean-windows-release.ps1 `
+  -Action Prepare `
+  -AcceptanceProfile 5.5.7A `
+  -Transport cloudflare `
+  -PublicUrl 'https://codemcp.quickclip.cc/mcp' `
+  -AllowedHost codemcp.quickclip.cc
+```
+
+Use `-AcceptanceProfile 5.5.7B` only when the external OAuth Resource Server evidence is intentionally being repeated. Profile A must not require `CODEMCP_RS_VERIFICATION_SECRET`.
 
 ## Runtime prerequisite boundary
 
@@ -68,26 +95,34 @@ The release-candidate gate also parsed the clean-machine harness with Windows Po
 
 ## Secret handling
 
-Never pass `CONTROL_PLANE_API_KEY` as a script parameter or command-line argument.
+Never pass a runtime secret as a script parameter or command-line argument. The harness accepts secrets only from the current PowerShell process environment and clears them before the final doctor/start proof.
 
-On the clean machine, place it only in the current PowerShell process environment before `Prepare`:
+For the recommended Profile A, provide only the Cloudflare tunnel token:
 
 ```powershell
-$env:CONTROL_PLANE_API_KEY = "<set locally; do not paste into chat>"
+$env:TUNNEL_TOKEN = "<set locally; do not paste into chat>"
 ```
 
-`Prepare` calls:
+`Prepare` initializes the equivalent of:
 
 ```text
-codemcp-remote.exe init --tunnel-id <id> --store-api-key
+codemcp-remote.exe init --home <home> --transport cloudflare --public-url <public-url>/mcp `
+  --auth-mode none --network-trust cloudflare-chatgpt `
+  --allowed-host <exact-host> --store-transport-secret
 ```
 
-The product stores the secret with Windows DPAPI. The harness then removes the plaintext process environment variable and requires `doctor` to report:
+The product stores the tunnel token with Windows DPAPI. Profile A does not require `CODEMCP_RS_VERIFICATION_SECRET`. After the environment value is removed, `doctor` must report:
 
 ```text
-checks.api_key.status = ok
-checks.api_key.source = windows-dpapi
+checks.tunnel_token.status = ok
+checks.tunnel_token.source = windows-dpapi
+checks.auth.mode = none
+checks.auth.oauth_secret_required = false
+checks.network_trust.mode = cloudflare-chatgpt
+checks.identity_level = network-only
 ```
+
+For Profile B only, also provide `CODEMCP_RS_VERIFICATION_SECRET` in the process environment. The harness stores it with DPAPI and requires the existing OAuth Resource Server doctor contract, including `mcp-rs-verification-v1` and `secret_source = windows-dpapi`.
 
 ## Acceptance harness
 
@@ -99,7 +134,7 @@ scripts\validate-clean-windows-release.ps1
 
 It is intentionally Windows PowerShell 5.1-compatible so the clean host does not need PowerShell 7.
 
-The harness has three actions.
+The harness has four actions: `Prepare`, `Start`, `Cleanup`, and `Reset`. `Prepare` and `Start` accept `-AcceptanceProfile 5.5.7A` (default) or `5.5.7B`.
 
 ### 1. Prepare
 
@@ -117,13 +152,14 @@ The harness has three actions.
 - rejects bundled Python/uv/pwsh/WSL executables;
 - isolates the runtime `PATH`;
 - checks `codemcp-remote.exe 0.1.0`;
-- initializes the Tunnel profile;
-- stores the API key with DPAPI;
-- removes the plaintext API key from the process;
-- verifies `doctor`;
+- initializes the selected runtime home with `--home`;
+- for 5.5.7A, initializes Cloudflare + No-Auth + network trust and stores only the tunnel token with DPAPI;
+- for 5.5.7B, initializes the existing Cloudflare OAuth Resource Server profile and stores the tunnel and verification secrets with DPAPI;
+- removes plaintext environment values before the final `doctor` check;
+- verifies profile-aware `doctor` output;
 - creates a disposable Git repository;
 - registers that project;
-- records non-secret Phase 5 state under `%LOCALAPPDATA%\codemcp-remote\phase5-validation.json`;
+- records non-secret Phase 5.5.7 state under `%LOCALAPPDATA%\codemcp-remote\phase5-validation.json`;
 - deliberately leaves Bridge/Tunnel stopped.
 
 Expected terminal state:
@@ -131,10 +167,15 @@ Expected terminal state:
 ```json
 {
   "status": "ready-for-start",
-  "phase": "5",
+  "phase": "5.5.7",
+  "acceptance_profile": "5.5.7A",
   "action": "prepare",
   "worker_mode": "local",
-  "api_key_source": "windows-dpapi"
+  "transport": "cloudflare",
+  "auth_mode": "none",
+  "network_trust_mode": "cloudflare-chatgpt",
+  "identity_level": "network-only",
+  "transport_secret_source": "windows-dpapi"
 }
 ```
 
@@ -147,14 +188,18 @@ Expected terminal state:
 ```json
 {
   "status": "ready-for-remote-verification",
-  "phase": "5",
+  "phase": "5.5.7",
+  "acceptance_profile": "5.5.7A",
   "action": "start",
+  "auth_mode": "none",
+  "network_trust_mode": "cloudflare-chatgpt",
+  "identity_level": "network-only",
   "bridge_health": "ok",
   "tunnel_health": "ok"
 }
 ```
 
-This split is intentional. If the same Tunnel ID is currently used by the development machine, stop the development lifecycle after `Prepare` and before `Start`. Prefer a dedicated Phase 5 Tunnel/connector when available.
+For 5.5.7A, configure ChatGPT Connector with `Authentication = No authentication` and the public `/mcp` URL only after `Start` is healthy. For 5.5.7B, use the existing OAuth Connector contract. This split is intentional. If the same Cloudflare Tunnel is currently used by the development machine, stop the development lifecycle after `Prepare` and before `Start`. Prefer a dedicated acceptance Tunnel/Connector when available.
 
 ### 3. Cleanup
 
@@ -209,11 +254,11 @@ PHASE5_ACCEPTANCE.txt
 
 The baseline commit hash is returned by `Prepare` and persisted in the Phase 5 validation state.
 
-## Remote connector contract
+## Remote Connector contract
 
 Phase 5 is not closed by local installation checks alone.
 
-After `Start`, ChatGPT must connect through the intended Secure MCP Tunnel and perform the following against `phase5-clean`:
+After `Start`, ChatGPT must connect through the intended Cloudflare URL and perform the following against `phase5-clean`:
 
 1. `project_open` succeeds.
 2. `project_status` reports the disposable project and `development_ready=true`.
@@ -224,16 +269,18 @@ After `Start`, ChatGPT must connect through the intended Secure MCP Tunnel and p
 7. Idempotent replay is checked for the same mutation identity.
 8. The repository is restored to its original baseline using the normal approval/checkpoint restore path.
 9. Final `git_status` proves the original baseline HEAD and a clean worktree.
+10. For Profile A, the request succeeds without `Authorization` and the Cloudflare WAF event shows network admission only; no user identity claim is recorded.
+11. For Profile B, the existing OAuth subject/client/scope and RFC 9728 Resource Server checks remain intact.
 
 No real user repository is used for this test.
 
-## Tunnel cutover options
+## Cloudflare cutover options
 
-### Preferred: dedicated acceptance Tunnel
+### Preferred: dedicated acceptance Cloudflare Tunnel
 
-Use a separate OpenAI Tunnel ID and connector for the clean-machine host. This avoids ambiguity and leaves the development connector running.
+Use a separate Cloudflare Tunnel/hostname and Connector for the clean-machine host. This avoids ambiguity and leaves the development Connector running.
 
-### Fallback: reuse the current Tunnel
+### Fallback: reuse the current Cloudflare Tunnel
 
 1. Run `Prepare` on the clean machine.
 2. Stop the current development-machine `codemcp-remote.exe` lifecycle.
@@ -243,9 +290,13 @@ Use a separate OpenAI Tunnel ID and connector for the clean-machine host. This a
 6. Run `Cleanup` on the clean machine.
 7. Restore the development lifecycle if needed.
 
-Do not run two active clients for the same acceptance path when the result would be ambiguous.
+Do not run two active clients for the same acceptance path when the result would be ambiguous. Verify the normal-IP WAF `403` and Cloudflare Security Events `BLOCK`/`ALLOW` evidence separately; they are Phase H live checks.
 
-## Current release candidate
+## Historical OAuth-first release evidence
+
+The following artifact and Prepare record are retained evidence from the pre-5.5.7A OAuth-first harness. They are Profile B/history, not proof of the current Profile A live path.
+
+## Current release candidate reference
 
 The Phase 5.5.7 release-candidate package was regenerated after the clean-machine PATH isolation,
 reset-harness, and project-registration rerun fixes.
@@ -270,9 +321,9 @@ so Prepare can safely rebuild its fixed `phase5-clean` registration on rerun. A 
 removed before a fresh baseline; a different root fails closed. DPAPI transport/auth credentials are
 preserved, and custom project roots are rejected rather than managed automatically.
 
-## Clean-machine Prepare validation
+## Historical clean-machine Prepare validation (Profile B)
 
-The final clean-machine `Prepare` gate passed on Windows 11 with the release candidate above.
+The historical clean-machine `Prepare` gate passed on Windows 11 with the release candidate above. It validated the OAuth-first compatibility profile and remains useful evidence for 5.5.7B; it does not establish the current ChatGPT No-Auth/WAF acceptance.
 
 Recorded result:
 
@@ -317,13 +368,16 @@ Packaging Phase 5 is PASS only when all of the following are recorded:
 - no Python/uv/pwsh dependency is visible on the isolated product runtime `PATH`;
 - worker mode is `local`;
 - Git prerequisite is resolved and reported by `doctor`;
-- DPAPI secret storage works after the plaintext environment value is removed;
-- bundled `tunnel-client` is found;
+- Profile A stores the Cloudflare tunnel token with DPAPI after the plaintext environment value is removed;
+- Profile B, when exercised, retains its OAuth verification-secret DPAPI behavior;
+- bundled `cloudflared` is found (and the optional `tunnel-client` remains packaged);
 - project registration succeeds;
 - Bridge and Tunnel are owned and healthy;
-- remote ChatGPT connector contract succeeds against the disposable project;
+- the Profile A remote ChatGPT Connector contract succeeds against the disposable project, or the Profile B contract is explicitly recorded when that profile is selected;
+- ordinary public traffic is blocked by the Cloudflare WAF before Tunnel/Bridge ingress;
+- Connector traffic is visible as an allowed Cloudflare network event;
 - final Git state returns to the recorded baseline and is clean;
 - cleanup/uninstall succeeds;
-- no Phase 6 work is started automatically.
+- no Phase H live action or `v0.1.0` freeze is implied by local gates.
 
-Until the remote connector contract and cleanup are complete, Phase 5 remains open.
+The local implementation and harness gates are complete. Until Phase H records the stopped-tunnel, ordinary-IP WAF block, ChatGPT Connector No-Auth contract, Security Events, and cleanup evidence, the release remains open.

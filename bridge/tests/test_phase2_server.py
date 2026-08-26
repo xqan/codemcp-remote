@@ -1267,9 +1267,7 @@ async def test_session_wip_merges_all_file_mutations_without_cross_session_amend
         request_hash(_file_delete_input("src/session-a-moved.txt", delete_description)),
     )
     head_5 = await assert_checkpoint(deleted, head_4)
-    assert deleted["data"]["checkpoint"]["after"]["changed_files"] == [
-        "src/session-a-moved.txt"
-    ]
+    assert deleted["data"]["checkpoint"]["after"]["changed_files"] == ["src/session-a-moved.txt"]
 
     directory_description = "session A directory"
     directory = await service.directory_create(
@@ -1738,10 +1736,13 @@ async def test_restart_successor_session_can_reconcile_applied_unknown_mutation(
     assert successor_head != successor_head_before
     assert int(_git(git_project, "rev-list", "--count", "main")) == successor_count_before + 1
     assert _git(git_project, "rev-parse", f"{successor_head}^") == successor_head_before
-    assert await service.git.read_session_footer(
-        git_project,
-        head=successor_head,
-    ) == successor.session_id
+    assert (
+        await service.git.read_session_footer(
+            git_project,
+            head=successor_head,
+        )
+        == successor.session_id
+    )
     await service.close()
 
 

@@ -7,10 +7,10 @@ import json
 import os
 import stat
 import tomllib
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 from .errors import BridgeError
 from .settings import CommandSpec, ProjectSpec

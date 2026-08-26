@@ -1,7 +1,7 @@
 # Phase 7 Acceptance Test Plan — v0.1.0 Release Gate
 
 > Status: DRAFT / EXECUTION PENDING
-> Date: 2026-08-24
+> Date: 2026-08-26
 > Target: first stable `v0.1.0`
 
 ## 1. Purpose
@@ -48,6 +48,31 @@ Before Phase 7 execution:
 7. destructive/recovery tests use disposable branches or fixture repositories.
 8. the threat model has no untracked P0 threat.
 
+### Phase 5.5.7 profile selection
+
+The recommended personal acceptance profile is **5.5.7A**:
+
+```text
+ChatGPT Connector (Authentication = No authentication)
+  -> OpenAI Connector egress network
+  -> Cloudflare WAF IP List/rule
+  -> Cloudflare Tunnel
+  -> 127.0.0.1:46200
+  -> network-trust Bridge + existing project/security policies
+```
+
+Profile A requires `auth.mode = "none"`, `network_trust.mode =
+"cloudflare-chatgpt"`, and non-empty exact `allowed_hosts`; it does not require
+`CODEMCP_RS_VERIFICATION_SECRET`. The Cloudflare allowlist is a network trust
+boundary, not authentication or user identity, and cannot identify a ChatGPT
+user, Workspace, account, or conversation. Profile B remains the optional
+advanced OAuth Resource Server profile with `mcp-rs-verification-v1`.
+
+The local Phase A–G implementation and regression gates do not replace the live
+Phase H checks. The release record must separately prove Cloudflare WAF
+`BLOCK` for an ordinary public source, Connector `ALLOW`, stopped-tunnel
+behavior, the selected Connector contract, and cleanup.
+
 ## 4. Automated suite gate
 
 Run the repository's complete registered test workflow from the release candidate.
@@ -74,9 +99,16 @@ Required result:
 
 ### Current status
 
-**PENDING.**
+**LOCAL REGRESSION PASS (2026-08-26):** `312 passed, 6 skipped` from
+`bridge/tests` and `tests/integration`, with the project virtual environment
+available on PATH for tests that intentionally invoke a `python` command.
+The skipped cases are environment/profile-specific (symlink permission,
+non-applicable WSL host, or opt-in real installer acceptance). This local PASS
+does not close the live Phase H or final release gate.
 
-The current remote development connector resolved the registered test command, but its invocation was blocked by the platform safety layer before execution. This is not a test failure and must not be recorded as a PASS.
+The full repository Ruff check and format validation pass after mechanical
+cleanup of the existing findings. This is a lint result only and does not
+prove the Phase H live Cloudflare or ChatGPT Connector boundary.
 
 ## 5. MCP contract gate
 
@@ -177,8 +209,11 @@ Every case below must fail closed or produce the explicitly designed `unknown`/r
 | S-24 | non-loopback server configuration | invalid/fail closed according to config validation | server/settings checks | PENDING RE-RUN |
 | S-25 | runtime/model credential canary | absent/redacted from logs and evidence | Phase 6 matrix | PENDING |
 | S-26 | hidden model/provider egress | no Bridge/codemcp model provider traffic | dependency/source/runtime review | PENDING |
+| S-27 | wrong/missing Host or forwarded-host bypass | exact Host boundary rejects; forwarded headers cannot authorize | Phase C runtime matrix | PASS LOCAL / PENDING LIVE |
+| S-28 | invalid/present Origin | missing accepted; present non-exact origin rejected | Phase C runtime matrix | PASS LOCAL / PENDING LIVE |
+| S-29 | ordinary public source reaches Bridge | Cloudflare WAF blocks before Tunnel/Bridge with `403` | deployment runbook | PENDING PHASE H |
 
-Any bypass of S-01 through S-26 that grants broader filesystem, command, approval, identity, secret, or destructive Git capability is a release blocker.
+Any bypass of S-01 through S-29 that grants broader filesystem, command, approval, identity, secret, network, or destructive Git capability is a release blocker.
 
 ## 8. Reliability and recovery acceptance
 
@@ -259,7 +294,8 @@ Required public documents:
 - [x] `docs/architecture/threat-model.md`
 - [x] `docs/acceptance/phase-6-validation.md`
 - [x] `docs/acceptance/acceptance-test-plan.md`
-- [ ] public-user README restructured and clean-machine verified
+- [x] public-user README and Cloudflare network-trust runbook restructured
+- [ ] public-user documentation clean-machine verified
 - [ ] `CONTRIBUTING.md`
 - [ ] `CODE_OF_CONDUCT.md`
 - [ ] `CHANGELOG.md`

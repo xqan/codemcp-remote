@@ -184,7 +184,10 @@ class RegisteredCommandRunner:
         except TimeoutError:
             await _terminate_process(process)
             return CommandRunResult(
-                text=f"Error: {command.kind.title()} command timed out after {command.timeout_seconds:g}s",
+                text=(
+                    f"Error: {command.kind.title()} command timed out after "
+                    f"{command.timeout_seconds:g}s"
+                ),
                 is_error=True,
                 truncated=False,
             )

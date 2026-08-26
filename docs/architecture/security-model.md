@@ -6,26 +6,39 @@ codemcp-remote exposes controlled local development capabilities to ChatGPT thro
 
 The design goal is not to make arbitrary remote shell access safe. The design goal is to avoid exposing arbitrary shell or arbitrary filesystem access at all.
 
+The v0.1.0 remote surface has two explicit security profiles. Profile A is the recommended personal-deployment path: ChatGPT Connector uses `Authentication = No authentication`, Cloudflare WAF restricts the Connector egress network, and the Bridge applies exact Host/Origin and local policy checks. Profile B is the optional OAuth Resource Server path for deployments that require subject, client, and scope identity. Cloudflare IP restriction is a network trust boundary, not authentication or user identity.
+
 ## Architecture and trust boundaries
 
 ```text
-ChatGPT
+ChatGPT Connector
   |
-  | Secure MCP Tunnel
+  | Authentication = No authentication (Profile A)
   v
-tunnel-client
+OpenAI / ChatGPT Connector egress network
   |
-  | loopback HTTP MCP
+  v
+Cloudflare WAF IP allowlist
+  |
+  v
+https://<mcp-host>/mcp
+  |
+  | Cloudflare Tunnel
+  v
+127.0.0.1:46200
+  |
   v
 codemcp-remote Bridge
   |
-  | validated project/tool invocation
+  | exact Host/Origin + project/tool invocation
   v
-codemcp worker (WSL2)
+native local codemcp worker
   |
   v
 registered local Git project
 ```
+
+The OpenAI Secure MCP `tunnel-client` remains an optional compatibility transport. The Bridge must remain bound to `127.0.0.1:46200` for either remote transport.
 
 ### ChatGPT
 
@@ -33,11 +46,23 @@ ChatGPT is the only reasoning engine in the current architecture. It decides whi
 
 ChatGPT is **not** trusted to bypass Bridge policy. A mistaken instruction, prompt injection from repository content, or compromised conversation must still be constrained by project registration, relative-path validation, command registration, mutation preconditions, approvals, and Git compare-and-swap checks.
 
+For Profile A, the Cloudflare egress allowlist does not identify the ChatGPT user, Workspace, account, or conversation. The internal `network-chatgpt-v1` principal is a deterministic network-only audit/replay identity, not a human identity.
+
+### Cloudflare WAF network boundary
+
+The Cloudflare IP List and whole-host WAF rule are the IP enforcement boundary. They must be configured at Cloudflare Edge before Tunnel ingress, for example:
+
+```text
+(http.host eq "codemcp.quickclip.cc" and not ip.src in $chatgpt_connectors)
+```
+
+The current OpenAI Connector ranges are deployment state and are intentionally not hardcoded in this repository. The Bridge does not authorize from `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*`. A WAF `ALLOW` therefore means only network admission; it is not authentication.
+
 ### Secure MCP Tunnel and tunnel-client
 
-The Tunnel is a transport boundary. The supported profile forwards to the Bridge's loopback MCP endpoint and uses outbound connectivity to the OpenAI control plane.
+The Tunnel is a transport boundary. The recommended Cloudflare profile forwards to the Bridge's loopback MCP endpoint through a WAF-restricted hostname. The optional OpenAI Secure MCP profile uses outbound connectivity to the OpenAI control plane.
 
-The Tunnel does not grant project authorization and does not replace the Bridge's approval, session, operation, or audit checks. The Bridge must remain safe if a caller sends policy-violating MCP input through an otherwise valid Tunnel.
+Neither Tunnel grants project authorization or replaces the Bridge's Host/Origin, approval, session, operation, replay, or audit checks. The Bridge must remain safe if a caller sends policy-violating MCP input through an otherwise valid transport.
 
 ### Bridge
 
@@ -63,7 +88,7 @@ The default example configuration binds to `127.0.0.1:46200`, denies arbitrary p
 
 ### codemcp worker
 
-`codemcp==0.3.0` is a pinned third-party execution backend. Mutation workers currently run under WSL2 Ubuntu.
+`codemcp==0.3.0` is a pinned third-party execution backend. The packaged Windows profile uses the native local worker by default; WSL2 remains a source-mode compatibility fallback.
 
 The worker is not a second reasoning agent. The Bridge must not assume that a backend error proves no local side effect occurred. Where completion cannot be determined, the operation must become `unknown` and require reconciliation.
 
@@ -178,7 +203,21 @@ Logs and tool results are still potential disclosure paths; release validation m
 
 ## Network model
 
-The Bridge is expected to listen only on loopback. The supported remote path is Secure MCP Tunnel. The example policy denies model egress from the Bridge.
+The Bridge listens only on loopback. The recommended public path is:
+
+```text
+ChatGPT Connector
+  -> OpenAI Connector egress network
+  -> Cloudflare WAF IP List/rule
+  -> Cloudflare Tunnel
+  -> 127.0.0.1:46200
+  -> exact Host/Origin network-trust middleware
+  -> MCP transport and existing project/security policies
+```
+
+Profile A uses `auth.mode = "none"` only with `network_trust.mode = "cloudflare-chatgpt"` and non-empty exact `allowed_hosts`. It does not install a bearer authenticator and accepts a valid `/mcp` request without `Authorization`. This does not remove any project, path, command, operation, approval, checkpoint, Git CAS, restore, replay, or audit policy. Profile B continues to validate OAuth Resource Server credentials and exposes subject/client/scope identity semantics.
+
+The example policy denies model egress from the Bridge. `/healthz` is a lifecycle probe and should not be exposed as a public application endpoint.
 
 This is an application policy, not a host firewall. A compromised dependency or local process can violate assumptions unless separately constrained by the OS/network environment.
 
@@ -188,12 +227,12 @@ The initial `v0.1.0` target does not guarantee:
 
 - protection against a compromised local OS user or administrator;
 - multi-user identity, tenancy isolation, or RBAC;
-- native Windows Git-backed mutation;
+- live Cloudflare account/WAF configuration or ChatGPT Connector availability;
 - recognition of every possible secret filename/content;
 - containment of an arbitrary malicious registered command;
 - security against a malicious replacement of the pinned dependencies or local toolchain;
 - automatic recovery from every `unknown` mutation;
-- availability when Tunnel, WSL2, Git, or codemcp is unhealthy;
+- availability when the selected Tunnel, Git, codemcp, or optional WSL2 fallback is unhealthy;
 - safety of unsupported transport adapters.
 
 Any future capability that expands filesystem scope, executable scope, identity scope, Git behavior, or remote transport must update this document, the threat model, and regression tests before release.

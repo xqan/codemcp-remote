@@ -42,6 +42,7 @@ def test_phase556_current_head_windows_installer_acceptance() -> None:
         encoding="utf-8",
         errors="replace",
         timeout=900,
+        check=False,
     )
     if completed.returncode != 0:
         pytest.fail(

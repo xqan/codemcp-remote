@@ -134,7 +134,7 @@ The authoritative matrix and current PASS/PENDING state are recorded in the
 [Phase 6 validation plan](../acceptance/phase-6-validation.md). Do not mark Phase 6 PASS
 from the lifecycle runner alone.
 
-## Phase 5 local Bridge and Tunnel
+## Phase 5 local Bridge and remote transports
 
 The local Bridge can be started for loopback-only validation with:
 
@@ -152,9 +152,34 @@ development server. The Phase 5 tunnel wrapper is configured separately and
 never points directly at codemcp.
 
 Do not expose codemcp directly to ChatGPT. The startup order is Bridge,
-codemcp worker on demand, tunnel-client, then ChatGPT tool discovery. The
-Bridge is the only MCP server exposed to the Tunnel. See the
-[Secure MCP Tunnel setup guide](tunnel-setup.md) for the complete setup.
+codemcp worker on demand, the selected transport (`cloudflared` for the
+recommended public path or `tunnel-client` for compatibility), then ChatGPT
+tool discovery. The Bridge is the only MCP server exposed to the transport.
+See the [Cloudflare network-trust setup guide](cloudflare-tunnel-setup.md) for
+the recommended path and the [Secure MCP Tunnel setup guide](tunnel-setup.md)
+for the optional compatibility path.
+
+### Recommended Cloudflare network-trust profile
+
+For a single-user ChatGPT Connector, use an explicit `--home` and configure
+`auth.mode = "none"` with `network_trust.mode = "cloudflare-chatgpt"` and a
+non-empty exact `allowed_hosts` list. Cloudflare WAF must enforce the current
+OpenAI Connector egress IP List before Tunnel ingress; the Bridge never trusts
+forwarded client-IP headers. This network allowlist is not authentication or
+user identity, and `doctor` reports `identity_level = network-only`.
+
+The packaged CLI shape is:
+
+~~~powershell
+$home = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+codemcp-remote.exe doctor --home $home
+codemcp-remote.exe start --home $home
+~~~
+
+Do not expose `/healthz` as a public application endpoint. Keep the Bridge
+origin at `127.0.0.1:46200`. Profile B remains available with
+`auth.mode = "oauth-resource-server"` when subject/client/scope identity is
+required.
 
 SQLite state is stored at `.local/bridge.sqlite3` and is ignored by Git. A
 normal shutdown closes active sessions. After an unclean restart, active

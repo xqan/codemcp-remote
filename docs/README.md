@@ -8,6 +8,7 @@
 - [当前实施计划](implementation-plan.md)
 - [当前架构](architecture/architecture.md)
 - [运维手册](guides/operations-runbook.md)
+- [Cloudflare Tunnel + ChatGPT network trust](guides/cloudflare-tunnel-setup.md)
 - [Secure MCP Tunnel 配置](guides/tunnel-setup.md)
 - [Phase 6 当前验收](acceptance/phase-6-validation.md)
 - [v0.1.0 最终验收门禁](acceptance/acceptance-test-plan.md)
@@ -38,7 +39,9 @@
 
 - [codemcp 固定版本基线](guides/codemcp-baseline.md)
 - [运维手册](guides/operations-runbook.md)
+- [Cloudflare Tunnel + ChatGPT network trust（推荐个人部署）](guides/cloudflare-tunnel-setup.md)
 - [Secure MCP Tunnel 配置](guides/tunnel-setup.md)
+- [External mcp-auth-server（可选 OAuth advanced profile）](guides/external-mcp-auth-setup.md)
 
 ### 当前验收与计划
 
@@ -55,13 +58,16 @@
 
 ## 当前运行与退役边界
 
-- 当前支持边界是 Windows 11 主机、WSL2 Ubuntu mutation worker、Python 3.12+、
-  `codemcp==0.3.0` 和 OpenAI Secure MCP Tunnel。
+- 推荐公网路径是 ChatGPT Connector（`Authentication = No authentication`）→ OpenAI
+  Connector egress → Cloudflare WAF IP allowlist → Cloudflare Tunnel → loopback Bridge；
+  OpenAI Secure MCP Tunnel 仍是可选兼容 transport。
+- Cloudflare IP allowlist 是 network trust boundary，不是 authentication 或 user identity；
+  需要 subject/client/scope 身份时使用可选 OAuth Resource Server profile。
 - 当前可执行说明以 `guides/`、`architecture/` 和 `acceptance/` 中的文档为准。
 - `releases/` 中的 Phase 0–5 文件是已完成阶段记录；`reports/` 中的内容是当时的
   验证证据，不能替代当前 runbook 或尚未完成的 release gate。
-- 稳定版 `v0.1.0` 仍受 Phase 6、Phase 7、secrets/supply-chain 和 clean-machine
-  验收阻断；历史记录中的 PASS 不代表稳定版已经获准发布。
+- 稳定版 `v0.1.0` 仍受 Phase H live acceptance、Phase 6/7、secrets/supply-chain
+  和 freeze gate 阻断；本地 Phase A–G PASS 不代表公网 WAF 或 ChatGPT Connector 已经实测通过。
 - 当前没有需要放入 `archive/` 的退役文档；后续被替代的文档按维护约定归档。
 
 ## 维护约定

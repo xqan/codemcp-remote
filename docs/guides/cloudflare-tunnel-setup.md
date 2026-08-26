@@ -1,89 +1,218 @@
-# Cloudflare Tunnel Setup for Phase 5.5.7
+# Cloudflare Tunnel + ChatGPT Network Trust
 
-Status: **LIVE ACCEPTANCE GUIDE**
+Status: **READY FOR PHASE H LIVE ACCEPTANCE — this runbook has not performed live endpoint, WAF, or ChatGPT Connector verification**
 
-This guide covers the final `codemcp-remote` transport topology. Cloudflare provides HTTPS transport only. OAuth authorization is enforced by `codemcp-remote` through an independent compatible `mcp-auth-server`.
+This is the recommended v0.1.0 personal-deployment path. ChatGPT Connector uses `Authentication = No authentication`; Cloudflare Edge/WAF supplies the external network restriction, while `codemcp-remote` keeps its local project, operation, approval, checkpoint, Git CAS, restore, audit, and loopback security policies.
 
-## Final topology
-
-```text
-ChatGPT
-  |
-  | OAuth access token
-  v
-https://<mcp-host>/mcp
-  |
-  | Cloudflare Tunnel
-  v
-http://127.0.0.1:46200/mcp
-  |
-  v
-codemcp-remote OAuth Resource Server
-  |
-  | mcp-rs-verification-v1
-  v
-https://<auth-host>/mcp/resource-server/validate
-```
-
-Cloudflare Access identity headers are not an authorization input for the Bridge. The acceptance path must work without `Cf-Access-*` identity headers.
-
-## Cloudflare setup
-
-1. Create a remotely managed Cloudflare Tunnel in the user-owned Cloudflare account.
-2. Add a public hostname for the dedicated MCP acceptance hostname.
-3. Route the public MCP hostname to the local Bridge service on `http://127.0.0.1:46200`.
-4. The externally configured MCP endpoint is `https://<mcp-host>/mcp`; do not rewrite or strip `/mcp`.
-5. Do not put Cloudflare Access in front of this acceptance hostname as an authentication dependency. The independent OAuth server is the authorization authority.
-6. Copy the remotely managed tunnel token once. Do not save it in repository files, TOML files, plaintext `.env` files, logs, screenshots, or acceptance records.
-
-The bundled `cloudflared.exe` is pinned by the release and runs with fixed arguments. The clean-machine harness stores the token through Windows DPAPI and clears `TUNNEL_TOKEN` before the final doctor/start proof.
-
-## Clean Windows acceptance
-
-Use the current Phase 5.5.7 installer candidate (Live reinstall is still pending):
+## Topology
 
 ```text
-.local\installer-dist\codemcp-remote-setup.exe
-SHA-256: b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e
+ChatGPT Connector
+  Authentication = No authentication
+        |
+        v
+OpenAI / ChatGPT Connector egress network
+        |
+        v
+Cloudflare Edge/WAF IP allowlist
+        |
+        v
+https://codemcp.quickclip.cc/mcp
+        |
+        v
+Cloudflare Tunnel
+        |
+        v
+127.0.0.1:46200
+        |
+        v
+codemcp-remote network-trusted Bridge
+        |
+        v
+project / operation / approval / checkpoint / Git CAS / restore / audit
 ```
 
-In a fresh PowerShell process, provide secrets only through the process environment:
+The Bridge must remain loopback-only. The Tunnel origin is `http://127.0.0.1:46200`; never change it to `0.0.0.0`.
+
+## Trust model and limitation
+
+The Cloudflare IP List is a **network trust boundary** / **ChatGPT egress network restriction**. It proves only that Cloudflare accepted a source address in the configured OpenAI/ChatGPT Connector egress range. It is not authentication, user identity, or strong identity. In particular, it does not identify:
+
+- a specific ChatGPT user;
+- a Workspace;
+- an account; or
+- a conversation.
+
+Profile A therefore reports `identity_level = network-only`. OAuth Profile B is the optional advanced profile when a real subject/client/scope identity is required.
+
+The IP policy belongs at Cloudflare Edge/WAF. Do not reproduce it in Python and do not authorize from `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*`. HTTP headers are not a network boundary.
+
+## 1. Create the Cloudflare Tunnel
+
+In the user-owned Cloudflare account:
+
+1. create or select a Cloudflare Tunnel;
+2. add the dedicated hostname `codemcp.quickclip.cc`;
+3. route it to `http://127.0.0.1:46200`;
+4. preserve the `/mcp` path used by the Connector; and
+5. do not add a second public origin or a public health route.
+
+The bundled `cloudflared` is a deployment/runtime dependency of the packaged release. Store its tunnel token through the product's DPAPI flow; do not put the token in Git, `remote.toml`, a plaintext `.env` file, logs, screenshots, or acceptance evidence.
+
+## 2. Create and populate the Cloudflare IP List
+
+Create an account-level Cloudflare IP List with the suggested name:
+
+```text
+chatgpt_connectors
+```
+
+Populate it with the current IPv4/IPv6 CIDR ranges from the official OpenAI-published ChatGPT Connector egress IP manifest. Record the manifest URL, retrieval date, and operator in deployment notes. Do not copy current ranges into this repository, Python source, PowerShell source, or `remote.toml`; the ranges are expected to change.
+
+The first supported provisioning mode is manual. If the official manifest has a stable documented JSON contract in the future, an administrative sync tool may validate a non-empty list, legal IPv4/IPv6 CIDRs, malformed-data rejection, diff, dry-run, and rollback before changing the list. The runtime must never hold a Cloudflare API token. Any future API automation must use a scoped token limited to the required IP List/WAF operations, read the token only from an environment variable, and never print or persist it. Do not use a Global API Key.
+
+## 3. Create the whole-host WAF rule
+
+For the dedicated hostname, create a Cloudflare WAF Custom Rule equivalent to:
+
+```text
+(
+  http.host eq "codemcp.quickclip.cc"
+  and not ip.src in $chatgpt_connectors
+)
+```
+
+Action: `Block`.
+
+Protect the whole hostname rather than only `/mcp`. This also covers `/mcp`, `/.well-known/oauth-protected-resource/*`, and future public endpoints. Treat `/healthz` separately: it is a lifecycle probe and should not be exposed as a public application interface. If the Tunnel provider cannot keep it private, do not claim the public health route is protected by this runbook.
+
+The WAF rule is the IP enforcement boundary. A request blocked there must not reach the Bridge. The Bridge's second boundary is exact Host validation from the actual `Host` authority. The configured host is:
+
+```toml
+[network_trust]
+mode = "cloudflare-chatgpt"
+allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_origins = ["https://chatgpt.com"] # optional, if-present validation
+```
+
+`allowed_origins` may be empty. A missing `Origin` is accepted; when present, it must be an exact canonical HTTPS origin. Origin is auxiliary and is not authentication.
+
+## 4. Initialize Profile A (No-Auth)
+
+Use a packaged executable or source-mode `codemcp-remote` command. The example uses an explicit runtime home so all config, data, checkpoints, logs, runtime state, and DPAPI-backed secrets have one visible root:
 
 ```powershell
-$env:TUNNEL_TOKEN = '<cloudflare-remotely-managed-tunnel-token>'
-$env:CODEMCP_RS_VERIFICATION_SECRET = '<resource-server-verification-secret>'
+$exe = "$env:LOCALAPPDATA\Programs\codemcp-remote\codemcp-remote.exe"
+$home = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+$env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
 
-pwsh -NoLogo -NoProfile -File .\scripts\validate-clean-windows-release.ps1 `
-  -Action Prepare `
-  -InstallerPath .\.local\installer-dist\codemcp-remote-setup.exe `
-  -ExpectedInstallerSha256 b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e `
-  -Transport cloudflare `
-  -PublicUrl 'https://<mcp-host>/mcp' `
-  -AuthorizationServerIssuer 'https://<auth-host>' `
-  -CanonicalResourceUri 'https://<mcp-host>/mcp' `
-  -ValidationResourceId '<resource-id>'
+& $exe init --home $home `
+  --transport cloudflare `
+  --public-url "https://codemcp.quickclip.cc/mcp" `
+  --auth-mode none `
+  --network-trust cloudflare-chatgpt `
+  --allowed-host codemcp.quickclip.cc `
+  --allowed-origin "https://chatgpt.com" `
+  --store-transport-secret
+$env:TUNNEL_TOKEN = $null
+
+& $exe project add phase5-clean "D:\workspace\phase5-clean" --home $home
 ```
 
-`Prepare` installs the release, verifies the installer hash, proves the isolated runtime does not depend on Python/uv/pwsh, initializes the Cloudflare transport and OAuth Resource Server configuration, stores both runtime secrets with DPAPI, creates the disposable `phase5-clean` project, and records the baseline Git HEAD without storing either secret.
+Profile A does not require `CODEMCP_RS_VERIFICATION_SECRET`, does not install an OAuth bearer authenticator, and does not imply `authenticated_user=true`. It still requires all existing project and mutation safety policies.
 
-If the production AppId is already present, `Prepare` permits only a harness-managed Phase 5.5.7
-reinstall: the fixed install directory, app root, transport/resource configuration, and non-secret
-`phase5-validation.json` must all match. The existing runtime is stopped through the packaged lifecycle
-command before the controlled Inno Setup upgrade. A missing or mismatched state, a different install
-location, or an unrelated user installation fails closed without invoking the installer.
+`--home` overrides `CODEMCP_HOME`. The legacy `--app-root` option remains available for compatibility with older runtime state; it must not be used to bypass the selected trust policy.
 
-On a Prepare rerun, the harness first calls the packaged `project remove` operation with the expected
-fixed disposable root. A missing registration is treated as the first-run case; an exact matching
-registration is removed before a new Git baseline is created; any other registered root fails closed.
-The fixed acceptance subtree is the only project filesystem path removed automatically. DPAPI
-transport/auth credentials remain intact, and a custom `-ProjectRoot` is rejected.
+## 5. Doctor and start
 
-Then start from DPAPI-backed state:
+Run the profile-aware checks with the environment token already cleared:
 
 ```powershell
-pwsh -NoLogo -NoProfile -File .\scripts\validate-clean-windows-release.ps1 -Action Start
+& $exe doctor --home $home
+& $exe start --home $home
+& $exe status --home $home
 ```
 
-The `Start` action clears all supported transport/auth secret environment variables before doctor/start. It must report the Cloudflare provider, loopback origin, bundled `cloudflared`, DPAPI secret sources, healthy Bridge/tunnel processes, and the disposable project baseline.
+The relevant `doctor` fields should be equivalent to:
 
-Do not run `Cleanup` until the ChatGPT remote mutation/replay/restore and negative-auth evidence has been captured.
+```text
+auth.mode: none
+auth.status: ready
+auth.oauth_secret_required: false
+network_trust.mode: cloudflare-chatgpt
+network_trust.status: ready
+network_trust.allowed_hosts: [codemcp.quickclip.cc]
+identity_level: network-only
+transport.provider: cloudflare
+tunnel_token.source: windows-dpapi
+```
+
+For public Cloudflare transport, a missing trust policy or empty host list must fail closed with `PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST`. Pure loopback development is a separate local-only scenario and must not be confused with this public profile.
+
+## 6. Normal-IP negative test
+
+From a normal public network that is not in `$chatgpt_connectors`, request the dedicated hostname:
+
+```powershell
+curl.exe -i https://codemcp.quickclip.cc/mcp
+```
+
+Expected result: Cloudflare WAF `403` (or the account's configured block response). Capture only non-sensitive status/timestamp evidence. The request must be blocked at Cloudflare and must not reach the Bridge. Do not substitute a Python response or a spoofed forwarding header for this test.
+
+When the codemcp lifecycle is stopped, the separate stopped-lifecycle probe should observe the Cloudflare Tunnel-unavailable behavior (commonly Cloudflare `1033`, depending on account presentation). This is a Phase H live check, not a result established by this runbook.
+
+## 7. ChatGPT Connector Scan Tools
+
+In ChatGPT, create or edit the Connector with:
+
+```text
+Authentication: No authentication
+URL: https://codemcp.quickclip.cc/mcp
+```
+
+Run `Scan Tools`. The scan must complete only after the WAF list contains the actual Connector egress range and the local lifecycle reports a healthy Bridge/Tunnel. A successful scan does not establish human identity; it establishes reachability through the configured network boundary.
+
+Then execute the disposable-project contract in order: `project_open`, `file_read`, `git_status`, deterministic mutation, checkpoint, identical replay, approval, restore, and final clean baseline. Never use a real user repository for first acceptance.
+
+## 8. Verify Cloudflare Security Events
+
+In Cloudflare Security Events, verify separate non-sensitive entries:
+
+```text
+ordinary public source -> BLOCK
+ChatGPT Connector source -> ALLOW
+```
+
+Record timestamps, rule action, hostname, and redacted request identifiers only. Do not record tokens, full request bodies, private project paths, or user content. An `ALLOW` event means network admission; it is not a ChatGPT user authentication event.
+
+## 9. Updating the IP List
+
+When OpenAI publishes a new official Connector manifest:
+
+1. retrieve it through the documented official source;
+2. verify the source and schema before editing the list;
+3. calculate and review the old/new CIDR diff;
+4. apply the change to `chatgpt_connectors`;
+5. confirm the WAF rule still references the same list;
+6. run the normal-IP negative test and a Connector Scan Tools check; and
+7. retain the old list contents and change record long enough to support rollback.
+
+Never update the Python runtime or `remote.toml` with current IP ranges. If the manifest is malformed or empty, reject the update and keep the last known-good Cloudflare list.
+
+## 10. Rollback
+
+For a bad list or WAF change, restore the last known-good IP List/rule in Cloudflare, verify the rule action in Security Events, and rerun both negative and Connector checks. Do not disable the WAF rule to restore availability. If the local runtime is unsafe, stop the project-owned lifecycle and remove the public hostname route; do not bind the Bridge publicly.
+
+## 11. Optional OAuth advanced profile (5.5.7B)
+
+Use Profile B for multi-user, enterprise, or deployments requiring a real subject/client/scope identity:
+
+```toml
+[auth]
+mode = "oauth-resource-server"
+issuer = "https://<authorization-server>"
+canonical_resource_uri = "https://codemcp.quickclip.cc/mcp"
+validation_resource_id = "<resource-id>"
+```
+
+Profile B keeps the existing `mcp-rs-verification-v1` Resource Server contract, RFC 9728 protected-resource metadata/challenges, external `mcp-auth-server` authorization profile, OAuth subjects/clients/scopes, and DPAPI-backed verification secret handling. It is optional advanced security; OAuth was not abandoned or removed. Do not configure `auth.mode = "none"` with `network_trust.mode = "unrestricted"`, and do not describe the Profile A IP allowlist as user authentication.

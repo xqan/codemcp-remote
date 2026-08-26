@@ -4,7 +4,7 @@
 
 This document tracks threats that matter to the `v0.1.0` architecture:
 
-`ChatGPT → Secure MCP Tunnel → loopback Bridge → WSL2 codemcp worker → registered Git project`.
+Recommended path: `ChatGPT Connector (No authentication) → OpenAI Connector egress → Cloudflare WAF IP List → Cloudflare Tunnel → loopback Bridge → native local worker → registered Git project`. The optional compatibility path uses the Secure MCP Tunnel, and Profile B adds OAuth Resource Server identity.
 
 The protected assets are local source code, secrets, Git state, registered command boundaries, approval state, operation/audit integrity, and runtime Tunnel credentials.
 
@@ -44,6 +44,8 @@ The local operator account, trusted Bridge installation, trusted local configura
 | Tunnel credential theft | local profile/log/history exposes control-plane key | key passed by environment reference; example docs prohibit storing it in repo/profile/logs | Compromised process/local user can read environment/process memory | secret scan + diagnostic output tests |
 | Dependency/supply-chain compromise | PyPI/upstream package or local interpreter is compromised | pin `codemcp==0.3.0`; lock file; planned dependency audit/CI | Version pinning does not prove package integrity or prevent compromise | dependency audit, lock review, release build provenance checks |
 | Compromised ChatGPT workspace | attacker can send otherwise valid calls through connected workspace | Bridge still enforces local project/path/command/approval/Git policy | Policy-valid operations may still be harmful; v0.1.0 has no independent user identity/RBAC | document limitation; test that Tunnel identity does not bypass Bridge |
+| Cloudflare allowlist mistaken for user authentication | operator assumes an allowed Connector egress IP identifies a person or conversation | Cloudflare WAF is documented and enforced as a network trust boundary; Profile A reports `identity_level = network-only`; Profile B is required for subject/client/scope identity | Any caller inside an allowed egress range shares the same network trust profile | deployment runbook and live Security Events must distinguish network admission from identity |
+| WAF/IP enforcement bypassed in the Bridge | implementation trusts a forwarded client-IP header or reverse DNS | IP ranges and WAF rule remain external at Cloudflare Edge; Bridge rejects forwarded-header authorization assumptions and uses exact Host/Origin only | Misconfigured Cloudflare account, Tunnel ingress, or a directly exposed Bridge is outside application guarantees | WAF rule review, normal-IP `403`, loopback bind inspection |
 | Compromised local OS user | attacker can edit config/code/DB/processes | none by design; this is a trusted boundary | Full compromise of Bridge guarantees | document as explicit non-goal |
 
 ## High-priority release threats
@@ -59,7 +61,8 @@ The following are P0 release blockers if unmitigated:
 7. mutation failure reported deterministically when the side effect is actually uncertain;
 8. runtime credential leakage;
 9. Bridge exposure beyond loopback contrary to configuration;
-10. any hidden model/provider dependency that violates the documented execution boundary.
+10. Cloudflare WAF/network admission being misrepresented as user authentication;
+11. any hidden model/provider dependency that violates the documented execution boundary.
 
 ## P0 validation mapping
 

@@ -165,12 +165,15 @@ def test_session_wip_evidence_requires_successful_non_noop_checkpoint(tmp_path: 
         before_head="3" * 40,
         after_head="3" * 40,
     )
-    assert database.find_session_wip_checkpoint(
-        project_id="demo",
-        session_id="session-1",
-        branch="main",
-        head="3" * 40,
-    ) is None
+    assert (
+        database.find_session_wip_checkpoint(
+            project_id="demo",
+            session_id="session-1",
+            branch="main",
+            head="3" * 40,
+        )
+        is None
+    )
 
     _finish_mutation(database, operation_id="op-failed", session_id="session-1", state="failed")
     _add_checkpoint_evidence(
@@ -181,12 +184,15 @@ def test_session_wip_evidence_requires_successful_non_noop_checkpoint(tmp_path: 
         before_head="4" * 40,
         after_head="5" * 40,
     )
-    assert database.find_session_wip_checkpoint(
-        project_id="demo",
-        session_id="session-1",
-        branch="main",
-        head="5" * 40,
-    ) is None
+    assert (
+        database.find_session_wip_checkpoint(
+            project_id="demo",
+            session_id="session-1",
+            branch="main",
+            head="5" * 40,
+        )
+        is None
+    )
 
     _finish_mutation(database, operation_id="op-unknown", session_id="session-1", state="unknown")
     _add_checkpoint_evidence(
@@ -197,12 +203,15 @@ def test_session_wip_evidence_requires_successful_non_noop_checkpoint(tmp_path: 
         before_head="6" * 40,
         after_head="7" * 40,
     )
-    assert database.find_session_wip_checkpoint(
-        project_id="demo",
-        session_id="session-1",
-        branch="main",
-        head="7" * 40,
-    ) is None
+    assert (
+        database.find_session_wip_checkpoint(
+            project_id="demo",
+            session_id="session-1",
+            branch="main",
+            head="7" * 40,
+        )
+        is None
+    )
     database.transition_operation(
         "op-unknown",
         "failed",
@@ -218,12 +227,15 @@ def test_session_wip_evidence_requires_successful_non_noop_checkpoint(tmp_path: 
         before_head="8" * 40,
         after_head="9" * 40,
     )
-    assert database.find_session_wip_checkpoint(
-        project_id="demo",
-        session_id="session-1",
-        branch="main",
-        head="9" * 40,
-    ) is None
+    assert (
+        database.find_session_wip_checkpoint(
+            project_id="demo",
+            session_id="session-1",
+            branch="main",
+            head="9" * 40,
+        )
+        is None
+    )
 
     _finish_mutation(database, operation_id="op-branch", session_id="session-1")
     _add_checkpoint_evidence(
@@ -235,12 +247,15 @@ def test_session_wip_evidence_requires_successful_non_noop_checkpoint(tmp_path: 
         after_head="b" * 40,
         branch="feature/wip",
     )
-    assert database.find_session_wip_checkpoint(
-        project_id="demo",
-        session_id="session-1",
-        branch="main",
-        head="b" * 40,
-    ) is None
+    assert (
+        database.find_session_wip_checkpoint(
+            project_id="demo",
+            session_id="session-1",
+            branch="main",
+            head="b" * 40,
+        )
+        is None
+    )
     database.close()
 
 

@@ -1,7 +1,12 @@
-# Secure MCP Tunnel setup
+# OpenAI Secure MCP Tunnel compatibility setup
 
-Phase 5 connects the private loopback Bridge to ChatGPT through the OpenAI
-`tunnel-client`. The client is the only remote transport. It makes an
+This guide documents the optional OpenAI Secure MCP `tunnel-client`
+compatibility transport. The recommended v0.1.0 personal deployment uses
+[Cloudflare Tunnel + ChatGPT network trust](cloudflare-tunnel-setup.md) with
+ChatGPT Connector `Authentication = No authentication`.
+
+The compatibility transport connects the private loopback Bridge to ChatGPT
+through the OpenAI `tunnel-client`. It makes an
 outbound HTTPS connection to the OpenAI control plane and forwards MCP
 requests to the Bridge at `http://127.0.0.1:46200/mcp`.
 

@@ -48,6 +48,7 @@ def test_windows_onedir_executable_build_and_worker_smoke() -> None:
         encoding="utf-8",
         errors="replace",
         timeout=420,
+        check=False,
     )
     if completed.returncode != 0:
         pytest.fail(

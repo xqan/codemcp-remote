@@ -64,70 +64,72 @@ async def _run(executable: Path, repository_root: Path) -> None:
             env=environment,
             cwd=str(project),
         )
-        async with stdio_client(server) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                initialized = await asyncio.wait_for(session.initialize(), timeout=30)
-                assert initialized.serverInfo.name == "codemcp"
+        async with (
+            stdio_client(server) as (read_stream, write_stream),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            initialized = await asyncio.wait_for(session.initialize(), timeout=30)
+            assert initialized.serverInfo.name == "codemcp"
 
-                tools = await asyncio.wait_for(session.list_tools(), timeout=30)
-                assert [tool.name for tool in tools.tools] == ["codemcp"]
+            tools = await asyncio.wait_for(session.list_tools(), timeout=30)
+            assert [tool.name for tool in tools.tools] == ["codemcp"]
 
-                init_result = await asyncio.wait_for(
-                    session.call_tool(
-                        "codemcp",
-                        arguments={
-                            "subtool": "InitProject",
-                            "path": str(project),
-                            "user_prompt": "Validate frozen worker mutation behavior",
-                            "subject_line": "test: frozen worker smoke",
-                            "reuse_head_chat_id": False,
-                        },
-                    ),
-                    timeout=30,
-                )
-                assert not init_result.isError
-                init_text = _result_text(init_result)
-                assert "EXE_SMOKE_PROMPT" in init_text
-                match = re.search(
-                    r"This chat has been assigned a chat ID: ([^\r\n]+)", init_text
-                )
-                assert match is not None
-                chat_id = match.group(1).strip()
+            init_result = await asyncio.wait_for(
+                session.call_tool(
+                    "codemcp",
+                    arguments={
+                        "subtool": "InitProject",
+                        "path": str(project),
+                        "user_prompt": "Validate frozen worker mutation behavior",
+                        "subject_line": "test: frozen worker smoke",
+                        "reuse_head_chat_id": False,
+                    },
+                ),
+                timeout=30,
+            )
+            assert not init_result.isError
+            init_text = _result_text(init_result)
+            assert "EXE_SMOKE_PROMPT" in init_text
+            match = re.search(
+                r"This chat has been assigned a chat ID: ([^\r\n]+)", init_text
+            )
+            assert match is not None
+            chat_id = match.group(1).strip()
 
-                read_result = await asyncio.wait_for(
-                    session.call_tool(
-                        "codemcp",
-                        arguments={
-                            "subtool": "ReadFile",
-                            "path": str(source_file),
-                            "chat_id": chat_id,
-                        },
-                    ),
-                    timeout=30,
-                )
-                assert not read_result.isError
-                assert "hello frozen worker" in _result_text(read_result)
+            read_result = await asyncio.wait_for(
+                session.call_tool(
+                    "codemcp",
+                    arguments={
+                        "subtool": "ReadFile",
+                        "path": str(source_file),
+                        "chat_id": chat_id,
+                    },
+                ),
+                timeout=30,
+            )
+            assert not read_result.isError
+            assert "hello frozen worker" in _result_text(read_result)
 
-                edit_result = await asyncio.wait_for(
-                    session.call_tool(
-                        "codemcp",
-                        arguments={
-                            "subtool": "EditFile",
-                            "path": str(source_file),
-                            "old_string": "hello frozen worker",
-                            "new_string": "edited by frozen worker",
-                            "description": "verify frozen EXE mutation",
-                            "chat_id": chat_id,
-                        },
-                    ),
-                    timeout=30,
-                )
-                assert not edit_result.isError
-                assert "Successfully edited" in _result_text(edit_result)
-                assert source_file.read_text(encoding="utf-8").startswith(
-                    "edited by frozen worker"
-                )
-                assert _git(project, "status", "--porcelain") == ""
+            edit_result = await asyncio.wait_for(
+                session.call_tool(
+                    "codemcp",
+                    arguments={
+                        "subtool": "EditFile",
+                        "path": str(source_file),
+                        "old_string": "hello frozen worker",
+                        "new_string": "edited by frozen worker",
+                        "description": "verify frozen EXE mutation",
+                        "chat_id": chat_id,
+                    },
+                ),
+                timeout=30,
+            )
+            assert not edit_result.isError
+            assert "Successfully edited" in _result_text(edit_result)
+            assert source_file.read_text(encoding="utf-8").startswith(
+                "edited by frozen worker"
+            )
+            assert _git(project, "status", "--porcelain") == ""
 
         assert repository_root.is_dir()
 

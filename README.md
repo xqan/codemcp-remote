@@ -4,13 +4,18 @@ A policy-controlled local MCP bridge for using **ChatGPT as the only reasoning e
 
 ```text
 ChatGPT
-  -> OpenAI Secure MCP Tunnel
-  -> loopback codemcp-remote Bridge
+  -> ChatGPT Connector (Authentication = No authentication)
+  -> OpenAI / ChatGPT Connector egress network
+  -> Cloudflare Edge/WAF IP allowlist
+  -> https://codemcp.quickclip.cc/mcp
+  -> Cloudflare Tunnel
+  -> 127.0.0.1:46200
+  -> codemcp-remote network-trusted Bridge
   -> pinned codemcp worker (native Windows by default)
   -> registered local Git project
 ```
 
-> **Pre-release:** the core remote-coding path is implemented and has passed earlier phase validation, but the first stable `v0.1.0` is still blocked on the final Windows operations, security, clean-machine, secrets, and release gates in [`docs/acceptance/acceptance-test-plan.md`](docs/acceptance/acceptance-test-plan.md).
+> **Pre-release:** the Phase A–G implementation and local regression gates are recorded, but live Cloudflare/WAF/ChatGPT acceptance and the final `v0.1.0` freeze remain pending. Follow [`docs/acceptance/acceptance-test-plan.md`](docs/acceptance/acceptance-test-plan.md) for the release gate.
 
 Browse the [documentation center](docs/README.md) for current architecture,
 operator guides, release gates, plans, and historical validation records.
@@ -41,14 +46,14 @@ The Bridge does not contain an agent loop or model provider. Repository content 
 | Mutation worker | Native Windows local worker |
 | Development fallback | WSL2 Ubuntu remains source-mode compatibility only |
 | codemcp | pinned `0.3.0` with Bridge-owned Windows compatibility wrapper |
-| Remote transport | bundled OpenAI Secure MCP `tunnel-client` |
+| Remote transport | bundled Cloudflare Tunnel + external WAF network trust (recommended); OpenAI Secure MCP `tunnel-client` remains optional compatibility transport |
 | Git | Git for Windows is an explicit runtime prerequisite |
-| Identity model | single-user local policy profile |
+| Identity model | Profile A is `network-only`; Profile B provides OAuth subject/client/scope identity |
 | Native Windows Git-backed mutation | **supported and compatibility-tested** |
 | Arbitrary shell / arbitrary path | **not exposed** |
 | Automatic push / merge / rebase / deploy | **not supported** |
 
-Secure MCP Tunnel and ChatGPT developer-mode availability depend on the capabilities enabled for your account/workspace. Tunnel connectivity is transport only; it does not replace Bridge authorization or approvals.
+ChatGPT Connector availability depends on the capabilities enabled for your account/workspace. Cloudflare IP allowlisting is a network trust boundary, not authentication: it can restrict requests to published OpenAI/ChatGPT Connector egress ranges, but it does not identify a ChatGPT user, Workspace, account, or conversation. The Bridge's project, operation, approval, checkpoint, CAS, replay, audit, and loopback policies still apply.
 
 See [`docs/reports/compatibility/codemcp-compatibility-matrix.md`](docs/reports/compatibility/codemcp-compatibility-matrix.md) for the tested backend behavior.
 
@@ -60,9 +65,10 @@ The `codemcp-remote-setup.exe` release requires:
 
 - Windows 11 x64-compatible;
 - Git for Windows;
-- an OpenAI Tunnel and the required account/workspace permissions for Tunnel use.
+- for the recommended path, a user-owned Cloudflare Tunnel and a Cloudflare WAF IP List populated from the official OpenAI Connector egress manifest;
+- ChatGPT Connector access with `Authentication = No authentication`.
 
-The installed runtime includes the Bridge, native codemcp worker, and OpenAI `tunnel-client`. It does **not** require Python, `uv`, PowerShell 7, WSL2, or the codemcp-remote source repository.
+The installed runtime includes the Bridge, native codemcp worker, `cloudflared`, and the optional OpenAI `tunnel-client`. It does **not** require Python, `uv`, PowerShell 7, WSL2, or the codemcp-remote source repository.
 
 ### Source development
 
@@ -76,9 +82,59 @@ WSL2 is optional and only needed when explicitly testing the compatibility fallb
 
 Do not store the Tunnel runtime API key in this repository, a local env file, the generated Tunnel profile, shell history, or logs.
 
+### Recommended personal deployment: Cloudflare network trust
+
+Profile A is intended for one operator using a private ChatGPT Connector:
+
+```toml
+[auth]
+mode = "none"
+
+[network_trust]
+mode = "cloudflare-chatgpt"
+allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_origins = ["https://chatgpt.com"] # optional, if-present validation
+```
+
+The Cloudflare Edge/WAF rule must protect the dedicated hostname before Tunnel ingress. A typical rule is:
+
+```text
+(http.host eq "codemcp.quickclip.cc" and not ip.src in $chatgpt_connectors)
+```
+
+`$chatgpt_connectors` is an operator-managed Cloudflare IP List sourced from the official OpenAI Connector manifest; current ranges are deliberately not hardcoded in this repository. Do not implement the allowlist with `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*` in Python. Keep the Bridge on `127.0.0.1:46200`.
+
+The allowlist proves only network provenance. It is not authentication, user identity, or strong identity. Profile A reports `identity_level = network-only`; use Profile B below when subject/client/scope identity is required.
+
+Initialize an installed runtime with an explicit home and no OAuth verification secret:
+
+```powershell
+$exe = "$env:LOCALAPPDATA\Programs\codemcp-remote\codemcp-remote.exe"
+$home = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+$env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
+
+& $exe init --home $home `
+  --transport cloudflare `
+  --public-url "https://codemcp.quickclip.cc/mcp" `
+  --auth-mode none `
+  --network-trust cloudflare-chatgpt `
+  --allowed-host codemcp.quickclip.cc `
+  --allowed-origin "https://chatgpt.com" `
+  --store-transport-secret
+$env:TUNNEL_TOKEN = $null
+
+& $exe project add my_project "D:\workspace\my-project" --home $home
+& $exe doctor --home $home
+& $exe start --home $home
+```
+
+The tunnel token is stored with Windows DPAPI. `CODEMCP_RS_VERIFICATION_SECRET` is not required for Profile A. `--home` takes precedence over `CODEMCP_HOME`; `--app-root` remains a legacy compatibility option. `doctor` should show Cloudflare, `auth.mode = none`, network trust ready, the exact allowed host, `identity_level = network-only`, and a DPAPI tunnel-secret source.
+
+`/healthz` is a lifecycle probe, not a public application endpoint. Review Tunnel ingress separately so it is not exposed as an unintended public route.
+
 ## Installed release quick start
 
-After installing Git for Windows and `codemcp-remote-setup.exe`, initialize the installed runtime directly from its default per-user location:
+After installing Git for Windows and `codemcp-remote-setup.exe`, the recommended quick start is the Profile A command sequence above. The older OpenAI Secure MCP Tunnel remains available as an explicit compatibility transport:
 
 ```powershell
 $exe = "$env:LOCALAPPDATA\Programs\codemcp-remote\codemcp-remote.exe"
@@ -93,7 +149,7 @@ $env:CONTROL_PLANE_API_KEY = $null
 & $exe status
 ```
 
-`--store-api-key` uses Windows DPAPI. Do not paste the API key into chat or store it in the Tunnel env/profile files.
+`--store-api-key` uses Windows DPAPI. Do not paste the API key into chat or store it in the Tunnel env/profile files. This compatibility path is transport-specific and does not replace the Cloudflare network-trust profile for the recommended public deployment.
 
 For clean-machine release validation, use [`docs/releases/v0.1.0/packaging-phase-5-clean-machine-validation.md`](docs/releases/v0.1.0/packaging-phase-5-clean-machine-validation.md).
 
@@ -186,13 +242,15 @@ pwsh -File .\scripts\stop-all.ps1 -WhatIf
 
 ## Connect from ChatGPT
 
-Follow [`docs/guides/tunnel-setup.md`](docs/guides/tunnel-setup.md):
+For the recommended path, follow [`docs/guides/cloudflare-tunnel-setup.md`](docs/guides/cloudflare-tunnel-setup.md):
 
-1. keep the local Bridge and `tunnel-client` healthy;
-2. create/use a ChatGPT developer-mode app with the supported Tunnel connection;
-3. select the Tunnel associated with the intended workspace;
+1. configure the Cloudflare IP List and whole-host WAF rule;
+2. keep the local Bridge and `cloudflared` healthy;
+3. create/use a ChatGPT Connector with `Authentication = No authentication` and the public `/mcp` URL;
 4. confirm that the Bridge tools are discovered;
 5. run the remote contract in [`tests/e2e/test_tunnel_contract.md`](tests/e2e/test_tunnel_contract.md).
+
+Profile B keeps the existing OAuth Resource Server interoperability path for multi-user, enterprise, or subject/scope-aware deployments. It continues to use `auth.mode = "oauth-resource-server"`, `mcp-rs-verification-v1`, RFC 9728 metadata/challenges, and an independently deployed `mcp-auth-server`.
 
 A safe first request is read-only: open one registered project, inspect its status, then read a non-sensitive source file.
 

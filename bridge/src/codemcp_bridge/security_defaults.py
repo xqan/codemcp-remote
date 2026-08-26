@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Mapping
 
 DEFAULT_ALLOWED_BRANCHES = ("main", "master", "codex/*")
 DEFAULT_REQUIRE_CLEAN_WORKSPACE = True

@@ -277,11 +277,14 @@ async def test_shared_ref_check_ignores_checkpoint_refs_and_blocks_published_ref
     head = _git(git_project, "rev-parse", "HEAD")
     checkpoint_ref = "refs/codemcp-remote/checkpoints/" + ("a" * 32)
     await guard.create_checkpoint_ref(git_project, checkpoint_ref, head)
-    assert await guard.shared_refs_containing_head(
-        git_project,
-        head=head,
-        branch="main",
-    ) == ()
+    assert (
+        await guard.shared_refs_containing_head(
+            git_project,
+            head=head,
+            branch="main",
+        )
+        == ()
+    )
 
     _git(git_project, "update-ref", "refs/remotes/origin/main", head)
     assert await guard.has_shared_refs_containing_head(
@@ -616,8 +619,11 @@ async def test_checkpoint_mcp_approval_diff_and_cas_restore(
     assert restored_edit_checkpoint["before"]["head"] == baseline_head
     assert restored_edit_head != baseline_head
     assert _git(git_project, "rev-list", "--count", "main") == "2"
-    assert await bridge.git.read_session_footer(
-        git_project,
-        head=restored_edit_head,
-    ) == session.session_id
+    assert (
+        await bridge.git.read_session_footer(
+            git_project,
+            head=restored_edit_head,
+        )
+        == session.session_id
+    )
     await bridge.close()

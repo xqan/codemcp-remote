@@ -8,9 +8,7 @@ from codemcp_bridge.transports.cloudflare import (
 )
 
 EXPECTED_CLOUDFLARED_VERSION = "2026.7.3"
-EXPECTED_CLOUDFLARED_SHA256 = (
-    "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841"
-)
+EXPECTED_CLOUDFLARED_SHA256 = "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841"
 
 
 def _repository_root() -> Path:
@@ -66,7 +64,10 @@ def test_release_manifest_is_cloudflare_first_and_external_auth_is_not_bundled()
     assert 'executable = "cloudflared.exe"' in script
     assert f'version = "{EXPECTED_CLOUDFLARED_VERSION}"' in script
     assert f'sha256 = "{EXPECTED_CLOUDFLARED_SHA256}"' in script
-    assert "compatible external mcp-auth-server deployment implementing mcp-rs-verification-v1" in script
+    assert (
+        "compatible external mcp-auth-server deployment implementing mcp-rs-verification-v1"
+        in script
+    )
     assert "local or bundled mcp-auth-server runtime" in script
 
 
@@ -75,4 +76,4 @@ def test_inno_uninstall_does_not_target_user_runtime_data() -> None:
 
     assert "[UninstallDelete]" not in script
     assert 'Source: "{#SourceDir}\\*"; DestDir: "{app}"' in script
-    assert "codemcp-remote.exe\"; Parameters: \"stop\"" in script
+    assert 'codemcp-remote.exe"; Parameters: "stop"' in script

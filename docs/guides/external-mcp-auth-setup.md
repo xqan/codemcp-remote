@@ -1,6 +1,12 @@
-# External mcp-auth-server Setup for Phase 5.5.7
+# External mcp-auth-server Setup for Phase 5.5.7B
 
-Status: **LIVE ACCEPTANCE GUIDE**
+Status: **OPTIONAL ADVANCED PROFILE — live interoperability is not required for the recommended 5.5.7A personal deployment**
+
+The recommended v0.1.0 personal path uses ChatGPT Connector `Authentication =
+No authentication` plus Cloudflare network trust. This guide documents the
+preserved OAuth Resource Server profile for multi-user, enterprise, or
+subject/client/scope-aware deployments. OAuth was moved to an optional advanced
+profile; it was not abandoned or deleted.
 
 `codemcp-remote` consumes `mcp-auth-server` only through the frozen protocol boundary. The authorization server remains independently deployed and independently versioned.
 

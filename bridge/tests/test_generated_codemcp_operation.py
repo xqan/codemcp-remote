@@ -219,7 +219,10 @@ async def test_registered_command_head_change_blocks_project_until_reconcile(
     assert blocked["error"]["code"] == "OPERATION_BLOCKED"
     assert blocked["error"]["details"]["operation_id"] == operation_id
 
-    evidence = "unexpected command commit confirmed; repository is clean and the changed HEAD is understood"
+    evidence = (
+        "unexpected command commit confirmed; repository is clean and the changed HEAD is "
+        "understood"
+    )
     reconciled = await service.operation_reconcile(
         None,
         operation_id,

@@ -45,6 +45,7 @@ def test_native_windows_worker_matrix_from_wsl() -> None:
         encoding="utf-8",
         errors="replace",
         timeout=240,
+        check=False,
     )
     if completed.returncode != 0:
         pytest.fail(

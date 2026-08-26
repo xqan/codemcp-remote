@@ -260,7 +260,7 @@ async def test_worker_contexts_are_owned_and_closed_by_same_task(
             del args, kwargs
             self._task_group: Any = None
 
-        async def __aenter__(self) -> "FakeClientSession":
+        async def __aenter__(self) -> FakeClientSession:
             self._task_group = anyio.create_task_group()
             await self._task_group.__aenter__()
             events.append(("session-enter", asyncio.current_task()))
@@ -340,7 +340,7 @@ async def test_cancelled_worker_call_discards_and_closes_worker(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             del args, kwargs
 
-        async def __aenter__(self) -> "FakeClientSession":
+        async def __aenter__(self) -> FakeClientSession:
             return self
 
         async def __aexit__(
@@ -399,7 +399,7 @@ async def test_cancelled_startup_does_not_cancel_shared_startup_future(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             del args, kwargs
 
-        async def __aenter__(self) -> "FakeClientSession":
+        async def __aenter__(self) -> FakeClientSession:
             return self
 
         async def __aexit__(
@@ -463,7 +463,7 @@ async def test_manager_close_waits_for_inflight_call_then_closes_owner(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             del args, kwargs
 
-        async def __aenter__(self) -> "FakeClientSession":
+        async def __aenter__(self) -> FakeClientSession:
             return self
 
         async def __aexit__(
