@@ -2,7 +2,7 @@
 
 Date: 2026-08-26
 
-Status: **LOCAL GATES READY; Phase H live Cloudflare/ChatGPT acceptance has not been executed**
+Status: **LIVE ACCEPTANCE COMPLETE; STRICT PACKAGING PHASE 5 PASS NOT CLAIMED; STABLE v0.1.0 REMAINS BLOCKED BY PHASE 7**
 
 ## Objective
 
@@ -380,4 +380,4 @@ Packaging Phase 5 is PASS only when all of the following are recorded:
 - cleanup/uninstall succeeds;
 - no Phase H live action or `v0.1.0` freeze is implied by local gates.
 
-The local implementation and harness gates are complete. Until Phase H records the stopped-tunnel, ordinary-IP WAF block, ChatGPT Connector No-Auth contract, Security Events, and cleanup evidence, the release remains open.
+Phase H live acceptance is now complete for the working `codemcp-557` Profile A path: real ChatGPT No-Auth access, complete tool discovery, project access, mutation, identical replay, explicit approval, checkpoint/CAS restore, exact clean-baseline recovery, ordinary-source Cloudflare `Block`, and ChatGPT-source `Allow` were recorded. The final registered gates also passed (`316 passed, 6 skipped`; 72 files already formatted). Strict Packaging Phase 5 PASS is intentionally not claimed because the live mutation used a dedicated temporary file in the registered `codemcp-remote` repository rather than the disposable `phase5-clean` repository, and Cleanup/uninstall was deferred to preserve the validated working connector. The optional stopped-Tunnel `1033` proof was also skipped. These are documented Phase H/Packaging Phase 5 deviations. They do not block normal use of the validated `codemcp-557` network-trust path, but **stable `v0.1.0` remains blocked by the mandatory repository-wide Phase 7 gates in `docs/acceptance/acceptance-test-plan.md`**; this document does not imply that a release tag or artifact has been approved.

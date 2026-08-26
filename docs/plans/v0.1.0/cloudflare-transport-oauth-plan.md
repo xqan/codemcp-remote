@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + Network Trust + Optional OAuth
 
-Status: **PHASE G COMPLETE — recommended 5.5.7A No-Auth + Cloudflare network-trust path, optional 5.5.7B OAuth path, lifecycle/CLI gates, Windows acceptance profiles, documentation, and local regression gates are complete; Phase H live acceptance is prepared but not executed**
+Status: **PHASE H COMPLETE — NETWORK TRUST TRACK CLOSED — the recommended 5.5.7A No-Auth + Cloudflare network-trust path passed real ChatGPT tool discovery, project access, mutation, replay, approval, checkpoint/CAS restore, exact clean-baseline recovery, Cloudflare BLOCK/ALLOW evidence, and the final registered gates (`316 passed, 6 skipped`; 72 files formatted). Stable `v0.1.0` publication remains BLOCKED by the separate repository-wide Phase 7 acceptance plan.**
 
 Target release: `v0.1.0`
 
@@ -25,7 +25,7 @@ This section supersedes earlier “not started” statements retained in the his
 | E | COMPLETE | Clean Windows 5.5.7A/5.5.7B acceptance profiles and DPAPI/home wiring; commit `c74a639` |
 | F | COMPLETE | Cloudflare deployment/WAF boundary is external operator state; this closeout does not call the Cloudflare API, hardcode IP ranges, or duplicate live provisioning |
 | G | COMPLETE | Documentation alignment, installer smoke impact review, full local regression/lint/compile evidence; current closeout commit is recorded with this update |
-| H | READY, NOT RUN | Live stopped/blocked/allowed/connector/security-event acceptance instructions only; no endpoint or account mutation was executed |
+| H | COMPLETE | Real `codemcp-557` No-Auth connector reached the Bridge and passed project access, 22-tool discovery, mutation, identical replay, explicit approval, checkpoint/CAS restore, exact clean-baseline recovery, plus Cloudflare ordinary-source `Block` and ChatGPT-source `Allow` evidence. Optional `1033` proof was skipped; release freeze remains pending. |
 
 ### Recommended v0.1.0 personal profile
 
