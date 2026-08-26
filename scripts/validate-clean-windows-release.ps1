@@ -56,6 +56,29 @@ function Invoke-JsonCommand {
     }
 }
 
+function Remove-AcceptanceProjectRegistration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectId,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedRoot
+    )
+
+    $result = Invoke-JsonCommand -FilePath $FilePath -ArgumentList @(
+        "project",
+        "remove",
+        $ProjectId,
+        "--expected-root",
+        $ExpectedRoot
+    )
+    if ($result.status -ne "ok" -and $result.status -ne "not-found") {
+        throw "Phase 5 project registration removal did not complete safely"
+    }
+    return $result
+}
+
 function Require-CleanAcceptanceHost {
     if ($env:OS -ne "Windows_NT") {
         throw "Phase 5 clean-machine validation must run on Windows"
@@ -377,10 +400,26 @@ function Remove-Phase5AcceptanceTree {
     $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\")
     $allowedPaths = @(
         [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "codemcp-remote")).TrimEnd("\"),
-        [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5")).TrimEnd("\")
+        [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5")).TrimEnd("\"),
+        [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5\project")).TrimEnd("\")
     )
     if ($allowedPaths -notcontains $fullPath) {
         throw "Reset refused to remove a path outside the fixed Phase 5 acceptance roots: $fullPath"
+    }
+
+    $existingAncestor = $fullPath
+    while (-not (Test-Path -LiteralPath $existingAncestor)) {
+        $parent = Split-Path -Parent $existingAncestor
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $existingAncestor) {
+            break
+        }
+        $existingAncestor = $parent
+    }
+    if (Test-Path -LiteralPath $existingAncestor) {
+        $ancestorItem = Get-Item -LiteralPath $existingAncestor -Force
+        if (($ancestorItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Reset refused to traverse a reparse-point acceptance ancestor: $existingAncestor"
+        }
     }
     if (-not (Test-Path -LiteralPath $fullPath)) {
         return
@@ -465,10 +504,18 @@ if ($actualInstallerSha256 -ne $ExpectedInstallerSha256.ToLowerInvariant()) {
 }
 
 $gitPath = Resolve-Git
+$defaultProjectRootPath = [System.IO.Path]::GetFullPath($DefaultProjectRoot).TrimEnd("\")
+if ($ProjectId -ne "phase5-clean") {
+    throw "Prepare only manages the fixed Phase 5 project_id 'phase5-clean'"
+}
 $projectRootPath = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $DefaultProjectRoot
 } else {
     [System.IO.Path]::GetFullPath($ProjectRoot)
+}
+$requestedProjectRootPath = [System.IO.Path]::GetFullPath($projectRootPath).TrimEnd("\")
+if (-not [string]::Equals($requestedProjectRootPath, $defaultProjectRootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Prepare only manages the fixed Phase 5 project root: $DefaultProjectRoot"
 }
 
 $setupExit = Invoke-GuiProcessAndWait -FilePath $installer -ArgumentList @(
@@ -548,6 +595,12 @@ $env:TUNNEL_TOKEN = $null
 $env:CODEMCP_RS_VERIFICATION_SECRET = $null
 $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
 Assert-DoctorContract -Doctor $doctor
+
+$registration = Remove-AcceptanceProjectRegistration `
+    -FilePath $release.exe `
+    -ProjectId $ProjectId `
+    -ExpectedRoot $projectRootPath
+Remove-Phase5AcceptanceTree -Path $projectRootPath
 
 $baselineHead = Prepare-AcceptanceProject -GitPath $gitPath -Root $projectRootPath
 $project = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @(

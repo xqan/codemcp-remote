@@ -452,6 +452,95 @@ def add_project(paths: RuntimePaths, *, project_id: str, root: Path) -> dict[str
     return {"status": "ok", "project_id": project_id, "root": str(project_root)}
 
 
+def remove_project(
+    paths: RuntimePaths,
+    *,
+    project_id: str,
+    expected_root: Path,
+) -> dict[str, Any]:
+    """Unregister one project only when its configured root matches exactly.
+
+    The expected-root check is intentionally mandatory for callers such as the
+    clean-machine acceptance harness.  It prevents a disposable project ID from
+    being used to remove an unrelated user-owned registration.
+    """
+
+    if not PROJECT_ID_PATTERN.fullmatch(project_id):
+        raise LifecycleError("project id must contain only letters, digits, '.', '_' or '-'")
+    if not paths.projects_config.is_file():
+        raise LifecycleError("projects.toml is missing; run 'codemcp-remote init' first")
+
+    import tomllib
+
+    raw = paths.projects_config.read_text(encoding="utf-8")
+    try:
+        parsed = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        raise LifecycleError(f"projects.toml is invalid: {exc}") from exc
+    projects = parsed.get("projects", {})
+    if not isinstance(projects, dict):
+        raise LifecycleError("projects.toml [projects] must be a table")
+    if project_id not in projects:
+        return {"status": "not-found", "project_id": project_id}
+
+    raw_project = projects[project_id]
+    if not isinstance(raw_project, dict):
+        raise LifecycleError(f"project registration is invalid: {project_id}")
+    registered_root_value = raw_project.get("root")
+    if not isinstance(registered_root_value, str) or not registered_root_value.strip():
+        raise LifecycleError(f"project registration has no valid root: {project_id}")
+    registered_root = Path(registered_root_value).expanduser()
+    if not registered_root.is_absolute():
+        registered_root = paths.projects_config.parent / registered_root
+    registered_root = registered_root.resolve(strict=False)
+    expected = expected_root.expanduser().resolve(strict=False)
+    if os.path.normcase(str(registered_root)) != os.path.normcase(str(expected)):
+        raise LifecycleError(
+            f"project root ownership mismatch for {project_id}: "
+            f"registered={registered_root} expected={expected}"
+        )
+
+    base_table = f"projects.{project_id}"
+    lines = raw.splitlines(keepends=True)
+    section_start: int | None = None
+    section_end: int | None = None
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*\[([^\]]+)\]", line)
+        if match is None:
+            continue
+        table_name = match.group(1).strip()
+        if section_start is None:
+            if table_name == base_table:
+                section_start = index
+            continue
+        if table_name != base_table and not table_name.startswith(f"{base_table}."):
+            section_end = index
+            break
+
+    if section_start is None:
+        raise LifecycleError(
+            f"project registration section not found for {project_id}; refusing removal"
+        )
+    if section_end is None:
+        section_end = len(lines)
+
+    candidate = "".join(lines[:section_start] + lines[section_end:])
+    temporary = paths.projects_config.with_suffix(".toml.tmp")
+    temporary.write_text(candidate, encoding="utf-8", newline="\n")
+    try:
+        load_settings(paths.bridge_config, temporary)
+    except SettingsError as exc:
+        temporary.unlink(missing_ok=True)
+        raise LifecycleError(f"project configuration is invalid after removal: {exc}") from exc
+    os.replace(temporary, paths.projects_config)
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "root": str(registered_root),
+        "removed": True,
+    }
+
+
 def load_tunnel_settings(paths: RuntimePaths, *, env_file: Path | None = None) -> Any:
     provider, _ = load_transport_provider(paths)
     return provider.load_settings(

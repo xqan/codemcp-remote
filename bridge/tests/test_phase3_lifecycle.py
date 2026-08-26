@@ -16,6 +16,7 @@ from codemcp_bridge.lifecycle import (
     initialize_runtime,
     load_tunnel_settings,
     redact_log_text,
+    remove_project,
     runtime_paths,
     start_services,
     stop_services,
@@ -160,6 +161,70 @@ def test_add_project_validates_then_atomically_replaces_config(tmp_path: Path) -
 
     with pytest.raises(LifecycleError, match="already exists"):
         add_project(paths, project_id="demo", root=project)
+
+
+def test_remove_project_requires_exact_root_and_preserves_other_registrations(
+    tmp_path: Path,
+) -> None:
+    _, paths = _runtime(tmp_path)
+    initialize_runtime(paths, tunnel_id="tunnel_12345678")
+    owned = tmp_path / "owned"
+    other = tmp_path / "other"
+    owned.mkdir()
+    other.mkdir()
+
+    add_project(paths, project_id="demo", root=owned)
+    add_project(paths, project_id="other", root=other)
+    original = paths.projects_config.read_text(encoding="utf-8")
+
+    with pytest.raises(LifecycleError, match="ownership mismatch"):
+        remove_project(paths, project_id="demo", expected_root=other)
+    assert paths.projects_config.read_text(encoding="utf-8") == original
+    assert owned.is_dir()
+
+    result = remove_project(paths, project_id="demo", expected_root=owned)
+
+    assert result == {
+        "status": "ok",
+        "project_id": "demo",
+        "root": str(owned.resolve()),
+        "removed": True,
+    }
+    updated = paths.projects_config.read_text(encoding="utf-8")
+    assert "[projects.demo]" not in updated
+    assert "[projects.other]" in updated
+    assert not paths.projects_config.with_suffix(".toml.tmp").exists()
+    assert remove_project(paths, project_id="demo", expected_root=owned) == {
+        "status": "not-found",
+        "project_id": "demo",
+    }
+
+
+def test_remove_project_removes_nested_command_tables_without_touching_following_project(
+    tmp_path: Path,
+) -> None:
+    _, paths = _runtime(tmp_path)
+    initialize_runtime(paths, tunnel_id="tunnel_12345678")
+    owned = tmp_path / "owned"
+    other = tmp_path / "other"
+    owned.mkdir()
+    other.mkdir()
+    add_project(paths, project_id="demo", root=owned)
+    paths.projects_config.write_text(
+        paths.projects_config.read_text(encoding="utf-8")
+        + "\n[projects.demo.commands.test]\n"
+        + 'kind = "test"\nargv = ["echo", "ok"]\n'
+        + "\n[projects.other]\n"
+        + f'root = "{other.as_posix()}"\n',
+        encoding="utf-8",
+    )
+
+    remove_project(paths, project_id="demo", expected_root=owned)
+
+    updated = paths.projects_config.read_text(encoding="utf-8")
+    assert "projects.demo" not in updated
+    assert "[projects.other]" in updated
+    assert other.resolve().as_posix() in updated
 
 
 def test_validate_tunnel_profile_enforces_openai_http_contract(tmp_path: Path) -> None:

@@ -40,11 +40,11 @@ The bundled `cloudflared.exe` is pinned by the release and runs with fixed argum
 
 ## Clean Windows acceptance
 
-Use the accepted installer:
+Use the current Phase 5.5.7 installer candidate (Live reinstall is still pending):
 
 ```text
 .local\installer-dist\codemcp-remote-setup.exe
-SHA-256: 7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93
+SHA-256: b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e
 ```
 
 In a fresh PowerShell process, provide secrets only through the process environment:
@@ -56,7 +56,7 @@ $env:CODEMCP_RS_VERIFICATION_SECRET = '<resource-server-verification-secret>'
 pwsh -NoLogo -NoProfile -File .\scripts\validate-clean-windows-release.ps1 `
   -Action Prepare `
   -InstallerPath .\.local\installer-dist\codemcp-remote-setup.exe `
-  -ExpectedInstallerSha256 7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93 `
+  -ExpectedInstallerSha256 b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e `
   -Transport cloudflare `
   -PublicUrl 'https://<mcp-host>/mcp' `
   -AuthorizationServerIssuer 'https://<auth-host>' `
@@ -65,6 +65,12 @@ pwsh -NoLogo -NoProfile -File .\scripts\validate-clean-windows-release.ps1 `
 ```
 
 `Prepare` installs the release, verifies the installer hash, proves the isolated runtime does not depend on Python/uv/pwsh, initializes the Cloudflare transport and OAuth Resource Server configuration, stores both runtime secrets with DPAPI, creates the disposable `phase5-clean` project, and records the baseline Git HEAD without storing either secret.
+
+On a Prepare rerun, the harness first calls the packaged `project remove` operation with the expected
+fixed disposable root. A missing registration is treated as the first-run case; an exact matching
+registration is removed before a new Git baseline is created; any other registered root fails closed.
+The fixed acceptance subtree is the only project filesystem path removed automatically. DPAPI
+transport/auth credentials remain intact, and a custom `-ProjectRoot` is rejected.
 
 Then start from DPAPI-backed state:
 

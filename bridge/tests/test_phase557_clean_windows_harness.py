@@ -10,9 +10,7 @@ import pytest
 
 def _script() -> str:
     return (
-        Path(__file__).resolve().parents[2]
-        / "scripts"
-        / "validate-clean-windows-release.ps1"
+        Path(__file__).resolve().parents[2] / "scripts" / "validate-clean-windows-release.ps1"
     ).read_text(encoding="utf-8")
 
 
@@ -30,6 +28,32 @@ def test_phase557_clean_windows_harness_is_cloudflare_first() -> None:
     assert '"--canonical-resource-uri", $CanonicalResourceUri' in script
     assert '"--validation-resource-id", $ValidationResourceId' in script
     assert '"--store-auth-secret"' in script
+
+
+def test_phase557_prepare_reclaims_only_owned_project_registration() -> None:
+    script = _script()
+
+    assert "function Remove-AcceptanceProjectRegistration" in script
+    assert '"project"' in script
+    assert '"remove"' in script
+    assert '"--expected-root"' in script
+    assert '$result.status -ne "ok" -and $result.status -ne "not-found"' in script
+    assert "$registration = Remove-AcceptanceProjectRegistration" in script
+    assert "Prepare only manages the fixed Phase 5 project_id 'phase5-clean'" in script
+    assert "Prepare only manages the fixed Phase 5 project root" in script
+
+
+def test_phase557_prepare_rebuilds_project_and_records_fresh_baseline() -> None:
+    script = _script()
+
+    registration_index = script.index("$registration = Remove-AcceptanceProjectRegistration")
+    baseline_index = script.index("$baselineHead = Prepare-AcceptanceProject")
+    project_add_index = script.index('"project", "add", $ProjectId, $projectRootPath')
+    state_index = script.index("baseline_head = $baselineHead")
+
+    assert registration_index < baseline_index < project_add_index < state_index
+    assert "Remove-Phase5AcceptanceTree -Path $projectRootPath" in script
+    assert "baseline_head = $baselineHead" in script
 
 
 def test_phase557_secrets_are_environment_only_and_rechecked_from_dpapi() -> None:
@@ -65,7 +89,7 @@ def test_phase557_disposable_project_has_profile_marker_but_no_codemcp_config() 
     assert '"pyproject.toml"' in script
     assert '"PHASE5_ACCEPTANCE.txt"' in script
     assert 'name = "codemcp-remote-phase5-acceptance"' in script
-    assert 'add README.md pyproject.toml PHASE5_ACCEPTANCE.txt' in script
+    assert "add README.md pyproject.toml PHASE5_ACCEPTANCE.txt" in script
     assert 'Join-Path $Root "codemcp.toml"' not in script
 
 
@@ -86,9 +110,7 @@ def test_phase557_clean_windows_harness_parses_as_powershell() -> None:
         pytest.skip("PowerShell 7 is unavailable")
 
     script_path = (
-        Path(__file__).resolve().parents[2]
-        / "scripts"
-        / "validate-clean-windows-release.ps1"
+        Path(__file__).resolve().parents[2] / "scripts" / "validate-clean-windows-release.ps1"
     )
     escaped_script_path = str(script_path).replace("'", "''")
     parser_command = (

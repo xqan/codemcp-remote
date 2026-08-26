@@ -1,6 +1,6 @@
 # Phase 5.5.7 — mcp-auth-server + ChatGPT Live Interoperability Acceptance
 
-Status: **IN PROGRESS — RFC 9728 repository fix PASS; new installer candidate READY; live reinstall and ChatGPT proof pending**
+Status: **IN PROGRESS — RFC 9728 repository fix PASS; harness rerun fix READY; new installer candidate READY; live reinstall and ChatGPT proof pending**
 
 Date: 2026-08-26
 
@@ -68,12 +68,13 @@ It proves or enforces before live ChatGPT testing:
 - `mcp-rs-verification-v1`;
 - no embedded `mcp-auth-server` runtime/private signing/user/client/refresh-token state;
 - disposable `phase5-clean` repository with `README.md`, `PHASE5_ACCEPTANCE.txt`, and `pyproject.toml`, but no `codemcp.toml`;
+- rerun ownership check for the fixed `phase5-clean` registration before creating a fresh disposable Git baseline;
 - native PowerShell parser validity of the acceptance harness.
 
-Current full regression after the harness upgrade:
+Current full regression after the harness rerun fix:
 
 ```text
-217 passed
+223 passed
 6 skipped
 0 failed
 ```
@@ -177,13 +178,77 @@ secret.
 | Phase 5.5.7 state | Result |
 |---|---|
 | Repository fix | PASS |
-| New installer candidate | READY |
+| Prior installer candidate (`ead65ece...`) | SUPERSEDED FOR RERUN |
 | Live installed binary | PENDING REINSTALL |
 | Live RFC 9728 verification | PENDING |
 | ChatGPT OAuth | PENDING |
 
 This candidate has not completed user clean Windows `Prepare`/`Start`, public curl verification, or
 ChatGPT OAuth E2E. The LIVE blocker is not PASS.
+
+## 2026-08-26 LIVE reinstall rerun blocker
+
+The first live reinstall attempt with candidate SHA-256
+`ead65eceea08b97f13c46710b7301b086217712da896e3f71951356f1d9809ed` stopped during `Prepare`:
+
+```text
+codemcp-remote.exe project add phase5-clean
+-> project already exists: phase5-clean
+```
+
+The previous `Prepare` had left the `phase5-clean` registration in the persisted
+`%LOCALAPPDATA%\codemcp-remote\config\projects.toml` even though the disposable filesystem project
+had been recreated. `init` intentionally preserves that configuration and the product CLI had no
+formal project unregister operation, so `project add` correctly failed instead of silently replacing
+an unknown registration. This is a harness rerun blocker, not an OAuth or Cloudflare contract change.
+
+The repository fix adds a formal `project remove <project-id> --expected-root <project-root>` operation.
+`Prepare` now treats a missing registration as the first-run case, removes an existing registration
+only when its resolved root exactly matches the harness-owned disposable root, and fails closed on any
+other root. It then removes only the fixed acceptance project subtree, creates a new Git repository,
+and records its new baseline. DPAPI tunnel/auth credentials and the rest of the runtime state are not
+deleted. A custom `-ProjectRoot` is rejected; the harness manages only its fixed acceptance root.
+
+The harness rerun fix is **READY**. The packaged CLI change required a replacement installer candidate
+below; no user `Prepare`/`Start`, Cloudflare change, Cleanup, or ChatGPT OAuth action has been run after
+this fix. Live reinstall remains pending.
+
+## 2026-08-26 harness rerun fix installer candidate
+
+The clean Windows packaging workflow rebuilt the executable and installer from the repository containing
+the harness rerun fix. The prior `ead65ece...` candidate contains the RFC 9728 fix but not this packaged
+CLI operation; it is superseded for the rerun acceptance.
+
+```text
+installer:
+.local\installer-dist\codemcp-remote-setup.exe
+
+NEW CANDIDATE SHA-256:
+b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e
+
+release-candidate ZIP SHA-256:
+0a63c7acb2a09bcc00d250ed2a7177499025d3d495dc7b38ffd97de5667c078f
+
+PRIOR CANDIDATE SHA-256 (superseded for rerun):
+ead65eceea08b97f13c46710b7301b086217712da896e3f71951356f1d9809ed
+
+OLD STALE LIVE SHA-256:
+7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93
+```
+
+The exact staged packaged executable passed local smoke for `project remove` (matching root succeeds,
+missing registration is idempotent, and a different root fails closed), RFC 9728 metadata, and the
+Bearer challenge. Targeted lifecycle/harness tests passed (`21 passed`), and the complete repository
+regression passed (`223 passed / 6 skipped / 0 failed`). No Live endpoint was revalidated.
+
+| Phase 5.5.7 state | Result |
+|---|---|
+| Repository fix | PASS |
+| Harness rerun fix | READY |
+| New installer candidate | READY |
+| Live installed binary | PENDING REINSTALL |
+| Live RFC 9728 verification | PENDING |
+| ChatGPT OAuth | PENDING |
 
 ## Client-policy correction from the historical spike
 
@@ -211,7 +276,7 @@ Meaningful custom OAuth scope-to-tool enforcement remains **NOT PROVEN** and is 
 
 | Requirement | Result | Evidence / remaining work |
 |---|---|---|
-| Installer hash / packaging | NEW CANDIDATE READY | SHA-256 `ead65eceea08b97f13c46710b7301b086217712da896e3f71951356f1d9809ed`; reinstall pending |
+| Installer hash / packaging | NEW CANDIDATE READY | SHA-256 `b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e`; live reinstall pending |
 | Native local worker / isolated PATH | PASS | Clean harness + prior native packaging acceptance |
 | Cloudflared bundled / fixed transport | PASS | Packaging and regression gates |
 | Loopback-only Bridge origin | PASS | Provider + harness contract |
@@ -220,13 +285,13 @@ Meaningful custom OAuth scope-to-tool enforcement remains **NOT PROVEN** and is 
 | No embedded auth-server private state | PASS | Harness fail-closed scan |
 | `mcp-rs-verification-v1` consumer behavior | PASS | Resource Server regression suite |
 | Wrong-resource / inactive / outage unit behavior | PASS | Resource Server security regression |
-| Current full regression | PASS | 219 passed / 6 skipped / 0 failed after RFC 9728 repository fix |
+| Current full regression | PASS | 223 passed / 6 skipped / 0 failed after the harness rerun fix |
 | Real public Cloudflare hostname/tunnel | ASSIGNED / LIVE PROOF PENDING | `https://codemcp.quickclip.cc/mcp` |
 | Real deployed auth issuer | LIVE ISSUER ASSIGNED | `https://auth-staging.quickclip.cc`; positive OAuth still pending |
 | codemcp Resource Registry entry | PASS | resource_id `0a8721b3-8944-47a5-b1ce-7351963fcb71`; resource `https://codemcp.quickclip.cc/mcp` |
-| Clean Windows Prepare | LIVE PASS | installer SHA `7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93`; project `phase5-clean`; baseline `87fca7ed129cd2493e6b872331873a4664077128`; worker `local`; tunnel/auth secrets recovered from `windows-dpapi`; isolated PATH excludes Python/uv/pwsh |
+| Clean Windows Prepare | RERUN BLOCKED — HARNESS FIX READY | First rerun with `ead65ece...` failed at persisted `phase5-clean` registration; install with `b0c99f7b...` and rerun pending |
 | Exact deployed auth-server commit/build | PARTIAL | Clean repo HEAD `b2372b61cf702874c6cae438ba504efe8bc0b4e6`; deployed Worker version still must be captured |
-| ChatGPT OAuth discovery | BLOCKED — CANDIDATE READY / LIVE REINSTALL PENDING | Install the new candidate and repeat public RFC 9728 curl proof before OAuth E2E |
+| ChatGPT OAuth discovery | BLOCKED — HARNESS RERUN FIX READY / LIVE REINSTALL PENDING | Install `b0c99f7b...`, complete Prepare/Start, then repeat public RFC 9728 curl proof before OAuth E2E |
 | CIMD/static-client interoperability | PENDING LIVE | Use current ChatGPT UI values |
 | Authorization Code + PKCE | PENDING LIVE | Requires real identity/session |
 | Refresh/session renewal | PENDING LIVE | Must preserve exact resource binding |

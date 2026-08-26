@@ -25,6 +25,7 @@ from .lifecycle import (
     load_request_authenticator,
     load_transport_provider,
     load_tunnel_settings,
+    remove_project,
     run_tunnel_proxy,
     runtime_paths,
     start_services,
@@ -84,6 +85,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("subcommand", nargs="?")
     parser.add_argument("project_id", nargs="?")
     parser.add_argument("project_root", nargs="?")
+    parser.add_argument("--expected-root", type=Path)
     parser.add_argument("--bridge-config", type=Path)
     parser.add_argument("--projects-config", type=Path)
     parser.add_argument("--env-file", type=Path)
@@ -187,15 +189,32 @@ def main() -> int:
                 if provider.provider_id == "openai-tunnel":
                     result["tunnel_profile"] = str(config)
             elif args.command == "project":
-                if args.subcommand != "add" or not args.project_id or not args.project_root:
-                    raise LifecycleError(
-                        "usage: codemcp-remote project add <project-id> <project-root>"
+                if args.subcommand == "add":
+                    if not args.project_id or not args.project_root:
+                        raise LifecycleError(
+                            "usage: codemcp-remote project add <project-id> <project-root>"
+                        )
+                    result = add_project(
+                        paths,
+                        project_id=args.project_id,
+                        root=Path(args.project_root),
                     )
-                result = add_project(
-                    paths,
-                    project_id=args.project_id,
-                    root=Path(args.project_root),
-                )
+                elif args.subcommand == "remove":
+                    if not args.project_id or args.expected_root is None:
+                        raise LifecycleError(
+                            "usage: codemcp-remote project remove <project-id> "
+                            "--expected-root <project-root>"
+                        )
+                    result = remove_project(
+                        paths,
+                        project_id=args.project_id,
+                        expected_root=args.expected_root,
+                    )
+                else:
+                    raise LifecycleError(
+                        "usage: codemcp-remote project add <project-id> <project-root> "
+                        "or project remove <project-id> --expected-root <project-root>"
+                    )
             elif args.command == "start":
                 result = start_services(
                     paths,
