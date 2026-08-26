@@ -147,15 +147,31 @@ def test_cloudflare_network_profile_starts_without_oauth_secret(
         "_secret_from_runtime",
         lambda _paths, _provider=None: "transport-secret",
     )
+
+    http_checks: list[tuple[str, object]] = []
+
+    def fake_http_check(url: str, timeout: float = 2.0, headers=None) -> dict[str, object]:
+        del timeout
+        http_checks.append((url, headers))
+        return {"status": "unreachable", "url": url}
+
     monkeypatch.setattr(
         lifecycle,
         "_http_check",
-        lambda url, timeout=2.0: {"status": "unreachable", "url": url},
+        fake_http_check,
     )
+
+    endpoint_checks: list[tuple[str, object]] = []
+
+    def fake_wait_endpoint(url: str, process, timeout: float, headers=None) -> dict[str, object]:
+        del process, timeout
+        endpoint_checks.append((url, headers))
+        return {"status": "ok", "status_code": 200, "url": url}
+
     monkeypatch.setattr(
         lifecycle,
         "_wait_endpoint",
-        lambda url, process, timeout: {"status": "ok", "status_code": 200, "url": url},
+        fake_wait_endpoint,
     )
     monkeypatch.setattr(lifecycle, "_process_marker", lambda pid: f"marker-{pid}")
     processes: list[SimpleNamespace] = []
@@ -178,6 +194,12 @@ def test_cloudflare_network_profile_starts_without_oauth_secret(
     assert processes[0].args[-2:] == ["--home", str(paths.home)]
     assert processes[1].args[-2:] == ["--home", str(paths.home)]
     assert lifecycle.RESOURCE_AUTH_SECRET_ENV_NAME not in repr(result)
+    bridge_checks = [item for item in http_checks if item[0].endswith("/healthz")]
+    assert bridge_checks == [("http://127.0.0.1:46200/healthz", {"Host": "codemcp.quickclip.cc"})]
+    assert endpoint_checks[0] == (
+        "http://127.0.0.1:46200/healthz",
+        {"Host": "codemcp.quickclip.cc"},
+    )
 
 
 def test_serve_wires_network_profile_without_installing_oauth(

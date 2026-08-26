@@ -870,9 +870,15 @@ def _self_command() -> list[str]:
     return [sys.executable, "-m", "codemcp_bridge.main"]
 
 
-def _http_check(url: str, *, timeout: float = 2.0) -> dict[str, Any]:
+def _http_check(
+    url: str,
+    *,
+    timeout: float = 2.0,
+    headers: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        request = urllib.request.Request(url, headers=dict(headers or {}))
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return {"status": "ok", "status_code": int(response.status), "url": url}
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         return {"status": "unreachable", "status_code": None, "url": url, "error": str(exc)}
@@ -882,6 +888,8 @@ def _wait_endpoint(
     url: str,
     process: subprocess.Popen[Any],
     timeout_seconds: float,
+    *,
+    headers: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, Any] | None = None
@@ -895,7 +903,10 @@ def _wait_endpoint(
                 "exit_code": code,
                 "last_check": last,
             }
-        last = _http_check(url)
+        if headers is None:
+            last = _http_check(url)
+        else:
+            last = _http_check(url, headers=headers)
         if last["status"] == "ok":
             return last
         time.sleep(0.25)
@@ -907,6 +918,19 @@ def _bridge_health_url(bridge_url: str) -> str:
 
     parsed = urlsplit(bridge_url)
     return f"{parsed.scheme}://{parsed.netloc}/healthz"
+
+
+def _bridge_probe_headers(
+    allowed_hosts: list[str] | tuple[str, ...] | None,
+) -> dict[str, str] | None:
+    """Return the configured Host authority for an internal Bridge probe."""
+
+    if not allowed_hosts:
+        return None
+    host = allowed_hosts[0]
+    if not isinstance(host, str) or not host:
+        return None
+    return {"Host": host}
 
 
 def _provider_secret_path(
@@ -1294,7 +1318,17 @@ def start_services(
 
     bridge_health = _bridge_health_url(provider.bridge_url(tunnel))
     tunnel_ready = provider.ready_url(tunnel)
-    if _http_check(bridge_health)["status"] == "ok":
+    bridge_health_headers = _bridge_probe_headers(
+        security.network_trust.allowed_hosts
+        if security.auth_mode == AUTH_MODE_NONE and security.network_trust is not None
+        else None
+    )
+    bridge_occupied = (
+        _http_check(bridge_health)
+        if bridge_health_headers is None
+        else _http_check(bridge_health, headers=bridge_health_headers)
+    )
+    if bridge_occupied["status"] == "ok":
         raise LifecycleError("Bridge health endpoint is already occupied; refusing unsafe takeover")
     if _http_check(tunnel_ready)["status"] == "ok":
         raise LifecycleError("Tunnel health endpoint is already occupied; refusing unsafe takeover")
@@ -1318,7 +1352,15 @@ def start_services(
             log_path=paths.log_dir / "bridge-supervisor.log",
             env=environment,
         )
-        bridge_wait = _wait_endpoint(bridge_health, bridge_process, startup_timeout_seconds)
+        if bridge_health_headers is None:
+            bridge_wait = _wait_endpoint(bridge_health, bridge_process, startup_timeout_seconds)
+        else:
+            bridge_wait = _wait_endpoint(
+                bridge_health,
+                bridge_process,
+                startup_timeout_seconds,
+                headers=bridge_health_headers,
+            )
         if bridge_wait["status"] != "ok":
             raise LifecycleError(
                 f"Bridge startup failed: {json.dumps(bridge_wait, ensure_ascii=False)}"
@@ -1405,7 +1447,21 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
     tunnel_owned = _matches_process_marker(
         int(state.get("tunnel_pid", 0)), state.get("tunnel_process_marker")
     )
-    bridge_health = _http_check(str(state.get("bridge_health_url", DEFAULT_BRIDGE_URL)))
+    network_status = security_status.get("network_trust")
+    allowed_hosts = None
+    if security_status.get("identity_level") == "network-only" and isinstance(
+        network_status, Mapping
+    ):
+        configured_hosts = network_status.get("allowed_hosts")
+        if isinstance(configured_hosts, (list, tuple)):
+            allowed_hosts = configured_hosts
+    bridge_health_headers = _bridge_probe_headers(allowed_hosts)
+    bridge_health_url = str(state.get("bridge_health_url", DEFAULT_BRIDGE_URL))
+    bridge_health = (
+        _http_check(bridge_health_url)
+        if bridge_health_headers is None
+        else _http_check(bridge_health_url, headers=bridge_health_headers)
+    )
     tunnel_health = _http_check(
         str(state.get("tunnel_ready_url", f"{DEFAULT_TUNNEL_HEALTH_URL}/readyz"))
     )

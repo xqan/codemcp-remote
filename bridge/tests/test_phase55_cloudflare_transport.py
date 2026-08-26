@@ -339,6 +339,12 @@ def test_cloudflare_status_requires_owned_and_healthy_provider_process(
         origin_url="http://127.0.0.1:46200/mcp",
         metrics_addr="127.0.0.1:46202",
     )
+    lifecycle.configure_network_trust(
+        paths,
+        mode="cloudflare-chatgpt",
+        allowed_hosts=["mcp.example.com"],
+    )
+    lifecycle.configure_resource_auth(paths, mode="none")
     paths.state_file.parent.mkdir(parents=True, exist_ok=True)
     paths.state_file.write_text(
         json.dumps(
@@ -357,8 +363,15 @@ def test_cloudflare_status_requires_owned_and_healthy_provider_process(
     )
     monkeypatch.setattr(lifecycle, "_matches_process_marker", lambda _pid, _marker: True)
 
-    def fake_http_check(url: str, timeout: float = 2.0) -> dict[str, object]:
+    http_checks: list[tuple[str, object]] = []
+
+    def fake_http_check(
+        url: str,
+        timeout: float = 2.0,
+        headers=None,
+    ) -> dict[str, object]:
         del timeout
+        http_checks.append((url, headers))
         return {
             "status": "ok" if url.endswith("/healthz") else "unreachable",
             "url": url,
@@ -374,6 +387,10 @@ def test_cloudflare_status_requires_owned_and_healthy_provider_process(
     assert status["bridge"]["health"]["status"] == "ok"
     assert status["tunnel"]["owned"] is True
     assert status["tunnel"]["health"]["status"] == "unreachable"
+    assert http_checks[0] == (
+        "http://127.0.0.1:46200/healthz",
+        {"Host": "mcp.example.com"},
+    )
 
 
 def test_cloudflare_start_replaces_degraded_supervisor_state(
