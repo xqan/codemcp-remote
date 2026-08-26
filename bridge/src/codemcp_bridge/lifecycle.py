@@ -745,7 +745,13 @@ def add_project(paths: RuntimePaths, *, project_id: str, root: Path) -> dict[str
         temporary.unlink(missing_ok=True)
         raise LifecycleError(f"project configuration is invalid: {exc}") from exc
     os.replace(temporary, paths.projects_config)
-    return {"status": "ok", "project_id": project_id, "root": str(project_root)}
+    return {
+        "status": "ok",
+        "project_id": project_id,
+        "root": str(project_root),
+        "reload": "automatic",
+        "restart_required": False,
+    }
 
 
 def remove_project(
@@ -777,7 +783,12 @@ def remove_project(
     if not isinstance(projects, dict):
         raise LifecycleError("projects.toml [projects] must be a table")
     if project_id not in projects:
-        return {"status": "not-found", "project_id": project_id}
+        return {
+            "status": "not-found",
+            "project_id": project_id,
+            "reload": "automatic",
+            "restart_required": False,
+        }
 
     raw_project = projects[project_id]
     if not isinstance(raw_project, dict):
@@ -834,6 +845,8 @@ def remove_project(
         "project_id": project_id,
         "root": str(registered_root),
         "removed": True,
+        "reload": "automatic",
+        "restart_required": False,
     }
 
 
@@ -890,6 +903,40 @@ def _http_check(
             return {"status": "ok", "status_code": int(response.status), "url": url}
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         return {"status": "unreachable", "status_code": None, "url": url, "error": str(exc)}
+
+
+def _http_json_check(
+    url: str,
+    *,
+    timeout: float = 2.0,
+    headers: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Read one bounded JSON object from a local lifecycle endpoint."""
+
+    try:
+        request = urllib.request.Request(url, headers=dict(headers or {}))
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = response.read(64 * 1024 + 1)
+            if len(payload) > 64 * 1024:
+                raise ValueError("response exceeds 64 KiB")
+            decoded = json.loads(payload.decode("utf-8"))
+            if not isinstance(decoded, dict):
+                raise ValueError("response is not a JSON object")
+            return {
+                "status": "ok",
+                "status_code": int(response.status),
+                "url": url,
+                "data": decoded,
+            }
+    except (
+        UnicodeDecodeError,
+        ValueError,
+        json.JSONDecodeError,
+        urllib.error.URLError,
+        OSError,
+        TimeoutError,
+    ) as exc:
+        return {"status": "unavailable", "status_code": None, "url": url, "error": str(exc)}
 
 
 def _wait_endpoint(
@@ -1433,6 +1480,12 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
             "paths": runtime_path_status(paths),
         }
     if not paths.state_file.is_file():
+        try:
+            configured_project_count: int | None = len(
+                load_settings(paths.bridge_config, paths.projects_config).projects
+            )
+        except SettingsError:
+            configured_project_count = None
         return {
             "status": "stopped",
             "transport": provider.provider_id,
@@ -1441,6 +1494,13 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
             "network_trust": security_status["network_trust"],
             "identity_level": security_status["identity_level"],
             "security_profile": security_status["profile"],
+            "project_registry": {
+                "status": "stopped",
+                "generation": None,
+                "reload_status": "stopped",
+                "last_reload_error": None,
+                "projects_registered": configured_project_count,
+            },
             "state_file": str(paths.state_file),
             "paths": runtime_path_status(paths),
         }
@@ -1470,6 +1530,35 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
         if bridge_health_headers is None
         else _http_check(bridge_health_url, headers=bridge_health_headers)
     )
+    project_registry: dict[str, Any] = {
+        "status": "unavailable",
+        "generation": None,
+        "reload_status": None,
+        "last_reload_error": None,
+        "projects_registered": None,
+    }
+    if bridge_owned and bridge_health["status"] == "ok":
+        live_health = (
+            _http_json_check(bridge_health_url)
+            if bridge_health_headers is None
+            else _http_json_check(bridge_health_url, headers=bridge_health_headers)
+        )
+        live_data = live_health.get("data")
+        if isinstance(live_data, Mapping):
+            registry_data = live_data.get("project_registry")
+            registered = live_data.get("projects_registered")
+            if isinstance(registry_data, Mapping):
+                project_registry = {
+                    "status": "ok",
+                    "generation": registry_data.get("generation"),
+                    "reload_status": registry_data.get("reload_status"),
+                    "last_reload_error": registry_data.get("last_reload_error"),
+                    "projects_registered": (
+                        registered
+                        if isinstance(registered, int) and not isinstance(registered, bool)
+                        else None
+                    ),
+                }
     tunnel_health = _http_check(
         str(state.get("tunnel_ready_url", f"{DEFAULT_TUNNEL_HEALTH_URL}/readyz"))
     )
@@ -1488,6 +1577,7 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
         "network_trust": security_status["network_trust"],
         "identity_level": security_status["identity_level"],
         "security_profile": security_status["profile"],
+        "project_registry": project_registry,
         "bridge": {
             "pid": state.get("bridge_pid"),
             "owned": bridge_owned,
@@ -1600,7 +1690,11 @@ def doctor_report(
         "status": "ok" if shutil.which("git") else "failed",
         "path": shutil.which("git"),
     }
-    checks["services"] = status_services(paths)
+    services_status = status_services(paths)
+    checks["services"] = services_status
+    registry_status = services_status.get("project_registry")
+    if isinstance(registry_status, Mapping):
+        checks["project_registry"] = dict(registry_status)
     failed = [
         name
         for name, value in checks.items()

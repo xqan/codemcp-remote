@@ -34,13 +34,17 @@ On the first run, initialize the local Tunnel profile explicitly:
 pwsh -File .\scripts\start-all.ps1 -Initialize
 ~~~
 
-Project registrations belong in the Git-ignored `config/projects.toml`.
-Keep `config/projects.example.toml` as the shareable template. On a fresh
-checkout, create the local file first:
+Project registration is a local administrative control-plane operation. MCP clients do not expose `project add`, `project remove`, `project reload`, or project-configuration mutation.
+
+For source-mode development, the local registry remains the Git-ignored `config/projects.toml`. Keep `config/projects.example.toml` as the shareable template. On a fresh checkout, create the local file first:
 
 ~~~powershell
 Copy-Item config/projects.example.toml config/projects.toml
 ~~~
+
+Normal authorization changes should then use the local CLI rather than direct file editing. The CLI validates the candidate and atomically replaces `projects.toml`. A running Bridge observes the validated change automatically on the next authorization-sensitive request, so project add/remove does not require a Bridge, Tunnel, or ChatGPT Connector restart.
+
+Direct `projects.toml` editing is reserved for trusted offline maintenance or recovery.
 
 `start-all.ps1` starts Bridge first, waits for its loopback health endpoint,
 then starts tunnel-client and waits for Tunnel `readyz`. If either endpoint is
@@ -161,20 +165,16 @@ for the optional compatibility path.
 
 ### Recommended Cloudflare network-trust profile
 
-For a single-user ChatGPT Connector, use an explicit `--home` and configure
-`auth.mode = "none"` with `network_trust.mode = "cloudflare-chatgpt"` and a
-non-empty exact `allowed_hosts` list. Cloudflare WAF must enforce the current
-OpenAI Connector egress IP List before Tunnel ingress; the Bridge never trusts
-forwarded client-IP headers. This network allowlist is not authentication or
-user identity, and `doctor` reports `identity_level = network-only`.
+For a single-user ChatGPT Connector, configure `auth.mode = "none"` with `network_trust.mode = "cloudflare-chatgpt"` and a non-empty exact `allowed_hosts` list. Cloudflare WAF must enforce the current OpenAI Connector egress IP List before Tunnel ingress; the Bridge never trusts forwarded client-IP headers. This network allowlist is not authentication or user identity, and `doctor` reports `identity_level = network-only`.
 
-The packaged CLI shape is:
+For a packaged Windows EXE, the EXE installation directory is the default runtime home. Normal installed commands therefore do not need `--home`:
 
 ~~~powershell
-$home = Join-Path $env:LOCALAPPDATA "codemcp-remote"
-codemcp-remote.exe doctor --home $home
-codemcp-remote.exe start --home $home
+.\codemcp-remote.exe doctor
+.\codemcp-remote.exe start
 ~~~
+
+`--home` remains an explicit override, and `CODEMCP_HOME` overrides the packaged EXE-directory default when set.
 
 Do not expose `/healthz` as a public application endpoint. Keep the Bridge
 origin at `127.0.0.1:46200`. Profile B remains available with

@@ -80,5 +80,8 @@ class SessionService:
     def close_all(self, reason: str) -> None:
         self._database.close_active_sessions(reason)
 
+    def revoke_project(self, project_id: str, reason: str = "project_removed") -> list[str]:
+        return self._database.block_active_sessions_for_project(project_id, reason)
+
     def recover_after_restart(self) -> dict[str, list[str]]:
         return self._database.recover_after_restart()

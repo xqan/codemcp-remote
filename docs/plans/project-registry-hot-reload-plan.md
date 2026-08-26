@@ -452,6 +452,8 @@ This is an explicit release/security invariant.
 
 ### Phase 1 — Registry Snapshot and Reload Core
 
+Status: **COMPLETE — 2026-08-26**
+
 Goal:
 
 - central current project snapshot;
@@ -461,52 +463,124 @@ Goal:
 - reload synchronization;
 - no behavior change to remote tool surface.
 
-Likely files:
+Implemented:
+
+- `settings.load_projects(...)` provides a project-only validated loader without reloading Bridge/auth/network settings;
+- `ProjectRegistry` owns an isolated current project snapshot;
+- `(mtime_ns, size)` fingerprint fast path detects candidate changes;
+- reload is serialized with a registry-local lock;
+- candidate parsing completes before one atomic snapshot reference swap;
+- a second fingerprint check rejects a configuration that changes during reload;
+- invalid candidates preserve the last-known-good snapshot;
+- a failed fingerprint is suppressed until the file changes again;
+- registry generation and internal reload status/error state are tracked for later Phase 3 observability;
+- Phase 1 deliberately does **not** wire automatic refresh into MCP authorization requests; add/remove/revoke/root-change semantics remain Phase 2 work.
+
+Files:
 
 - `bridge/src/codemcp_bridge/project_registry.py`
 - `bridge/src/codemcp_bridge/settings.py`
-- `bridge/src/codemcp_bridge/mcp_server.py`
-- focused tests.
+- `bridge/tests/test_project_registry_hot_reload.py`
 
-STOP after Phase 1 implementation and targeted tests if a design blocker is found. Otherwise continue.
+Validation:
+
+- focused coverage added for valid snapshot swap, invalid-candidate preservation/recovery, mid-read change rejection, and concurrent single-generation reload;
+- full regression: `323 passed, 6 skipped`;
+- registered format gate: `73 files already formatted`;
+- no public MCP tool was added or changed.
+
+No Phase 1 design blocker was found.
 
 ### Phase 2 — Authorization Semantics
 
-Implement and validate:
+Status: **COMPLETE — 2026-08-26**
 
-- add becomes visible without restart;
-- remove revokes new access;
-- existing session loses authorization after remove;
-- root change is rejected;
-- remove + add permits an explicit new root;
-- project policy/command snapshot behavior;
-- invalid candidate preserves last known-good snapshot.
+Implemented and validated:
+
+- the standard MCP execution path checks for a validated `projects.toml` refresh before authorization-sensitive work;
+- a locally added project becomes visible to `project_open` without Bridge, Tunnel, or Connector restart;
+- removing a project revokes new access on the next request;
+- active sessions for a removed project are persistently marked `blocked` with reason `project_removed`, so re-adding the same project ID cannot revive an old session;
+- direct in-place root redirection for an existing `project_id` is rejected and the last-known-good snapshot remains active;
+- an explicit new root is accepted after the removal snapshot has first been observed, preserving the required revoke boundary between roots;
+- project branch/command policy changes are installed as a new immutable `ProjectSpec` snapshot and affect the next operation;
+- codemcp workers are replaced when their `ProjectSpec` snapshot changes, preventing a reused project ID from retaining a stale worker/root/config view;
+- invalid candidates continue to preserve the last-known-good snapshot.
+
+Files:
+
+- `bridge/src/codemcp_bridge/project_registry.py`
+- `bridge/src/codemcp_bridge/mcp_server.py`
+- `bridge/src/codemcp_bridge/session_service.py`
+- `bridge/src/codemcp_bridge/db/store.py`
+- `bridge/src/codemcp_bridge/worker_manager.py`
+- `bridge/tests/test_project_registry_hot_reload_authorization.py`
+
+Validation:
+
+- full regression: `326 passed, 6 skipped`;
+- registered format gate: `74 files already formatted`;
+- the first full run exposed only a test-status expectation mismatch (`rejected` vs `failed`); no implementation defect was found;
+- no MCP project-administration tool was added and the remote execution-plane boundary remains unchanged.
+
+Phase 3 remains not started.
 
 Do not weaken session ownership, project locks, checkpoint, replay, approval, CAS, or sensitive-path behavior.
 
 ### Phase 3 — CLI and Observability
 
-Update:
+Status: **COMPLETE — 2026-08-26**
 
-- `project add/remove` result fields;
-- `status`;
-- `doctor`;
-- reload metadata;
-- sanitized logging.
+Implemented:
 
-No remote administrative tool is added.
+- local CLI `project add` and `project remove` now report `reload = "automatic"` and `restart_required = false`;
+- a no-op `project remove` (`not-found`) also reports that no restart is required;
+- Bridge `/healthz` reports the live validated project count plus sanitized registry metadata: generation, reload status, and a public-safe reload error code;
+- `/healthz` does not expose project IDs, roots, command argv, raw TOML errors, or other registration content;
+- `status` reports the live project-registry generation/reload state when the owned Bridge is running;
+- stopped `status` reports configured project count while clearly marking generation/reload state as stopped;
+- `doctor` surfaces the same project-registry status directly under its checks;
+- internal detailed reload errors remain available inside the Bridge, while externally observable errors are reduced to stable safe classifications such as `project_root_change_requires_remove_add`;
+- no remote administrative tool or reload endpoint was added.
+
+Files:
+
+- `bridge/src/codemcp_bridge/project_registry.py`
+- `bridge/src/codemcp_bridge/mcp_server.py`
+- `bridge/src/codemcp_bridge/lifecycle.py`
+- `bridge/tests/test_phase3_lifecycle.py`
+- `bridge/tests/test_project_registry_hot_reload_authorization.py`
+
+Validation:
+
+- full regression: `328 passed, 6 skipped`;
+- registered format gate: `74 files already formatted`;
+- the first full run reached `327 passed` and failed only because the Windows EXE build gate detected one Ruff formatting difference; after the mechanical formatting fix, the full suite passed;
+- MCP project administration remains absent.
+
+Phase 4 is complete.
 
 ### Phase 4 — Documentation and Full Regression
 
-Update at least:
+Status: **COMPLETE — 2026-08-26**
 
-- `README.md`;
-- `docs/guides/windows-build-install-use.md`;
-- `docs/guides/operations-runbook.md`;
-- `docs/architecture/security-model.md`;
-- relevant config/acceptance documentation.
+Documentation synchronized:
 
-Then run targeted tests and full regression.
+- `README.md`: local CLI is the normal project-authorization control plane and add/remove requires no restart;
+- `docs/guides/windows-build-install-use.md`: add/remove output, automatic reload, session revocation, root-change protection, and live registry status;
+- `docs/guides/operations-runbook.md`: packaged default-home behavior and local-only registration workflow;
+- `docs/architecture/security-model.md`: authorization control-plane boundary, last-known-good behavior, removal revocation, root-change guard, and sanitized health metadata;
+- `docs/README.md` and `CHANGELOG.md`: current capability and boundary.
+
+Validation:
+
+- registered format gate: `74 files already formatted`;
+- full regression: `328 passed, 6 skipped`;
+- the full regression includes Windows packaged EXE build/smoke coverage;
+- validation used the existing registered `test` and `format` command surface only;
+- no MCP project-administration capability was added.
+
+This feature plan is complete. Stable public `v0.1.0` release gates remain separate.
 
 ## 18. Required Test Matrix
 

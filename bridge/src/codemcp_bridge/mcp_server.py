@@ -272,6 +272,15 @@ class BridgeService:
             self._mutation_locks[project_id] = lock
         return lock
 
+    def _refresh_project_registry(self) -> bool:
+        before = self.registry.snapshot()
+        if not self.registry.refresh_if_changed():
+            return False
+        after = self.registry.snapshot()
+        for project_id in before.keys() - after.keys():
+            self.sessions.revoke_project(project_id)
+        return True
+
     @staticmethod
     def _request_id(ctx: Context | None) -> str:
         if ctx is not None:
@@ -298,6 +307,7 @@ class BridgeService:
         approval_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> dict[str, Any]:
         await self.start()
+        self._refresh_project_registry()
         request_id = self._request_id(ctx)
         input_data = operation_input or {}
         request_hash_value = supplied_request_hash or (
@@ -455,9 +465,12 @@ class BridgeService:
             return payload
 
     async def _require_session(self, project_id: str, session_id: str | None) -> SessionRecord:
+        self._refresh_project_registry()
+        self.registry.get(project_id)
         return self.sessions.require_active(project_id, session_id)
 
     def require_operation_for_session(self, operation_id: str, session_id: str) -> OperationRecord:
+        self._refresh_project_registry()
         record = self.operations.operation(operation_id)
         if record.owner_id != self.sessions.owner_id or record.session_id != session_id:
             raise BridgeError(
@@ -471,6 +484,7 @@ class BridgeService:
     def require_operation_for_reconcile(
         self, operation_id: str, session_id: str
     ) -> OperationRecord:
+        self._refresh_project_registry()
         record = self.operations.operation(operation_id)
         if record.owner_id != self.sessions.owner_id:
             raise BridgeError(
@@ -2248,6 +2262,9 @@ class BridgeService:
         )
 
     async def health(self) -> dict[str, Any]:
+        await self.start()
+        self._refresh_project_registry()
+        snapshot = self.registry.snapshot()
         return {
             "status": "ok",
             "phase": "5",
@@ -2257,7 +2274,12 @@ class BridgeService:
                 f"{self.settings.server.path}"
             ),
             "worker_mode": self.settings.codemcp.worker_mode,
-            "projects_registered": len(self.settings.projects),
+            "projects_registered": len(snapshot),
+            "project_registry": {
+                "generation": self.registry.generation,
+                "reload_status": self.registry.last_reload_status,
+                "last_reload_error": self.registry.last_reload_error_code,
+            },
             "model_egress": "deny",
         }
 

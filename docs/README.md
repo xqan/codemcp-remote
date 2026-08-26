@@ -68,8 +68,8 @@
 - 当前可执行说明以 `guides/`、`architecture/` 和 `acceptance/` 中的文档为准。
 - `releases/` 中的 Phase 0–5 文件是已完成阶段记录；`reports/` 中的内容是当时的
   验证证据，不能替代当前 runbook 或尚未完成的 release gate。
-- Cloudflare No-Auth network-trust 的 Phase A–H live acceptance 已通过；稳定版 `v0.1.0`
-  仍受更大的 Phase 6/7、secrets/supply-chain、clean-machine packaging 和 freeze gate 阻断。
+- Cloudflare No-Auth network-trust 的 Phase A–H live acceptance 已通过；项目注册热加载也已实现：本机 CLI 是唯一项目授权控制面，运行中的 Bridge 可自动观察经过验证的 `projects.toml` add/remove 变更，无需重启 Bridge/Tunnel/Connector；MCP 不提供项目管理能力。
+- 稳定版 `v0.1.0` 仍受更大的 Phase 6/7、secrets/supply-chain、clean-machine packaging 和 freeze gate 阻断。
 - 当前没有需要放入 `archive/` 的退役文档；后续被替代的文档按维护约定归档。
 
 ## 维护约定

@@ -5,10 +5,19 @@ from __future__ import annotations
 import fnmatch
 import os
 import stat
+import threading
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from .errors import BridgeError
-from .settings import BridgeSettings, ProjectSpec, normalize_relative_path, to_wsl_path
+from .settings import (
+    BridgeSettings,
+    ProjectSpec,
+    SettingsError,
+    load_projects,
+    normalize_relative_path,
+    to_wsl_path,
+)
 
 SENSITIVE_NAMES = {
     ".git",
@@ -65,12 +74,137 @@ def is_sensitive_relative_path(relative_path: str) -> bool:
     return _is_sensitive(relative_path)
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectRegistryFingerprint:
+    """Cheap identity for one observed projects.toml version."""
+
+    mtime_ns: int
+    size: int
+
+
+def _projects_config_fingerprint(path: Path) -> ProjectRegistryFingerprint:
+    try:
+        info = path.stat()
+    except OSError as exc:
+        raise SettingsError(f"cannot stat project configuration: {path}") from exc
+    return ProjectRegistryFingerprint(mtime_ns=info.st_mtime_ns, size=info.st_size)
+
+
 class ProjectRegistry:
     """Resolve only registered project IDs and safe project-relative paths."""
 
     def __init__(self, settings: BridgeSettings):
         self._settings = settings
-        self._projects = settings.projects
+        self._projects_config_path = settings.projects_config_path
+        self._projects = dict(settings.projects)
+        self._reload_lock = threading.RLock()
+        self._generation = 1
+        self._last_reload_status = "initial"
+        self._last_reload_error: str | None = None
+        self._last_reload_error_code: str | None = None
+        self._last_failed_fingerprint: ProjectRegistryFingerprint | None = None
+        try:
+            self._fingerprint: ProjectRegistryFingerprint | None = _projects_config_fingerprint(
+                self._projects_config_path
+            )
+        except SettingsError as exc:
+            self._fingerprint = None
+            self._last_reload_status = "failed"
+            self._last_reload_error = str(exc)
+            self._last_reload_error_code = "projects_config_unavailable"
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    @property
+    def last_reload_status(self) -> str:
+        return self._last_reload_status
+
+    @property
+    def last_reload_error(self) -> str | None:
+        return self._last_reload_error
+
+    @property
+    def last_reload_error_code(self) -> str | None:
+        """Return a public-safe reload error classification without paths or TOML content."""
+
+        return self._last_reload_error_code
+
+    def snapshot(self) -> dict[str, ProjectSpec]:
+        """Return an isolated copy of the current validated project snapshot."""
+
+        with self._reload_lock:
+            return dict(self._projects)
+
+    def refresh_if_changed(self) -> bool:
+        """Install one coherent validated project snapshot when the file changes."""
+
+        try:
+            observed = _projects_config_fingerprint(self._projects_config_path)
+        except SettingsError as exc:
+            with self._reload_lock:
+                self._last_reload_status = "failed"
+                self._last_reload_error = str(exc)
+                self._last_reload_error_code = "projects_config_unavailable"
+            return False
+
+        if observed == self._fingerprint or observed == self._last_failed_fingerprint:
+            return False
+
+        with self._reload_lock:
+            try:
+                observed = _projects_config_fingerprint(self._projects_config_path)
+            except SettingsError as exc:
+                self._last_reload_status = "failed"
+                self._last_reload_error = str(exc)
+                self._last_reload_error_code = "projects_config_unavailable"
+                return False
+            if observed == self._fingerprint or observed == self._last_failed_fingerprint:
+                return False
+
+            try:
+                candidate = load_projects(self._projects_config_path)
+            except SettingsError as exc:
+                self._last_failed_fingerprint = observed
+                self._last_reload_status = "failed"
+                self._last_reload_error = str(exc)
+                self._last_reload_error_code = "projects_config_invalid"
+                return False
+
+            for project_id in self._projects.keys() & candidate.keys():
+                current_root = self._projects[project_id].root.resolve(strict=False)
+                candidate_root = candidate[project_id].root.resolve(strict=False)
+                if current_root != candidate_root:
+                    self._last_failed_fingerprint = observed
+                    self._last_reload_status = "failed"
+                    self._last_reload_error = (
+                        f"project root change requires remove then add: {project_id}"
+                    )
+                    self._last_reload_error_code = "project_root_change_requires_remove_add"
+                    return False
+
+            try:
+                verified = _projects_config_fingerprint(self._projects_config_path)
+            except SettingsError as exc:
+                self._last_reload_status = "failed"
+                self._last_reload_error = str(exc)
+                self._last_reload_error_code = "projects_config_unavailable"
+                return False
+            if verified != observed:
+                self._last_reload_status = "failed"
+                self._last_reload_error = "project configuration changed during reload"
+                self._last_reload_error_code = "projects_config_changed_during_reload"
+                return False
+
+            self._projects = dict(candidate)
+            self._fingerprint = verified
+            self._last_failed_fingerprint = None
+            self._generation += 1
+            self._last_reload_status = "ok"
+            self._last_reload_error = None
+            self._last_reload_error_code = None
+            return True
 
     def get(self, project_id: str) -> ProjectSpec:
         project = self._projects.get(project_id)

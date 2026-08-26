@@ -183,6 +183,9 @@ class _CodemcpWorker:
         owner_task = self._owner_task
         return self._session is not None and owner_task is not None and not owner_task.done()
 
+    def matches_project(self, project: ProjectSpec) -> bool:
+        return self._project == project
+
     async def call(
         self,
         subtool: str,
@@ -229,12 +232,18 @@ class WorkerManager:
         self._workers_lock = asyncio.Lock()
 
     async def _get_worker(self, project: ProjectSpec) -> _CodemcpWorker:
+        stale_worker: _CodemcpWorker | None = None
         async with self._workers_lock:
             worker = self._workers.get(project.project_id)
+            if worker is not None and not worker.matches_project(project):
+                stale_worker = self._workers.pop(project.project_id)
+                worker = None
             if worker is None:
                 worker = _CodemcpWorker(self._settings, project)
                 self._workers[project.project_id] = worker
-            return worker
+        if stale_worker is not None:
+            await stale_worker.close()
+        return worker
 
     async def _discard(self, project_id: str, worker: _CodemcpWorker) -> None:
         async with self._workers_lock:

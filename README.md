@@ -123,6 +123,8 @@ $env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
 $env:TUNNEL_TOKEN = $null
 
 & $exe project add my_project "D:\workspace\my-project"
+# The running Bridge observes the validated registry change automatically.
+# No Bridge, Tunnel, or ChatGPT Connector restart is required.
 & $exe doctor
 & $exe start
 ```
@@ -179,29 +181,25 @@ creates `.local/bridge-venv-wsl`, installs the worker dependencies, and verifies
 
 ### 3. Register your first project
 
-Create the Git-ignored local registry:
+Project registration is a **local administrative operation**. Use the local CLI to add or remove authorized roots; MCP clients cannot add, remove, reload, or reconfigure projects.
+
+For source-mode development, create the Git-ignored local registry once if it does not already exist:
 
 ```powershell
 Copy-Item config/projects.example.toml config/projects.toml
 ```
 
-Edit `config/projects.toml`. A conservative explicit example is:
+Then register the project through the local CLI:
 
-```toml
-[projects.my_project]
-root = "D:/workspace/my-project"
-allowed_branches = ["main", "develop", "feature/*"]
-require_clean_workspace = true
-codemcp_config = "codemcp.toml"
-
-[projects.my_project.commands.test]
-kind = "test"
-argv = ["mvn", "-q", "test"]
-timeout_seconds = 900
-approval = "not-required"
+```powershell
+uv run --project bridge codemcp-bridge-server project add my_project "D:\workspace\my-project"
 ```
 
-Only register repositories you intend ChatGPT to access. Treat registered command configuration as trusted local policy.
+When the Bridge is already running, the validated `projects.toml` update is detected automatically on the next authorization-sensitive request. No Bridge, Tunnel, or ChatGPT Connector restart is required.
+
+Use direct `projects.toml` editing only for trusted offline maintenance or recovery. Normal project authorization changes should go through the local CLI so validation and atomic replacement are preserved. Registered command configuration remains trusted local policy.
+
+Only register repositories you intend ChatGPT to access.
 
 ### 4. Prepare the Tunnel profile input
 

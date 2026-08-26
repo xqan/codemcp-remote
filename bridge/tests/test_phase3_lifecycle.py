@@ -154,6 +154,8 @@ def test_add_project_validates_then_atomically_replaces_config(tmp_path: Path) -
     result = add_project(paths, project_id="demo", root=project)
 
     assert result["project_id"] == "demo"
+    assert result["reload"] == "automatic"
+    assert result["restart_required"] is False
     text = paths.projects_config.read_text(encoding="utf-8")
     assert "[projects.demo]" in text
     assert str(project.resolve()).replace("\\", "\\\\") in text
@@ -189,6 +191,8 @@ def test_remove_project_requires_exact_root_and_preserves_other_registrations(
         "project_id": "demo",
         "root": str(owned.resolve()),
         "removed": True,
+        "reload": "automatic",
+        "restart_required": False,
     }
     updated = paths.projects_config.read_text(encoding="utf-8")
     assert "[projects.demo]" not in updated
@@ -197,6 +201,8 @@ def test_remove_project_requires_exact_root_and_preserves_other_registrations(
     assert remove_project(paths, project_id="demo", expected_root=owned) == {
         "status": "not-found",
         "project_id": "demo",
+        "reload": "automatic",
+        "restart_required": False,
     }
 
 
@@ -357,6 +363,103 @@ def test_stop_services_never_kills_a_reused_pid(
     assert killed == []
     assert [item["status"] for item in result["actions"]] == ["not_owned", "not_owned"]
     assert not paths.state_file.exists()
+
+
+def test_status_services_reports_sanitized_live_project_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, paths = _runtime(tmp_path)
+    initialize_runtime(paths, tunnel_id="tunnel_12345678")
+    paths.run_dir.mkdir(parents=True, exist_ok=True)
+    paths.state_file.write_text(
+        json.dumps(
+            {
+                "transport": "openai-tunnel",
+                "bridge_pid": 123,
+                "tunnel_pid": 456,
+                "bridge_process_marker": "bridge-marker",
+                "tunnel_process_marker": "tunnel-marker",
+                "bridge_health_url": "http://127.0.0.1:46200/healthz",
+                "tunnel_ready_url": "http://127.0.0.1:46201/readyz",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(lifecycle, "_matches_process_marker", lambda pid, marker: True)
+    monkeypatch.setattr(
+        lifecycle,
+        "security_profile_status",
+        lambda runtime: {
+            "status": "ready",
+            "auth": {"status": "disabled"},
+            "network_trust": {"status": "disabled"},
+            "identity_level": "local-only",
+            "profile": "legacy",
+        },
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_http_check",
+        lambda url, timeout=2.0, headers=None: {
+            "status": "ok",
+            "status_code": 200,
+            "url": url,
+        },
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_http_json_check",
+        lambda url, timeout=2.0, headers=None: {
+            "status": "ok",
+            "status_code": 200,
+            "url": url,
+            "data": {
+                "projects_registered": 3,
+                "project_registry": {
+                    "generation": 7,
+                    "reload_status": "failed",
+                    "last_reload_error": "project_root_change_requires_remove_add",
+                },
+            },
+        },
+    )
+
+    result = lifecycle.status_services(paths)
+
+    assert result["status"] == "running"
+    assert result["project_registry"] == {
+        "status": "ok",
+        "generation": 7,
+        "reload_status": "failed",
+        "last_reload_error": "project_root_change_requires_remove_add",
+        "projects_registered": 3,
+    }
+    assert "D:" not in str(result["project_registry"])
+
+
+def test_doctor_surfaces_project_registry_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, paths = _runtime(tmp_path)
+    initialize_runtime(paths, tunnel_id="tunnel_12345678")
+    registry_status = {
+        "status": "ok",
+        "generation": 4,
+        "reload_status": "ok",
+        "last_reload_error": None,
+        "projects_registered": 2,
+    }
+    monkeypatch.setattr(
+        lifecycle,
+        "status_services",
+        lambda runtime: {"status": "running", "project_registry": registry_status},
+    )
+
+    report = lifecycle.doctor_report(paths)
+
+    assert report["checks"]["project_registry"] == registry_status
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI acceptance runs on Windows")

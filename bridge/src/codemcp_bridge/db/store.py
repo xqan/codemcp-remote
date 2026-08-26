@@ -501,6 +501,26 @@ class Database:
                 self.transition_session(session_id, "closing", reason=reason)
             self.transition_session(session_id, "closed", reason=reason)
 
+    def block_active_sessions_for_project(self, project_id: str, reason: str) -> list[str]:
+        connection = self._require_connection()
+        with self._lock:
+            session_ids = [
+                row["session_id"]
+                for row in connection.execute(
+                    "SELECT session_id FROM sessions "
+                    "WHERE project_id=? AND status IN ('active', 'closing')",
+                    (project_id,),
+                ).fetchall()
+            ]
+        blocked: list[str] = []
+        for session_id in session_ids:
+            current = self.get_session(session_id)
+            if current is None or current.status not in {"active", "closing"}:
+                continue
+            self.transition_session(session_id, "blocked", reason=reason)
+            blocked.append(session_id)
+        return blocked
+
     def recover_after_restart(self) -> dict[str, list[str]]:
         recovered = {
             "sessions_blocked": [],

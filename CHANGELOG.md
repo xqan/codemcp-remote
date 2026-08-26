@@ -17,6 +17,7 @@ The project is currently pre-release. Version `v0.1.0` must not be published unt
 - GitHub governance, CI, issue templates, pull-request template, and Dependabot configuration.
 - End-to-end Windows build/install/use guide.
 - One-click `codemcp-start.cmd` and `codemcp-stop.cmd` lifecycle launchers in the packaged Windows payload.
+- Safe project-registry hot reload with last-known-good snapshots, removal revocation, root-redirect protection, and sanitized live observability.
 
 ### Changed
 
@@ -24,6 +25,7 @@ The project is currently pre-release. Version `v0.1.0` must not be published unt
 - README status is explicitly pre-release and separates completed private network-trust acceptance from the broader stable release gates.
 - A packaged `codemcp-remote.exe` launched without a command now starts the managed lifecycle.
 - The packaged EXE directory is the default runtime home unless `--home` or `CODEMCP_HOME` overrides it.
+- Local `project add/remove` is the project-authorization control plane; running Bridges automatically observe validated registry changes without restart, while MCP project-administration tools remain unavailable.
 
 ### Known limitations
 

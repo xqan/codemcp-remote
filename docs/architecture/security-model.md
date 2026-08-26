@@ -110,6 +110,18 @@ Repository text can contain malicious instructions or prompt injection. Such con
 
 Project configuration that controls executable commands is security-sensitive and must be treated as operator-controlled configuration, not as permission derived from repository prose.
 
+### Local project-authorization control plane
+
+Project registration is intentionally **not** an MCP capability. The local CLI is the administrative control plane for adding and removing authorized project roots. The remote MCP execution plane can only operate on projects that the local operator has already registered.
+
+A running Bridge watches only the validated `projects.toml` registry. On an authorization-sensitive request it can atomically install a newly validated snapshot without restarting the Bridge, Tunnel, or ChatGPT Connector. This hot reload does not extend to `remote.toml`, authentication, network trust, Tunnel configuration, or other global security settings.
+
+Removal is a revocation boundary: new access is denied and active sessions for the removed project are persistently blocked. Re-adding the same project ID does not revive those old sessions.
+
+An in-place root change for an existing `project_id` is rejected and the last-known-good snapshot remains active. Moving an ID to another root requires an explicit remove followed by add, with the removal observed first. Invalid or racing registry candidates also preserve the last-known-good snapshot.
+
+Direct `projects.toml` editing is trusted local maintenance, not a remote administration mechanism. Normal authorization changes should use the local CLI so validation and atomic replacement are preserved.
+
 ### Local operating-system account
 
 The local OS user is a root trust assumption for the current version. An attacker who can arbitrarily modify the Bridge executable, its Python environment, local configuration, SQLite database, trusted scripts, Git executable, WSL environment, or runtime process memory is outside the protection boundary.
@@ -217,7 +229,7 @@ ChatGPT Connector
 
 Profile A uses `auth.mode = "none"` only with `network_trust.mode = "cloudflare-chatgpt"` and non-empty exact `allowed_hosts`. It does not install a bearer authenticator and accepts a valid `/mcp` request without `Authorization`. This does not remove any project, path, command, operation, approval, checkpoint, Git CAS, restore, replay, or audit policy. Profile B continues to validate OAuth Resource Server credentials and exposes subject/client/scope identity semantics.
 
-The example policy denies model egress from the Bridge. `/healthz` is a lifecycle probe and should not be exposed as a public application endpoint.
+The example policy denies model egress from the Bridge. `/healthz` is a lifecycle probe and should not be exposed as a public application endpoint. Its project-registry observability is deliberately sanitized to counts, generation, reload status, and stable error codes; it does not expose project IDs, roots, command argv, or raw configuration errors.
 
 This is an application policy, not a host firewall. A compromised dependency or local process can violate assumptions unless separately constrained by the OS/network environment.
 

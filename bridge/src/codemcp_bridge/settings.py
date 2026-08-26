@@ -286,6 +286,13 @@ def _parse_projects(path: Path, base: Path) -> dict[str, ProjectSpec]:
     return projects
 
 
+def load_projects(projects_config_path: Path | str) -> dict[str, ProjectSpec]:
+    """Load and validate only the project-authorization configuration."""
+
+    projects_path = Path(projects_config_path).expanduser().resolve(strict=False)
+    return _parse_projects(projects_path, projects_path.parent)
+
+
 def load_settings(
     bridge_config_path: Path | str,
     projects_config_path: Path | str,
@@ -403,7 +410,7 @@ def load_settings(
             worker_timeout_seconds=positive_float("worker_timeout_seconds", 60),
             shutdown_timeout_seconds=positive_float("shutdown_timeout_seconds", 5),
         ),
-        projects=_parse_projects(projects_path, projects_path.parent),
+        projects=load_projects(projects_path),
     )
 
 

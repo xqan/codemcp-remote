@@ -206,22 +206,50 @@ D:\codemcp-remote\data\
 D:\codemcp-remote\secrets\
 ```
 
-## 7. Register a project
+## 7. Register or remove a project
 
-Example:
+Project registration is a **local administrative control-plane action**. Only the local CLI should add or remove project authorization. ChatGPT/MCP clients can use already registered projects, but they cannot add, remove, reload, or reconfigure registrations.
+
+Add a project:
 
 ```powershell
 & $exe project add codemcp-remote "D:\Documents\CodexProject\codemcp-remote"
 ```
 
-Check it:
+A successful result includes:
+
+```json
+{
+  "status": "ok",
+  "project_id": "codemcp-remote",
+  "reload": "automatic",
+  "restart_required": false
+}
+```
+
+If the Bridge is already running, the next authorization-sensitive request detects and validates the changed `projects.toml` automatically. You do **not** need to restart the Bridge, Tunnel, EXE, or ChatGPT Connector.
+
+Remove a project with an explicit expected-root guard:
+
+```powershell
+& $exe project remove codemcp-remote `
+  --expected-root "D:\Documents\CodexProject\codemcp-remote"
+```
+
+Removal is also automatically observed by the running Bridge. New access is denied immediately on the next request, and existing active sessions for the removed project are blocked. Re-adding the same project ID does not revive those old sessions.
+
+Do not directly change the root of an existing `project_id`. The live registry rejects an in-place root redirect and keeps the last-known-good snapshot. To intentionally move an ID to another root, perform an explicit `remove`, allow that removal to be observed, then `add` the new root.
+
+Check live registry state:
 
 ```powershell
 & $exe doctor
 & $exe status
 ```
 
-Only register repositories that ChatGPT is intended to access.
+`status`/`doctor` report sanitized registry metadata such as project count, generation, reload status, and safe error codes. They do not expose the registered project list, project roots, or command argv through the public health payload.
+
+Only register repositories that ChatGPT is intended to access. Direct `projects.toml` editing should be reserved for trusted offline maintenance or recovery; normal authorization changes should use the local CLI.
 
 ## 8. Start
 
