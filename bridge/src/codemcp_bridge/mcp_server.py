@@ -32,6 +32,7 @@ from .operation_service import request_hash as calculate_request_hash
 from .policy_engine import PolicyEngine
 from .project_readiness import inspect_development_readiness
 from .project_registry import ProjectRegistry, is_sensitive_relative_path
+from .resource_auth import OAuthResourceServerAuthenticator
 from .session_service import SessionService
 from .settings import BridgeSettings, CommandSpec, ProjectSpec
 
@@ -2588,6 +2589,23 @@ def create_server(
         )
 
     return server, service
+
+
+def install_resource_server_auth(
+    server: FastMCP,
+    authenticator: OAuthResourceServerAuthenticator,
+) -> None:
+    """Install MCP authentication and its public RFC 9728 metadata route."""
+
+    server._session_manager.install_request_authenticator(authenticator)  # noqa: SLF001
+
+    @server.custom_route(
+        authenticator.protected_resource_metadata_path,
+        methods=["GET"],
+        include_in_schema=False,
+    )
+    async def protected_resource_metadata(_: Request) -> JSONResponse:
+        return JSONResponse(authenticator.protected_resource_metadata())
 
 
 def create_app(

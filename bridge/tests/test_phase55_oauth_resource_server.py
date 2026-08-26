@@ -15,7 +15,7 @@ from mcp.client.streamable_http import streamable_http_client
 import codemcp_bridge.resource_auth as resource_auth
 from codemcp_bridge.db import Database
 from codemcp_bridge.errors import BridgeError
-from codemcp_bridge.mcp_server import create_server
+from codemcp_bridge.mcp_server import create_server, install_resource_server_auth
 from codemcp_bridge.operation_service import OperationService, request_hash
 from codemcp_bridge.resource_auth import (
     AUTH_SCOPE_KEY,
@@ -40,10 +40,13 @@ from codemcp_bridge.settings import (
 from codemcp_bridge.worker_manager import AdapterResult
 
 
-def _config() -> ResourceServerValidationConfig:
+def _config(
+    *,
+    resource: str = "https://code.example.com/mcp",
+) -> ResourceServerValidationConfig:
     return ResourceServerValidationConfig(
         issuer="https://auth.example.com",
-        resource="https://code.example.com/mcp",
+        resource=resource,
         validation_resource_id="resource-code",
         validation_secret="verification-secret-value",
     )
@@ -192,6 +195,43 @@ def test_resource_server_config_fails_closed(kwargs: dict[str, Any], message: st
 
 def test_validation_secret_is_not_exposed_in_repr() -> None:
     assert "verification-secret-value" not in repr(_config())
+
+
+def test_protected_resource_metadata_is_derived_from_auth_config() -> None:
+    config = ResourceServerValidationConfig(
+        issuer="https://auth.example.com",
+        resource="https://resource.example.com/mcp",
+        validation_resource_id="resource-code",
+        validation_secret="verification-secret-value",
+    )
+
+    assert config.protected_resource_metadata_url == (
+        "https://resource.example.com/.well-known/oauth-protected-resource/mcp"
+    )
+    assert config.protected_resource_metadata_path == (
+        "/.well-known/oauth-protected-resource/mcp"
+    )
+    assert config.protected_resource_metadata() == {
+        "resource": "https://resource.example.com/mcp",
+        "authorization_servers": ["https://auth.example.com"],
+        "bearer_methods_supported": ["header"],
+    }
+
+
+def test_protected_resource_metadata_preserves_nested_resource_path() -> None:
+    config = ResourceServerValidationConfig(
+        issuer="https://auth.example.com",
+        resource="https://resource.example.com/foo/bar",
+        validation_resource_id="resource-code",
+        validation_secret="verification-secret-value",
+    )
+
+    assert config.protected_resource_metadata_url == (
+        "https://resource.example.com/.well-known/oauth-protected-resource/foo/bar"
+    )
+    assert config.protected_resource_metadata_path == (
+        "/.well-known/oauth-protected-resource/foo/bar"
+    )
 
 
 def test_default_requester_matches_frozen_wire_contract(
@@ -361,6 +401,7 @@ async def test_authenticator_maps_bearer_and_service_outcomes() -> None:
     class StubValidator:
         def __init__(self, result: Any):
             self.result = result
+            self.config = _config()
 
         async def validate(self, token: str) -> AuthenticatedPrincipal | None:
             assert token == "opaque-token"
@@ -371,13 +412,22 @@ async def test_authenticator_maps_bearer_and_service_outcomes() -> None:
     missing = OAuthResourceServerAuthenticator(StubValidator(_principal()))  # type: ignore[arg-type]
     assert not await missing({"type": "http", "headers": []}, send)  # type: ignore[arg-type]
     assert messages[0]["status"] == 401
-    assert (b"www-authenticate", b"Bearer") in messages[0]["headers"]
+    expected_challenge = (
+        b'Bearer resource_metadata="https://code.example.com/'
+        b'.well-known/oauth-protected-resource/mcp"'
+    )
+    assert (b"www-authenticate", expected_challenge) in messages[0]["headers"]
 
     messages.clear()
     inactive = OAuthResourceServerAuthenticator(StubValidator(None))  # type: ignore[arg-type]
     scope = {"type": "http", "headers": [(b"authorization", b"Bearer opaque-token")]}
     assert not await inactive(scope, send)  # type: ignore[arg-type]
     assert messages[0]["status"] == 401
+    assert (b"www-authenticate", expected_challenge) in messages[0]["headers"]
+    serialized_inactive = repr(messages)
+    assert "opaque-token" not in serialized_inactive
+    assert "resource-code" not in serialized_inactive
+    assert "verification-secret-value" not in serialized_inactive
 
     messages.clear()
     unavailable = OAuthResourceServerAuthenticator(  # type: ignore[arg-type]
@@ -407,6 +457,8 @@ async def test_cloudflare_identity_headers_do_not_authenticate_without_bearer() 
         messages.append(message)
 
     class RejectingValidator:
+        config = _config()
+
         async def validate(self, token: str) -> AuthenticatedPrincipal | None:
             pytest.fail(f"validator must not receive Cloudflare identity headers as bearer: {token}")
 
@@ -480,17 +532,27 @@ async def test_mcp_transport_enforces_auth_and_propagates_safe_audit_identity(
     tmp_path: Path,
 ) -> None:
     settings = _bridge_settings(tmp_path)
+    config = _config(resource="https://resource.example.com/mcp")
     calls: list[str] = []
 
     def requester(**kwargs: Any) -> ValidationHTTPResponse:
         calls.append(kwargs["token"])
-        return _active_response()
+        if kwargs["token"] == "inactive-token-value":
+            return ValidationHTTPResponse(
+                status_code=200,
+                headers={
+                    "content-type": "application/json",
+                    "cache-control": "no-store",
+                },
+                body=b'{"contract_version":"1","active":false}',
+            )
+        return _active_response(resource=config.resource)
 
     authenticator = OAuthResourceServerAuthenticator(
-        OnlineResourceServerValidator(_config(), requester=requester)
+        OnlineResourceServerValidator(config, requester=requester)
     )
     server, service = create_server(settings, adapter=_NoopAdapter())
-    server._session_manager.install_request_authenticator(authenticator)  # noqa: SLF001
+    install_resource_server_auth(server, authenticator)
     app = server.streamable_http_app()
 
     async with app.router.lifespan_context(app):
@@ -501,12 +563,47 @@ async def test_mcp_transport_enforces_auth_and_propagates_safe_audit_identity(
         ) as anonymous:
             health = await anonymous.get("/healthz")
             assert health.status_code == 200
-            denied = await anonymous.post(
-                "/mcp",
-                headers={"content-type": "application/json"},
-                content=b"{}",
+            metadata = await anonymous.get(
+                "/.well-known/oauth-protected-resource/mcp"
             )
+            assert metadata.status_code == 200
+            assert metadata.headers["content-type"].split(";", 1)[0] == "application/json"
+            assert metadata.json() == {
+                "resource": "https://resource.example.com/mcp",
+                "authorization_servers": ["https://auth.example.com"],
+                "bearer_methods_supported": ["header"],
+            }
+
+            denied = await anonymous.get("/mcp")
             assert denied.status_code == 401
+            assert "no-store" in denied.headers["cache-control"]
+            expected_challenge = (
+                'Bearer resource_metadata="https://resource.example.com/'
+                '.well-known/oauth-protected-resource/mcp"'
+            )
+            assert denied.headers["www-authenticate"] == expected_challenge
+
+            inactive = await anonymous.get(
+                "/mcp",
+                headers={"Authorization": "Bearer inactive-token-value"},
+            )
+            assert inactive.status_code == 401
+            assert inactive.headers["www-authenticate"] == expected_challenge
+
+            public_surface = "\n".join(
+                [
+                    str(metadata.headers),
+                    metadata.text,
+                    str(denied.headers),
+                    denied.text,
+                    str(inactive.headers),
+                    inactive.text,
+                ]
+            )
+            assert "resource-code" not in public_surface
+            assert "verification-secret-value" not in public_surface
+            assert "inactive-token-value" not in public_surface
+            assert "127.0.0.1:46200" not in public_surface
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -525,13 +622,13 @@ async def test_mcp_transport_enforces_auth_and_propagates_safe_audit_identity(
 
         assert opened["status"] == "succeeded"
         assert calls
-        assert set(calls) == {"opaque-token-value"}
+        assert set(calls) == {"inactive-token-value", "opaque-token-value"}
         events = service.audit.for_operation(opened["operation_id"])
         auth_events = [event for event in events if event["event_type"] == "auth.context"]
         assert len(auth_events) == 1
         details = auth_events[0]["details"]
         assert details["issuer"] == "https://auth.example.com"
-        assert details["resource"] == "https://code.example.com/mcp"
+        assert details["resource"] == "https://resource.example.com/mcp"
         assert details["subject"] == "subject-a"
         assert details["client_id"] == "chatgpt-client"
         serialized = json.dumps(events)

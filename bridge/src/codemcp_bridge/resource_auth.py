@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import anyio
 from starlette.types import Scope, Send
@@ -20,6 +20,7 @@ CONTRACT_ID = "mcp-rs-verification-v1"
 VALIDATION_PATH = "/mcp/resource-server/validate"
 AUTH_SCOPE_KEY = "codemcp.auth.principal"
 MAX_VALIDATION_RESPONSE_BYTES = 64 * 1024
+PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 
 
 class ResourceAuthError(RuntimeError):
@@ -66,6 +67,21 @@ class ResourceServerValidationConfig:
     @property
     def validation_endpoint(self) -> str:
         return f"{self.issuer}{VALIDATION_PATH}"
+
+    @property
+    def protected_resource_metadata_url(self) -> str:
+        return protected_resource_metadata_url(self.resource)
+
+    @property
+    def protected_resource_metadata_path(self) -> str:
+        return urlsplit(self.protected_resource_metadata_url).path
+
+    def protected_resource_metadata(self) -> dict[str, Any]:
+        return {
+            "resource": self.resource,
+            "authorization_servers": [self.issuer],
+            "bearer_methods_supported": ["header"],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,8 +157,24 @@ def _validate_resource(value: str) -> None:
         or not parsed.path.startswith("/")
         or parsed.query
         or parsed.fragment
+        or not value.isascii()
+        or any(ord(character) < 0x21 or ord(character) == 0x7F for character in value)
+        or '"' in value
+        or "\\" in value
     ):
-        raise ValueError("canonical_resource_uri must be an absolute HTTPS URI without query or fragment")
+        raise ValueError(
+            "canonical_resource_uri must be an absolute HTTPS URI without query or fragment"
+        )
+
+
+def protected_resource_metadata_url(resource: str) -> str:
+    """Derive the RFC 9728 path-specific metadata URL for a resource URI."""
+
+    _validate_resource(resource)
+    parsed = urlsplit(resource)
+    resource_path = "" if parsed.path == "/" else parsed.path
+    metadata_path = f"{PROTECTED_RESOURCE_METADATA_PATH}{resource_path}"
+    return urlunsplit((parsed.scheme, parsed.netloc, metadata_path, "", ""))
 
 
 def _default_requester(
@@ -332,24 +364,48 @@ class OAuthResourceServerAuthenticator:
     def __init__(self, validator: OnlineResourceServerValidator):
         self.validator = validator
 
+    @property
+    def protected_resource_metadata_path(self) -> str:
+        return self.validator.config.protected_resource_metadata_path
+
+    def protected_resource_metadata(self) -> dict[str, Any]:
+        return self.validator.config.protected_resource_metadata()
+
     async def __call__(self, scope: Scope, send: Send) -> bool:
         token = _extract_bearer(scope)
         if token is None:
-            await _send_auth_response(send, status_code=401, challenge=True)
+            await self._send_auth_response(send, status_code=401, challenge=True)
             return False
         try:
             principal = await self.validator.validate(token)
         except InvalidBearerCredential:
-            await _send_auth_response(send, status_code=401, challenge=True)
+            await self._send_auth_response(send, status_code=401, challenge=True)
             return False
         except VerificationServiceUnavailable:
-            await _send_auth_response(send, status_code=503, challenge=False)
+            await self._send_auth_response(send, status_code=503, challenge=False)
             return False
         if principal is None:
-            await _send_auth_response(send, status_code=401, challenge=True)
+            await self._send_auth_response(send, status_code=401, challenge=True)
             return False
         scope[AUTH_SCOPE_KEY] = principal
         return True
+
+    async def _send_auth_response(
+        self,
+        send: Send,
+        *,
+        status_code: int,
+        challenge: bool,
+    ) -> None:
+        challenge_value = None
+        if challenge:
+            metadata_url = self.validator.config.protected_resource_metadata_url
+            challenge_value = f'Bearer resource_metadata="{metadata_url}"'
+        await _send_auth_response(
+            send,
+            status_code=status_code,
+            challenge=challenge_value,
+        )
 
 
 def _extract_bearer(scope: Scope) -> str | None:
@@ -373,7 +429,7 @@ async def _send_auth_response(
     send: Send,
     *,
     status_code: int,
-    challenge: bool,
+    challenge: str | None,
 ) -> None:
     if status_code == 401:
         body = b'{"error":"unauthorized"}'
@@ -384,7 +440,7 @@ async def _send_auth_response(
         (b"cache-control", b"no-store"),
         (b"content-length", str(len(body)).encode("ascii")),
     ]
-    if challenge:
-        headers.append((b"www-authenticate", b"Bearer"))
+    if challenge is not None:
+        headers.append((b"www-authenticate", challenge.encode("ascii")))
     await send({"type": "http.response.start", "status": status_code, "headers": headers})
     await send({"type": "http.response.body", "body": body})

@@ -1,8 +1,8 @@
 # Phase 5.5.7 — mcp-auth-server + ChatGPT Live Interoperability Acceptance
 
-Status: **IN PROGRESS — repository-side acceptance READY; live issuer and Cloudflare MCP URL assigned; Resource Server provisioning/ChatGPT proof pending**
+Status: **IN PROGRESS — RFC 9728 repository fix READY; installed live binary STALE and ChatGPT proof pending**
 
-Date: 2026-08-25
+Date: 2026-08-26
 
 Repositories:
 
@@ -86,6 +86,45 @@ SHA-256:
 7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93
 ```
 
+## 2026-08-26 LIVE discovery blocker and repository fix
+
+Clean Windows `Prepare` and `Start` passed with the accepted installer above, and the live
+Authorization Server metadata returned the expected issuer, authorization endpoint, token endpoint,
+Authorization Code/refresh-token grants, PKCE S256, and client metadata document support. The next
+public discovery checks found two Resource Server surface blockers:
+
+```text
+GET https://codemcp.quickclip.cc/.well-known/oauth-protected-resource/mcp
+-> 404 Not Found
+
+GET https://codemcp.quickclip.cc/mcp
+-> 401 Unauthorized
+-> WWW-Authenticate: Bearer
+```
+
+The `401` fail-closed decision was correct, but the RFC 9728 Protected Resource Metadata endpoint was
+absent and the Bearer challenge did not provide its `resource_metadata` URL. ChatGPT OAuth discovery
+was therefore paused before OAuth E2E.
+
+The repository fix is now **READY**:
+
+- the configured canonical resource path derives the RFC 9728 metadata location, including nested
+  resource paths;
+- the unauthenticated metadata route returns the exact configured resource, configured Authorization
+  Server issuer, and `header` bearer method;
+- missing/inactive bearer responses retain `401` plus `Cache-Control: no-store` and advertise the
+  same derived metadata URL;
+- `/healthz` remains outside the OAuth gate;
+- Resource Server id, verification secret, bearer token, Cloudflare identity headers, and loopback
+  origin are not authorization inputs or public metadata;
+- `mcp-rs-verification-v1` online validation behavior is unchanged.
+
+Repository validation is `219 passed / 6 skipped / 0 failed`. This is not LIVE proof. Installer
+SHA-256 `7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93` predates the fix and is
+**STALE / needs rebuild** for this acceptance. ChatGPT OAuth discovery remains blocked until a new
+installer is built, hashed, installed through clean `Prepare`/`Start`, and both public curl checks are
+repeated successfully.
+
 ## Client-policy correction from the historical spike
 
 The older Cloudflare Access spike is not the final auth contract.
@@ -121,13 +160,13 @@ Meaningful custom OAuth scope-to-tool enforcement remains **NOT PROVEN** and is 
 | No embedded auth-server private state | PASS | Harness fail-closed scan |
 | `mcp-rs-verification-v1` consumer behavior | PASS | Resource Server regression suite |
 | Wrong-resource / inactive / outage unit behavior | PASS | Resource Server security regression |
-| Current full regression | PASS | 217 passed / 6 skipped / 0 failed |
+| Current full regression | PASS | 219 passed / 6 skipped / 0 failed after RFC 9728 repository fix |
 | Real public Cloudflare hostname/tunnel | ASSIGNED / LIVE PROOF PENDING | `https://codemcp.quickclip.cc/mcp` |
 | Real deployed auth issuer | LIVE ISSUER ASSIGNED | `https://auth-staging.quickclip.cc`; positive OAuth still pending |
 | codemcp Resource Registry entry | PASS | resource_id `0a8721b3-8944-47a5-b1ce-7351963fcb71`; resource `https://codemcp.quickclip.cc/mcp` |
 | Clean Windows Prepare | LIVE PASS | installer SHA `7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93`; project `phase5-clean`; baseline `87fca7ed129cd2493e6b872331873a4664077128`; worker `local`; tunnel/auth secrets recovered from `windows-dpapi`; isolated PATH excludes Python/uv/pwsh |
 | Exact deployed auth-server commit/build | PARTIAL | Clean repo HEAD `b2372b61cf702874c6cae438ba504efe8bc0b4e6`; deployed Worker version still must be captured |
-| ChatGPT OAuth discovery | PENDING LIVE | Requires real issuer and public MCP URL |
+| ChatGPT OAuth discovery | BLOCKED — REPOSITORY FIX READY / LIVE BINARY STALE | RFC 9728 metadata/challenge fix requires a new installer and repeated public curl proof |
 | CIMD/static-client interoperability | PENDING LIVE | Use current ChatGPT UI values |
 | Authorization Code + PKCE | PENDING LIVE | Requires real identity/session |
 | Refresh/session renewal | PENDING LIVE | Must preserve exact resource binding |

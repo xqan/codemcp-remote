@@ -35,7 +35,7 @@ from .lifecycle import (
     store_transport_secret_from_environment,
 )
 from .logging_utils import configure_logging
-from .mcp_server import create_server
+from .mcp_server import create_server, install_resource_server_auth
 from .native_codemcp_worker import main as native_worker_main
 from .settings import SettingsError, load_settings
 
@@ -256,7 +256,7 @@ def main() -> int:
     logging.getLogger(__name__).info("Bridge logging initialized")
     server, service = create_server(settings)
     if request_authenticator is not None:
-        server._session_manager.install_request_authenticator(request_authenticator)  # noqa: SLF001
+        install_resource_server_auth(server, request_authenticator)
     try:
         server.run(transport=settings.server.transport)
     finally:
