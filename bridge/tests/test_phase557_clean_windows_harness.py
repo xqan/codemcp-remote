@@ -43,6 +43,82 @@ def test_phase557_prepare_reclaims_only_owned_project_registration() -> None:
     assert "Prepare only manages the fixed Phase 5 project root" in script
 
 
+def test_phase557_prepare_classifies_existing_installation_before_upgrade() -> None:
+    script = _script()
+
+    assert "function Get-ExistingManagedAcceptanceInstall" in script
+    assert "managed = $false" in script
+    assert "function Read-Phase5ValidationState" in script
+    assert "validation state is missing" in script
+    assert "validation state is unreadable" in script
+    assert "refusing to overwrite an unknown installation" in script
+    assert "without an uninstall registration" in script
+    assert "use a fresh Windows host/VM" not in script
+    assert 'phase = "5.5.7"' in script
+    assert "project_id = $ProjectId" in script
+    assert "project_root = $projectRootPath" in script
+    assert "app_root = $appRoot" in script
+
+
+def test_phase557_managed_install_state_matches_fixed_acceptance_identity() -> None:
+    script = _script()
+
+    assert "function Assert-ManagedAcceptanceState" in script
+    assert "ExpectedInstallDir" in script
+    assert "ExpectedAppRoot" in script
+    assert "ExpectedProjectRoot" in script
+    assert "ExpectedProjectId" in script
+    assert "ExpectedTransport" in script
+    assert "ExpectedPublicUrl" in script
+    assert "ExpectedAuthorizationServerIssuer" in script
+    assert "ExpectedCanonicalResourceUri" in script
+    assert "ExpectedValidationResourceId" in script
+    assert "current_installer_sha256" in script
+    assert "previous_installer_sha256" in script
+    assert "installed_executable_sha256" in script
+
+
+def test_phase557_managed_upgrade_stops_owned_runtime_before_inno_setup() -> None:
+    script = _script()
+
+    stop_index = script.index("Stop-ManagedAcceptanceRuntime -ExistingInstall $existingAcceptance")
+    setup_index = script.index("$setupExit = Invoke-GuiProcessAndWait -FilePath $installer")
+    assert stop_index < setup_index
+    assert (
+        'Invoke-JsonCommand -FilePath $ExistingInstall.release.exe -ArgumentList @("stop")'
+        in script
+    )
+    assert "managed Phase 5.5.7 runtime did not stop cleanly" in script
+    assert "runtime ownership could not be proven stopped" in script
+    assert '"/NOSTOPLIFECYCLE"' in script
+
+
+def test_phase557_installed_payload_identity_is_verified_after_reinstall() -> None:
+    script = _script()
+
+    assert "function Get-InstalledExecutableIdentity" in script
+    assert 'Join-Path $release.install_dir "SHA256SUMS.txt"' in script
+    assert "Get-FileHash -LiteralPath $ExecutablePath -Algorithm SHA256" in script
+    assert "installed codemcp-remote.exe does not match its packaged checksum manifest" in script
+    assert "left the previous executable artifact in place" in script
+    assert 'Join-Path $release.install_dir "cloudflared.exe"' in script
+    assert "$installedExecutableSha256 = Get-InstalledExecutableIdentity" in script
+
+
+def test_phase557_prepare_records_current_and_previous_installer_identity() -> None:
+    script = _script()
+
+    state_index = script.index("$phase5State = [ordered]@{")
+    current_index = script.index("current_installer_sha256 = $actualInstallerSha256", state_index)
+    previous_index = script.index(
+        "previous_installer_sha256 = $existingAcceptance.previous_installer_sha256", state_index
+    )
+    assert previous_index < current_index
+    assert "installer_sha256 = $actualInstallerSha256" in script[state_index:]
+    assert "installed_executable_sha256 = $installedExecutableSha256" in script[state_index:]
+    assert "current_installer_sha256 = $actualInstallerSha256" in script
+
+
 def test_phase557_prepare_rebuilds_project_and_records_fresh_baseline() -> None:
     script = _script()
 

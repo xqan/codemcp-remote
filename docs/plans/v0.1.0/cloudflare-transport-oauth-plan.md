@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 RFC 9728 and harness rerun repository fixes are PASS/READY; live reinstall and ChatGPT proof remain pending**
+Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 RFC 9728 and managed reinstall repository fixes are PASS/READY; live reinstall and ChatGPT proof remain pending**
 
 Target release: `v0.1.0`
 
@@ -847,7 +847,7 @@ Then STOP.
 
 ## Phase 5.5.7 — Final ChatGPT + external OAuth + clean Windows acceptance
 
-**Status: IN PROGRESS — RFC 9728 repository fix is PASS; harness rerun fix and replacement installer candidate are READY; live installed binary requires reinstall; LIVE external deployment/ChatGPT acceptance remains BLOCKED/PENDING.**
+**Status: IN PROGRESS — RFC 9728 repository fix and managed reinstall harness fix are PASS/READY; replacement installer candidate remains valid; live installed binary requires reinstall; LIVE external deployment/ChatGPT acceptance remains BLOCKED/PENDING.**
 
 ### 2026-08-26 RFC 9728 live blocker
 
@@ -881,6 +881,29 @@ credentials; custom project roots are rejected rather than managed automatically
 
 This is a harness rerun fix **READY**, not LIVE acceptance. The new candidate has not yet been used by
 the user for Prepare/Start, and no Live endpoint or ChatGPT OAuth proof is claimed.
+
+### 2026-08-26 managed reinstall ownership blocker
+
+The next live rerun stopped before project reset because the clean-machine harness rejected any existing
+production AppId installation. This was too broad: it could not distinguish the harness-owned acceptance
+installation from an unrelated user installation on the same Windows account.
+
+The managed-reinstall repository fix is **READY**. `Prepare` now permits first install when the AppId is
+absent, or a same-AppId upgrade only when all non-secret ownership evidence matches the fixed acceptance
+contract: the default install directory, fixed app root, `phase=5.5.7`, `phase5-clean`, the disposable
+project root, selected transport, and configured Cloudflare resource/issuer values. Missing or corrupt
+state, a different install directory/root, or any mismatched resource configuration remains fail-closed.
+The harness stops the existing runtime through the formal packaged lifecycle command before invoking
+Inno Setup with `/NOSTOPLIFECYCLE`, verifies the installed executable against the packaged checksum
+manifest, and records previous/current installer and executable identity fields. It does not remove
+DPAPI secrets, user runtime data, or the disposable project outside the existing fixed reset path.
+
+Only `scripts/validate-clean-windows-release.ps1`, its harness tests, and acceptance documentation
+changed in this fix. The packaged runtime/Inno payload did not change, so candidate
+`b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e` remains the current installer
+candidate. The release-candidate ZIP was refreshed with the new harness script at
+`9053041a675fe68baf1b5a1145ade0612508dfc50bcf9e8b5e8e87cba8322c28`. No user Prepare/Start/Cleanup
+or public endpoint verification has been run after this fix.
 
 ### Objective
 

@@ -105,11 +105,15 @@ The harness has three actions.
 
 `Prepare`:
 
-- requires a clean host with no existing codemcp-remote installation;
+- allows a first install on a host with no existing codemcp-remote installation, or a controlled
+  same-AppId upgrade when the fixed Phase 5.5.7 state proves that the existing installation is
+  harness-managed; unrelated or unowned installations fail closed;
 - verifies the installer SHA-256;
 - requires Git for Windows;
 - silently installs to the default per-user location;
 - verifies required installed files;
+- verifies the installed executable against its packaged `SHA256SUMS.txt` identity manifest and
+  records current/previous installer identity in the non-secret Phase 5 state;
 - rejects bundled Python/uv/pwsh/WSL executables;
 - isolates the runtime `PATH`;
 - checks `codemcp-remote.exe 0.1.0`;

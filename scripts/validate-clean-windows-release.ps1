@@ -21,8 +21,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $UninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A26B4BA3-1D96-4F1A-95C4-9984C941A1E1}_is1"
+$DefaultInstallDir = Join-Path $env:LOCALAPPDATA "Programs\codemcp-remote"
+$AcceptanceAppRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote"
 $DefaultProjectRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5\project"
-$Phase5StateFile = Join-Path $env:LOCALAPPDATA "codemcp-remote\phase5-validation.json"
+$Phase5StateFile = Join-Path $AcceptanceAppRoot "phase5-validation.json"
 
 function Invoke-GuiProcessAndWait {
     param(
@@ -86,9 +88,302 @@ function Require-CleanAcceptanceHost {
     if (-not [Environment]::Is64BitOperatingSystem) {
         throw "Phase 5 currently supports only x64-compatible Windows"
     }
-    if (Test-Path -LiteralPath $UninstallKey) {
-        $existing = Get-ItemProperty -LiteralPath $UninstallKey -ErrorAction Stop
-        throw "codemcp-remote is already installed at '$($existing.InstallLocation)'; use a fresh Windows host/VM"
+}
+
+function Normalize-ComparablePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if ($fullPath.Length -gt 3) {
+        $fullPath = $fullPath.TrimEnd("\")
+    }
+    return $fullPath
+}
+
+function Get-StateField {
+    param(
+        [Parameter(Mandatory = $true)]
+        $State,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $property = $State.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
+function Read-Phase5ValidationState {
+    if (-not (Test-Path -LiteralPath $Phase5StateFile -PathType Leaf)) {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install; validation state is missing"
+    }
+    try {
+        $state = Get-Content -LiteralPath $Phase5StateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install; validation state is unreadable"
+    }
+    if ($null -eq $state -or $state -is [System.Array]) {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install; validation state is invalid"
+    }
+    return $state
+}
+
+function Assert-ManagedAcceptanceState {
+    param(
+        [Parameter(Mandatory = $true)]
+        $State,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedInstallDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedAppRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedProjectRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedProjectId,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedTransport,
+        [string]$ExpectedPublicUrl,
+        [string]$ExpectedAuthorizationServerIssuer,
+        [string]$ExpectedCanonicalResourceUri,
+        [string]$ExpectedValidationResourceId
+    )
+
+    if ([string](Get-StateField -State $State -Name "phase") -ne "5.5.7") {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+    if ([string](Get-StateField -State $State -Name "project_id") -ne $ExpectedProjectId) {
+        throw "existing codemcp-remote installation is not owned by the fixed Phase 5 project"
+    }
+
+    $stateProjectRoot = [string](Get-StateField -State $State -Name "project_root")
+    $stateInstallDir = [string](Get-StateField -State $State -Name "install_dir")
+    if ([string]::IsNullOrWhiteSpace($stateProjectRoot) -or [string]::IsNullOrWhiteSpace($stateInstallDir)) {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+    try {
+        $projectRootMatches = [string]::Equals(
+            (Normalize-ComparablePath -Path $stateProjectRoot),
+            (Normalize-ComparablePath -Path $ExpectedProjectRoot),
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+        $installDirMatches = [string]::Equals(
+            (Normalize-ComparablePath -Path $stateInstallDir),
+            (Normalize-ComparablePath -Path $ExpectedInstallDir),
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    } catch {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+    if (-not $projectRootMatches -or -not $installDirMatches) {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+
+    $stateAppRoot = [string](Get-StateField -State $State -Name "app_root")
+    if ([string]::IsNullOrWhiteSpace($stateAppRoot)) {
+        # State written before the managed-reinstall schema used this fixed state-file location.
+        $stateAppRoot = $ExpectedAppRoot
+    }
+    try {
+        $appRootMatches = [string]::Equals(
+            (Normalize-ComparablePath -Path $stateAppRoot),
+            (Normalize-ComparablePath -Path $ExpectedAppRoot),
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    } catch {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+    if (-not $appRootMatches) {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+
+    if ([string](Get-StateField -State $State -Name "transport") -ne $ExpectedTransport) {
+        throw "existing codemcp-remote installation transport does not match the acceptance configuration"
+    }
+    if ($ExpectedTransport -eq "cloudflare") {
+        $expectedFields = [ordered]@{
+            public_url = $ExpectedPublicUrl
+            auth_issuer = $ExpectedAuthorizationServerIssuer
+            canonical_resource_uri = $ExpectedCanonicalResourceUri
+            validation_resource_id = $ExpectedValidationResourceId
+        }
+        foreach ($field in $expectedFields.Keys) {
+            if ([string](Get-StateField -State $State -Name $field) -ne [string]$expectedFields[$field]) {
+                throw "existing codemcp-remote installation OAuth configuration does not match the acceptance configuration"
+            }
+        }
+    }
+
+    $legacyInstallerSha256 = [string](Get-StateField -State $State -Name "installer_sha256")
+    $currentInstallerSha256 = [string](Get-StateField -State $State -Name "current_installer_sha256")
+    if ([string]::IsNullOrWhiteSpace($currentInstallerSha256)) {
+        $currentInstallerSha256 = $legacyInstallerSha256
+    }
+    if ($currentInstallerSha256 -notmatch "^[0-9a-fA-F]{64}$") {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+    if (
+        -not [string]::IsNullOrWhiteSpace($legacyInstallerSha256) -and
+        $legacyInstallerSha256 -notmatch "^[0-9a-fA-F]{64}$"
+    ) {
+        throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+    if (
+        -not [string]::IsNullOrWhiteSpace($legacyInstallerSha256) -and
+        -not [string]::Equals(
+            $legacyInstallerSha256,
+            $currentInstallerSha256,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw "existing codemcp-remote installation has inconsistent installer identity state"
+    }
+
+    $previousInstallerSha256 = [string](Get-StateField -State $State -Name "previous_installer_sha256")
+    if (
+        -not [string]::IsNullOrWhiteSpace($previousInstallerSha256) -and
+        $previousInstallerSha256 -notmatch "^[0-9a-fA-F]{64}$"
+    ) {
+        throw "existing codemcp-remote installation has invalid installer identity state"
+    }
+    $recordedExecutableSha256 = [string](Get-StateField -State $State -Name "installed_executable_sha256")
+    if (
+        -not [string]::IsNullOrWhiteSpace($recordedExecutableSha256) -and
+        $recordedExecutableSha256 -notmatch "^[0-9a-fA-F]{64}$"
+    ) {
+        throw "existing codemcp-remote installation has invalid executable identity state"
+    }
+}
+
+function Get-InstalledExecutableIdentity {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstallDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ExecutablePath
+    )
+
+    $checksumManifest = Join-Path $InstallDir "SHA256SUMS.txt"
+    if (-not (Test-Path -LiteralPath $checksumManifest -PathType Leaf)) {
+        throw "installed release is missing its executable checksum manifest"
+    }
+    $matchingLines = @(
+        Get-Content -LiteralPath $checksumManifest -Encoding ASCII |
+            Where-Object { $_ -match "^([0-9A-Fa-f]{64})\s+codemcp-remote\.exe$" }
+    )
+    if ($matchingLines.Count -ne 1) {
+        throw "installed release executable checksum manifest is invalid"
+    }
+    $manifestSha256 = ([regex]::Match($matchingLines[0], "^([0-9A-Fa-f]{64})\s+codemcp-remote\.exe$")).Groups[1].Value.ToLowerInvariant()
+    $actualSha256 = (Get-FileHash -LiteralPath $ExecutablePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualSha256 -ne $manifestSha256) {
+        throw "installed codemcp-remote.exe does not match its packaged checksum manifest"
+    }
+    return $actualSha256
+}
+
+function Get-ExistingManagedAcceptanceInstall {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedInstallDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedAppRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedProjectRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedProjectId,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedTransport,
+        [string]$ExpectedPublicUrl,
+        [string]$ExpectedAuthorizationServerIssuer,
+        [string]$ExpectedCanonicalResourceUri,
+        [string]$ExpectedValidationResourceId
+    )
+
+    if (-not (Test-Path -LiteralPath $UninstallKey)) {
+        if (Test-Path -LiteralPath $ExpectedInstallDir) {
+            throw "codemcp-remote files exist at the fixed install location without an uninstall registration; refusing to overwrite an unknown installation"
+        }
+        return [ordered]@{
+            managed = $false
+            release = $null
+            state = $null
+            previous_installer_sha256 = $null
+            previous_installed_executable_sha256 = $null
+        }
+    }
+
+    $release = Get-InstalledRelease
+    if (
+        -not [string]::Equals(
+            (Normalize-ComparablePath -Path $release.install_dir),
+            (Normalize-ComparablePath -Path $ExpectedInstallDir),
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw "codemcp-remote is installed outside the fixed Phase 5 acceptance location; refusing to overwrite an unknown installation"
+    }
+
+    $state = Read-Phase5ValidationState
+    Assert-ManagedAcceptanceState `
+        -State $state `
+        -ExpectedInstallDir $ExpectedInstallDir `
+        -ExpectedAppRoot $ExpectedAppRoot `
+        -ExpectedProjectRoot $ExpectedProjectRoot `
+        -ExpectedProjectId $ExpectedProjectId `
+        -ExpectedTransport $ExpectedTransport `
+        -ExpectedPublicUrl $ExpectedPublicUrl `
+        -ExpectedAuthorizationServerIssuer $ExpectedAuthorizationServerIssuer `
+        -ExpectedCanonicalResourceUri $ExpectedCanonicalResourceUri `
+        -ExpectedValidationResourceId $ExpectedValidationResourceId
+
+    $installedExecutableSha256 = Get-InstalledExecutableIdentity `
+        -InstallDir $release.install_dir `
+        -ExecutablePath $release.exe
+    $recordedExecutableSha256 = [string](Get-StateField -State $state -Name "installed_executable_sha256")
+    if (
+        -not [string]::IsNullOrWhiteSpace($recordedExecutableSha256) -and
+        -not [string]::Equals(
+            $recordedExecutableSha256,
+            $installedExecutableSha256,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw "existing codemcp-remote installation executable identity does not match validation state"
+    }
+
+    $currentInstallerSha256 = [string](Get-StateField -State $state -Name "current_installer_sha256")
+    if ([string]::IsNullOrWhiteSpace($currentInstallerSha256)) {
+        $currentInstallerSha256 = [string](Get-StateField -State $state -Name "installer_sha256")
+    }
+    return [ordered]@{
+        managed = $true
+        release = $release
+        state = $state
+        previous_installer_sha256 = $currentInstallerSha256.ToLowerInvariant()
+        previous_installed_executable_sha256 = $installedExecutableSha256
+    }
+}
+
+function Stop-ManagedAcceptanceRuntime {
+    param(
+        [Parameter(Mandatory = $true)]
+        $ExistingInstall
+    )
+
+    $stop = Invoke-JsonCommand -FilePath $ExistingInstall.release.exe -ArgumentList @("stop")
+    if ($stop.status -ne "ok") {
+        throw "managed Phase 5.5.7 runtime did not stop cleanly; refusing to overwrite the installation"
+    }
+    $notOwnedActions = @(
+        $stop.actions | Where-Object { $_.status -eq "not_owned" }
+    )
+    if ($notOwnedActions.Count -gt 0) {
+        throw "managed Phase 5.5.7 runtime ownership could not be proven stopped; refusing to overwrite the installation"
     }
 }
 
@@ -105,7 +400,11 @@ function Get-InstalledRelease {
         throw "codemcp-remote is not installed; run Action=Prepare first"
     }
     $registration = Get-ItemProperty -LiteralPath $UninstallKey -ErrorAction Stop
-    $installDir = [System.IO.Path]::GetFullPath([string]$registration.InstallLocation)
+    $registeredInstallLocation = [string]$registration.InstallLocation
+    if ([string]::IsNullOrWhiteSpace($registeredInstallLocation)) {
+        throw "installed codemcp-remote registration has no install location"
+    }
+    $installDir = [System.IO.Path]::GetFullPath($registeredInstallLocation)
     $exe = Join-Path $installDir "codemcp-remote.exe"
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
         throw "installed codemcp-remote.exe is missing: $exe"
@@ -285,7 +584,7 @@ function Invoke-Start {
     $env:CODEMCP_RS_VERIFICATION_SECRET = $null
     $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("doctor")
     Assert-DoctorContract -Doctor $doctor
-    $appRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+    $appRoot = $AcceptanceAppRoot
     Assert-NoEmbeddedAuthServerState -AppRoot $appRoot
 
     $start = Invoke-JsonCommand -FilePath $release.exe -ArgumentList @("start", "--startup-timeout", "45")
@@ -323,16 +622,39 @@ function Invoke-Start {
     } else {
         [string]$doctor.checks.tunnel_client.path
     }
+    $phase5PreviousInstallerSha256 = if ($null -ne $phase5) {
+        [string](Get-StateField -State $phase5 -Name "previous_installer_sha256")
+    } else {
+        $null
+    }
+    $phase5CurrentInstallerSha256 = if ($null -ne $phase5) {
+        $current = [string](Get-StateField -State $phase5 -Name "current_installer_sha256")
+        if ([string]::IsNullOrWhiteSpace($current)) {
+            [string](Get-StateField -State $phase5 -Name "installer_sha256")
+        } else {
+            $current
+        }
+    } else {
+        $null
+    }
+    $phase5InstalledExecutableSha256 = if ($null -ne $phase5) {
+        [string](Get-StateField -State $phase5 -Name "installed_executable_sha256")
+    } else {
+        $null
+    }
 
     [ordered]@{
         status = "ready-for-remote-verification"
         phase = "5.5.7"
         action = "start"
         install_dir = $release.install_dir
-        app_root = (Join-Path $env:LOCALAPPDATA "codemcp-remote")
-        project_id = if ($null -ne $phase5) { [string]$phase5.project_id } else { $null }
-        project_root = if ($null -ne $phase5) { [string]$phase5.project_root } else { $null }
-        baseline_head = if ($null -ne $phase5) { [string]$phase5.baseline_head } else { $null }
+        app_root = $AcceptanceAppRoot
+        project_id = if ($null -ne $phase5) { [string](Get-StateField -State $phase5 -Name "project_id") } else { $null }
+        project_root = if ($null -ne $phase5) { [string](Get-StateField -State $phase5 -Name "project_root") } else { $null }
+        baseline_head = if ($null -ne $phase5) { [string](Get-StateField -State $phase5 -Name "baseline_head") } else { $null }
+        previous_installer_sha256 = $phase5PreviousInstallerSha256
+        current_installer_sha256 = $phase5CurrentInstallerSha256
+        installed_executable_sha256 = $phase5InstalledExecutableSha256
         worker_mode = [string]$doctor.checks.configuration.worker_mode
         git_path = $gitPath
         transport = $provider
@@ -437,7 +759,7 @@ function Invoke-Reset {
         throw "Reset requires codemcp-remote to be uninstalled first; run Action=Cleanup"
     }
 
-    $appRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+    $appRoot = $AcceptanceAppRoot
     $acceptanceRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5"
     Remove-Phase5AcceptanceTree -Path $appRoot
     Remove-Phase5AcceptanceTree -Path $acceptanceRoot
@@ -518,12 +840,36 @@ if (-not [string]::Equals($requestedProjectRootPath, $defaultProjectRootPath, [S
     throw "Prepare only manages the fixed Phase 5 project root: $DefaultProjectRoot"
 }
 
-$setupExit = Invoke-GuiProcessAndWait -FilePath $installer -ArgumentList @(
+$expectedInstallDir = Normalize-ComparablePath -Path $DefaultInstallDir
+$expectedAppRoot = Normalize-ComparablePath -Path $AcceptanceAppRoot
+$existingAcceptance = Get-ExistingManagedAcceptanceInstall `
+    -ExpectedInstallDir $expectedInstallDir `
+    -ExpectedAppRoot $expectedAppRoot `
+    -ExpectedProjectRoot $projectRootPath `
+    -ExpectedProjectId $ProjectId `
+    -ExpectedTransport $Transport `
+    -ExpectedPublicUrl $PublicUrl `
+    -ExpectedAuthorizationServerIssuer $AuthorizationServerIssuer `
+    -ExpectedCanonicalResourceUri $CanonicalResourceUri `
+    -ExpectedValidationResourceId $ValidationResourceId
+
+if ($existingAcceptance.managed) {
+    Stop-ManagedAcceptanceRuntime -ExistingInstall $existingAcceptance
+}
+
+$installerArguments = @(
     "/VERYSILENT",
     "/SUPPRESSMSGBOXES",
     "/NORESTART",
+    ('/DIR="{0}"' -f $expectedInstallDir),
     "/MERGETASKS=!addtopath"
 )
+if ($existingAcceptance.managed) {
+    # The harness already performed the formal lifecycle stop and must not let
+    # Inno Setup target any process outside that managed runtime boundary.
+    $installerArguments += "/NOSTOPLIFECYCLE"
+}
+$setupExit = Invoke-GuiProcessAndWait -FilePath $installer -ArgumentList $installerArguments
 if ($setupExit -ne 0) {
     throw "clean-machine installer failed with exit code $setupExit"
 }
@@ -532,8 +878,8 @@ if (-not (Test-Path -LiteralPath $UninstallKey)) {
 }
 
 $release = Get-InstalledRelease
-$expectedInstallDir = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs\codemcp-remote"))
-if ($release.install_dir.TrimEnd("\") -ne $expectedInstallDir.TrimEnd("\")) {
+$releaseInstallDir = Normalize-ComparablePath -Path $release.install_dir
+if (-not [string]::Equals($releaseInstallDir, $expectedInstallDir, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "unexpected default install location: $($release.install_dir)"
 }
 
@@ -544,7 +890,8 @@ foreach ($required in @(
     $cloudflaredExe,
     $tunnelExe,
     (Join-Path $release.install_dir "LICENSE"),
-    (Join-Path $release.install_dir "THIRD_PARTY_NOTICES.txt")
+    (Join-Path $release.install_dir "THIRD_PARTY_NOTICES.txt"),
+    (Join-Path $release.install_dir "SHA256SUMS.txt")
 )) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "installed release is missing required file: $required"
@@ -554,6 +901,16 @@ foreach ($forbiddenBundledTool in @("python.exe", "uv.exe", "pwsh.exe", "wsl.exe
     if (Test-Path -LiteralPath (Join-Path $release.install_dir $forbiddenBundledTool) -PathType Leaf) {
         throw "installer unexpectedly bundles $forbiddenBundledTool"
     }
+}
+$installedExecutableSha256 = Get-InstalledExecutableIdentity `
+    -InstallDir $release.install_dir `
+    -ExecutablePath $release.exe
+if (
+    $existingAcceptance.managed -and
+    $actualInstallerSha256 -ne $existingAcceptance.previous_installer_sha256 -and
+    $installedExecutableSha256 -eq $existingAcceptance.previous_installed_executable_sha256
+) {
+    throw "managed installer upgrade left the previous executable artifact in place; refusing to continue"
 }
 
 Set-RuntimeIsolationPath -InstallDir $release.install_dir -GitPath $gitPath
@@ -615,7 +972,7 @@ Assert-DoctorContract -Doctor $doctorAfterProject
 if ([int]$doctorAfterProject.checks.configuration.projects -lt 1) {
     throw "doctor did not observe the registered Phase 5 project"
 }
-$appRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+$appRoot = $AcceptanceAppRoot
 Assert-NoEmbeddedAuthServerState -AppRoot $appRoot
 
 $provider = [string]$doctorAfterProject.checks.transport.provider
@@ -635,7 +992,12 @@ $phase5State = [ordered]@{
     project_id = $ProjectId
     project_root = $projectRootPath
     baseline_head = $baselineHead
+    app_root = $appRoot
     installer_sha256 = $actualInstallerSha256
+    previous_installer_sha256 = $existingAcceptance.previous_installer_sha256
+    current_installer_sha256 = $actualInstallerSha256
+    installed_executable_sha256 = $installedExecutableSha256
+    previous_installed_executable_sha256 = $existingAcceptance.previous_installed_executable_sha256
     install_dir = $release.install_dir
     transport = $provider
     public_url = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.cloudflare_settings.public_url } else { $null }
@@ -652,6 +1014,9 @@ $phase5State | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Phase5StateFi
     phase = "5.5.7"
     action = "prepare"
     installer_sha256 = $actualInstallerSha256
+    previous_installer_sha256 = $existingAcceptance.previous_installer_sha256
+    current_installer_sha256 = $actualInstallerSha256
+    installed_executable_sha256 = $installedExecutableSha256
     install_dir = $release.install_dir
     app_root = $appRoot
     phase5_state_file = $Phase5StateFile

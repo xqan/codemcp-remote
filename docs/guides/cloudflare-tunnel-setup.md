@@ -66,6 +66,12 @@ pwsh -NoLogo -NoProfile -File .\scripts\validate-clean-windows-release.ps1 `
 
 `Prepare` installs the release, verifies the installer hash, proves the isolated runtime does not depend on Python/uv/pwsh, initializes the Cloudflare transport and OAuth Resource Server configuration, stores both runtime secrets with DPAPI, creates the disposable `phase5-clean` project, and records the baseline Git HEAD without storing either secret.
 
+If the production AppId is already present, `Prepare` permits only a harness-managed Phase 5.5.7
+reinstall: the fixed install directory, app root, transport/resource configuration, and non-secret
+`phase5-validation.json` must all match. The existing runtime is stopped through the packaged lifecycle
+command before the controlled Inno Setup upgrade. A missing or mismatched state, a different install
+location, or an unrelated user installation fails closed without invoking the installer.
+
 On a Prepare rerun, the harness first calls the packaged `project remove` operation with the expected
 fixed disposable root. A missing registration is treated as the first-run case; an exact matching
 registration is removed before a new Git baseline is created; any other registered root fails closed.
