@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + Network Trust + Optional OAuth
 
-Status: **PHASE A COMPLETE — read-only architecture/config/security review recorded; implementation phases B-H are NOT STARTED; existing OAuth evidence and 5.5.7B work remain preserved**
+Status: **PHASE B COMPLETE — auth none + Cloudflare network-trust configuration/model/validation implemented; phases C-H are NOT STARTED; existing OAuth evidence and 5.5.7B work remain preserved**
 
 Target release: `v0.1.0`
 
@@ -180,7 +180,83 @@ Each item is a separate stop-gated phase. No later phase starts automatically:
 - The current public-capable `/healthz` route and externally managed Tunnel ingress need an explicit route-level review before claiming that health is loopback-only.
 - Existing documentation and release harness assertions are intentionally inconsistent with Profile A until their later phase updates. This is known migration work, not evidence that OAuth was abandoned.
 
-**Phase A gate:** COMPLETE for read-only review. The branch is created, the review artifact is recorded, no Phase B implementation has started, and work stops here pending the user’s explicit `继续` instruction.
+**Phase A gate:** COMPLETE for read-only review. The branch and review artifact were recorded before Phase B implementation began. The Phase B result is recorded below.
+
+## Phase B — Auth none + network-trust configuration model and validation
+
+**Status:** **COMPLETE — 2026-08-26.**
+
+### B.1 Scope
+
+This phase implements only the configuration/model/schema/validation foundation for the two security profiles. The lifecycle start gate, doctor output, CLI flags, HTTP middleware, synthetic principal, replay/session identity, Windows harness, WAF, IP manifest, and live endpoint work remain deferred to later phases.
+
+The lifecycle-owned, versioned `config/remote.toml` remains the canonical persisted runtime configuration. Authentication and network trust are separate tables and separate models:
+
+```toml
+[auth]
+version = 1
+mode = "none"
+
+[network_trust]
+mode = "cloudflare-chatgpt"
+allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_origins = ["https://chatgpt.com"]
+```
+
+The existing OAuth shape remains supported without a network-trust table:
+
+```toml
+[auth]
+version = 1
+mode = "oauth-resource-server"
+verification_contract = "mcp-rs-verification-v1"
+authorization_server_issuer = "https://auth.example.com"
+canonical_resource_uri = "https://mcp.example.com/mcp"
+validation_resource_id = "codemcp-resource"
+validation_timeout_ms = 2000
+```
+
+### B.2 Implemented contract
+
+- Added independent `NetworkTrustConfig` and `NetworkTrustConfigError` in `bridge/src/codemcp_bridge/network_trust.py`.
+- Supported network-trust mode is exactly `cloudflare-chatgpt`; unknown modes fail closed.
+- `allowed_hosts` is required and non-empty. Entries are hostname-only, canonicalized to lowercase, and reject schemes, ports (including `:443`), paths, queries, fragments, credentials, wildcard characters, IP literals, invalid labels, whitespace, and control characters.
+- `allowed_origins` is optional and may be empty. Entries must be complete HTTPS origins without credentials, path, query, fragment, `null`, or wildcards. Hostnames are canonicalized case-insensitively and default HTTPS port `:443` is removed.
+- Unknown `network_trust` fields fail closed. No HTTP request enforcement is introduced here; Origin remains an if-present policy for the later middleware phase.
+- Supported auth modes are exactly `none` and `oauth-resource-server`. Unknown auth modes fail closed.
+- Explicit `auth.mode = "none"` requires a valid `network_trust` table with `mode = "cloudflare-chatgpt"` and non-empty `allowed_hosts`. Missing or invalid trust policy fails closed during combined configuration loading.
+- `auth.mode = "oauth-resource-server"` continues to validate the existing issuer/resource/contract fields and does not require `network_trust`.
+- `configure_network_trust()` persists canonical values while preserving an existing OAuth configuration. `configure_resource_auth(mode="none")` persists an explicit No-Auth mode only when a valid network-trust policy already exists.
+- No `anonymous` principal, OAuth principal change, replay namespace change, session owner change, audit principal change, HTTP middleware, or public-start enforcement was added.
+
+### B.3 Backward compatibility
+
+Legacy configurations with no `[auth]` table retain the existing disabled/legacy parsing result. Existing OAuth configurations without `[network_trust]` continue to load successfully and retain `mcp-rs-verification-v1` validation semantics. Existing OAuth secret handling and RFC 9728 behavior were not changed.
+
+An explicit No-Auth configuration is intentionally different from an absent legacy auth table: it must include the network-trust policy and cannot receive a permissive default. `remote.toml` serialization writes canonical host/origin arrays and an explicit `auth.mode = "none"` for the configured Profile A state.
+
+### B.4 Validation evidence
+
+Changed tests cover:
+
+- OAuth configuration with no network trust;
+- valid No-Auth plus Cloudflare network trust;
+- missing/empty trust policy and unknown auth/network modes;
+- hostname-only validation, lowercase canonicalization, wildcard/scheme/path/port/credential/query/fragment rejection;
+- valid HTTPS origins, `:443` canonicalization, empty origin lists, and rejection of HTTP/path/query/credentials/`null`/wildcards/malformed values;
+- OAuth preservation when adding network trust;
+- explicit No-Auth configuration refusal without trust;
+- TOML round-trip and canonical serialization.
+
+Validation on 2026-08-26:
+
+- targeted Phase B plus OAuth, Cloudflare, security-gate, and Phase 3 lifecycle regression: `97 passed`;
+- Ruff check on changed Python files: PASS;
+- Ruff format check on changed Python files: PASS;
+- Python `compileall`: PASS;
+- `git diff --check`: PASS.
+
+**STOP GATE:** Phase B is COMPLETE. Phase C (Host/Origin HTTP middleware and synthetic principal/replay design) has not started and requires a new explicit `继续` instruction.
 
 ## 1. Context
 

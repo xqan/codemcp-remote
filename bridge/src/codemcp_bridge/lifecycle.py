@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .network_trust import (
+    NETWORK_TRUST_MODE,
+    NetworkTrustConfig,
+    NetworkTrustConfigError,
+)
 from .resource_auth import (
     CONTRACT_ID,
     CONTRACT_VERSION,
@@ -26,8 +31,8 @@ from .resource_auth import (
 )
 from .settings import PROJECT_ID_PATTERN, SettingsError, load_settings
 from .transports import (
-    LifecycleError,
     OPENAI_TUNNEL_PROVIDER,
+    LifecycleError,
     OpenAITunnelSettings,
     RemoteTransportProvider,
     TransportContext,
@@ -114,6 +119,7 @@ def _transport_context(paths: RuntimePaths) -> TransportContext:
 
 REMOTE_CONFIG_VERSION = 1
 RESOURCE_AUTH_CONFIG_VERSION = 1
+AUTH_MODE_NONE = "none"
 RESOURCE_AUTH_MODE = "oauth-resource-server"
 RESOURCE_AUTH_SECRET_ENV_NAME = "CODEMCP_RS_VERIFICATION_SECRET"
 RESOURCE_AUTH_SECRET_FILE_NAME = "mcp-rs-verification-secret.dpapi"
@@ -137,6 +143,17 @@ class ResourceAuthSettings:
             timeout_seconds=self.timeout_seconds,
             contract_version=CONTRACT_VERSION,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteSecuritySettings:
+    """The independently configured authentication and network-trust profiles."""
+
+    auth_mode: str | None
+    resource_auth: ResourceAuthSettings | None
+    network_trust: NetworkTrustConfig | None
+    auth_source: str
+    network_trust_source: str
 
 
 def _remote_config_path(paths: RuntimePaths) -> Path:
@@ -163,6 +180,9 @@ def _write_remote_config(
     paths: RuntimePaths,
     provider: RemoteTransportProvider,
     auth: ResourceAuthSettings | None = None,
+    *,
+    auth_mode: str | None = None,
+    network_trust: NetworkTrustConfig | None = None,
 ) -> Path:
     path = _remote_config_path(paths)
     temporary = path.with_suffix(".toml.tmp")
@@ -171,16 +191,31 @@ def _write_remote_config(
         f"version = {REMOTE_CONFIG_VERSION}\n"
         f"transport = {_toml_quote(provider.provider_id)}\n"
     )
-    if auth is not None:
+    selected_auth_mode = auth.mode if auth is not None else auth_mode
+    if selected_auth_mode is not None:
+        if selected_auth_mode not in {AUTH_MODE_NONE, RESOURCE_AUTH_MODE}:
+            raise LifecycleError(f"unsupported remote auth mode: {selected_auth_mode!r}")
+        if selected_auth_mode == RESOURCE_AUTH_MODE and auth is None:
+            raise LifecycleError("OAuth Resource Server configuration is incomplete")
         text += (
             "\n[auth]\n"
             f"version = {RESOURCE_AUTH_CONFIG_VERSION}\n"
-            f"mode = {_toml_quote(auth.mode)}\n"
-            f"verification_contract = {_toml_quote(auth.contract_id)}\n"
-            f"authorization_server_issuer = {_toml_quote(auth.issuer)}\n"
-            f"canonical_resource_uri = {_toml_quote(auth.resource)}\n"
-            f"validation_resource_id = {_toml_quote(auth.validation_resource_id)}\n"
-            f"validation_timeout_ms = {int(auth.timeout_seconds * 1000)}\n"
+            f"mode = {_toml_quote(selected_auth_mode)}\n"
+        )
+        if auth is not None:
+            text += (
+                f"verification_contract = {_toml_quote(auth.contract_id)}\n"
+                f"authorization_server_issuer = {_toml_quote(auth.issuer)}\n"
+                f"canonical_resource_uri = {_toml_quote(auth.resource)}\n"
+                f"validation_resource_id = {_toml_quote(auth.validation_resource_id)}\n"
+                f"validation_timeout_ms = {int(auth.timeout_seconds * 1000)}\n"
+            )
+    if network_trust is not None:
+        text += (
+            "\n[network_trust]\n"
+            f"mode = {_toml_quote(network_trust.mode)}\n"
+            f"allowed_hosts = {_toml_string_array(network_trust.allowed_hosts)}\n"
+            f"allowed_origins = {_toml_string_array(network_trust.allowed_origins)}\n"
         )
     temporary.write_text(text, encoding="utf-8", newline="\n")
     os.replace(temporary, path)
@@ -222,15 +257,30 @@ def _build_resource_auth_settings(
     return settings
 
 
-def load_resource_auth_settings(paths: RuntimePaths) -> tuple[ResourceAuthSettings | None, str]:
-    parsed = _read_remote_config(paths)
-    if parsed is None:
-        return None, "disabled"
+def _parse_auth_configuration(
+    parsed: dict[str, Any],
+) -> tuple[str | None, ResourceAuthSettings | None, str]:
     auth = parsed.get("auth")
     if auth is None:
-        return None, "disabled"
+        return None, None, "disabled"
     if not isinstance(auth, dict):
         raise LifecycleError("remote auth configuration must be a TOML table")
+
+    mode = auth.get("mode")
+    if mode == AUTH_MODE_NONE:
+        unexpected = sorted(set(auth) - {"version", "mode"})
+        if unexpected:
+            raise LifecycleError(
+                "remote auth configuration contains unsupported fields: " + ", ".join(unexpected)
+            )
+        if "version" in auth and auth["version"] != RESOURCE_AUTH_CONFIG_VERSION:
+            raise LifecycleError(
+                f"unsupported remote auth configuration version: {auth.get('version')!r}"
+            )
+        return AUTH_MODE_NONE, None, "config"
+
+    if mode != RESOURCE_AUTH_MODE:
+        raise LifecycleError(f"unsupported remote auth mode: {mode!r}")
 
     allowed = {
         "version",
@@ -250,8 +300,6 @@ def load_resource_auth_settings(paths: RuntimePaths) -> tuple[ResourceAuthSettin
         raise LifecycleError(
             f"unsupported remote auth configuration version: {auth.get('version')!r}"
         )
-    if auth.get("mode") != RESOURCE_AUTH_MODE:
-        raise LifecycleError(f"unsupported remote auth mode: {auth.get('mode')!r}")
     if auth.get("verification_contract") != CONTRACT_ID:
         raise LifecycleError("remote auth verification_contract must be mcp-rs-verification-v1")
     if auth.get("validation_timeout_ms") != 2000:
@@ -267,6 +315,7 @@ def load_resource_auth_settings(paths: RuntimePaths) -> tuple[ResourceAuthSettin
             "remote auth issuer, canonical resource URI, and validation resource id are required"
         )
     return (
+        RESOURCE_AUTH_MODE,
         _build_resource_auth_settings(
             issuer=issuer,
             resource=resource,
@@ -274,6 +323,65 @@ def load_resource_auth_settings(paths: RuntimePaths) -> tuple[ResourceAuthSettin
         ),
         "config",
     )
+
+
+def _parse_network_trust_configuration(
+    parsed: dict[str, Any],
+) -> tuple[NetworkTrustConfig | None, str]:
+    network_trust = parsed.get("network_trust")
+    if network_trust is None:
+        return None, "disabled"
+    if not isinstance(network_trust, dict):
+        raise LifecycleError("remote network_trust configuration must be a TOML table")
+    try:
+        settings = NetworkTrustConfig.from_mapping(network_trust)
+    except NetworkTrustConfigError as exc:
+        raise LifecycleError(f"network trust configuration is invalid: {exc}") from exc
+    return settings, "config"
+
+
+def load_remote_security_settings(paths: RuntimePaths) -> RemoteSecuritySettings:
+    """Load both independent security profiles and validate their legal combination."""
+
+    parsed = _read_remote_config(paths)
+    if parsed is None:
+        return RemoteSecuritySettings(
+            auth_mode=None,
+            resource_auth=None,
+            network_trust=None,
+            auth_source="disabled",
+            network_trust_source="disabled",
+        )
+
+    auth_mode, resource_auth, auth_source = _parse_auth_configuration(parsed)
+    network_trust, network_trust_source = _parse_network_trust_configuration(parsed)
+    if auth_mode == AUTH_MODE_NONE and network_trust is None:
+        raise LifecycleError(
+            f"auth.mode = none requires network_trust.mode = {NETWORK_TRUST_MODE} "
+            "with non-empty allowed_hosts"
+        )
+    return RemoteSecuritySettings(
+        auth_mode=auth_mode,
+        resource_auth=resource_auth,
+        network_trust=network_trust,
+        auth_source=auth_source,
+        network_trust_source=network_trust_source,
+    )
+
+
+def load_resource_auth_settings(paths: RuntimePaths) -> tuple[ResourceAuthSettings | None, str]:
+    security = load_remote_security_settings(paths)
+    return security.resource_auth, security.auth_source
+
+
+def load_network_trust_settings(paths: RuntimePaths) -> tuple[NetworkTrustConfig | None, str]:
+    security = load_remote_security_settings(paths)
+    return security.network_trust, security.network_trust_source
+
+
+def load_auth_mode(paths: RuntimePaths) -> tuple[str | None, str]:
+    security = load_remote_security_settings(paths)
+    return security.auth_mode, security.auth_source
 
 
 def configure_resource_auth(
@@ -285,12 +393,20 @@ def configure_resource_auth(
     validation_resource_id: str | None = None,
 ) -> dict[str, Any]:
     provider, _ = load_transport_provider(paths)
-    if mode == "none":
+    parsed = _read_remote_config(paths) or {}
+    existing_network_trust, _ = _parse_network_trust_configuration(parsed)
+    if mode == AUTH_MODE_NONE:
         if any(value is not None for value in (issuer, resource, validation_resource_id)):
             raise LifecycleError(
                 "auth fields must not be supplied when --auth-mode none is selected"
             )
+        if existing_network_trust is None:
+            raise LifecycleError(
+                f"auth.mode = none requires network_trust.mode = {NETWORK_TRUST_MODE} "
+                "with non-empty allowed_hosts"
+            )
         auth = None
+        auth_mode = AUTH_MODE_NONE
     elif mode == RESOURCE_AUTH_MODE:
         if not all(
             isinstance(value, str) and value for value in (issuer, resource, validation_resource_id)
@@ -305,13 +421,54 @@ def configure_resource_auth(
             resource=resource,
             validation_resource_id=validation_resource_id,
         )
+        auth_mode = RESOURCE_AUTH_MODE
     else:
         raise LifecycleError(f"unsupported remote auth mode: {mode!r}")
-    _write_remote_config(paths, provider, auth)
+    _write_remote_config(
+        paths,
+        provider,
+        auth,
+        auth_mode=auth_mode,
+        network_trust=existing_network_trust,
+    )
     return {
         "status": "ok",
-        "auth_mode": auth.mode if auth is not None else "none",
+        "auth_mode": auth.mode if auth is not None else AUTH_MODE_NONE,
         "auth_config": str(_remote_config_path(paths)),
+    }
+
+
+def configure_network_trust(
+    paths: RuntimePaths,
+    *,
+    mode: str,
+    allowed_hosts: list[str] | tuple[str, ...],
+    allowed_origins: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Persist a validated network-trust policy while preserving auth settings."""
+
+    provider, _ = load_transport_provider(paths)
+    parsed = _read_remote_config(paths) or {}
+    auth_mode, auth, _ = _parse_auth_configuration(parsed)
+    try:
+        network_trust = NetworkTrustConfig(
+            mode=mode,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        )
+    except NetworkTrustConfigError as exc:
+        raise LifecycleError(f"network trust configuration is invalid: {exc}") from exc
+    _write_remote_config(
+        paths,
+        provider,
+        auth,
+        auth_mode=auth_mode,
+        network_trust=network_trust,
+    )
+    return {
+        "status": "ok",
+        "network_trust_mode": network_trust.mode,
+        "network_trust_config": str(_remote_config_path(paths)),
     }
 
 
@@ -329,6 +486,10 @@ def ensure_runtime_dirs(paths: RuntimePaths) -> None:
 
 def _toml_quote(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _toml_string_array(values: tuple[str, ...]) -> str:
+    return "[" + ", ".join(_toml_quote(value) for value in values) + "]"
 
 
 def _rewrite_bridge_storage(template: str, paths: RuntimePaths) -> str:
@@ -363,12 +524,16 @@ def initialize_runtime(
 ) -> dict[str, Any]:
     ensure_runtime_dirs(paths)
     existing_provider, existing_source = load_transport_provider(paths)
-    existing_auth, _ = load_resource_auth_settings(paths)
+    existing_security = load_remote_security_settings(paths)
+    existing_auth = existing_security.resource_auth
+    existing_auth_mode = existing_security.auth_mode
+    existing_network_trust = existing_security.network_trust
     provider = existing_provider if transport is None else get_transport_provider(transport)
     if existing_provider.provider_id != provider.provider_id and not force:
         if existing_source == "config" or paths.tunnel_env.exists():
             raise LifecycleError(
-                "remote transport change requires --force so provider configuration is replaced safely"
+                "remote transport change requires --force so provider configuration is "
+                "replaced safely"
             )
 
     template = paths.runtime_root / "config" / "bridge.example.toml"
@@ -405,7 +570,17 @@ def initialize_runtime(
         or not remote_config.is_file()
         or existing_provider.provider_id != provider.provider_id
     ):
-        created.append(str(_write_remote_config(paths, provider, existing_auth)))
+        created.append(
+            str(
+                _write_remote_config(
+                    paths,
+                    provider,
+                    existing_auth,
+                    auth_mode=existing_auth_mode,
+                    network_trust=existing_network_trust,
+                )
+            )
+        )
 
     return {
         "status": "ok",
@@ -696,7 +871,8 @@ def store_resource_auth_secret_from_environment(paths: RuntimePaths) -> bool:
         raise LifecycleError(f"{RESOURCE_AUTH_SECRET_ENV_NAME} is not set in the current process")
     if os.name != "nt":
         raise LifecycleError(
-            "secure Resource Server verification secret storage is currently supported only on Windows"
+            "secure Resource Server verification secret storage is currently supported "
+            "only on Windows"
         )
     ensure_runtime_dirs(paths)
     _resource_auth_secret_path(paths).write_bytes(_dpapi_protect(value.encode("utf-8")))
@@ -710,7 +886,8 @@ def load_request_authenticator(paths: RuntimePaths) -> OAuthResourceServerAuthen
     secret = _resource_auth_secret_from_runtime(paths)
     if not secret:
         raise LifecycleError(
-            f"{RESOURCE_AUTH_SECRET_ENV_NAME} is unavailable; set it in the environment or store it securely"
+            f"{RESOURCE_AUTH_SECRET_ENV_NAME} is unavailable; set it in the environment or "
+            "store it securely"
         )
     try:
         validator = OnlineResourceServerValidator(auth.validation_config(secret))
@@ -858,7 +1035,8 @@ def start_services(
     secret = _secret_from_runtime(paths, provider)
     if not secret:
         raise LifecycleError(
-            f"{provider.secret_env_name} is unavailable; set it in the environment or store it securely"
+            f"{provider.secret_env_name} is unavailable; set it in the environment or "
+            "store it securely"
         )
     if paths.state_file.exists():
         existing = status_services(paths)
