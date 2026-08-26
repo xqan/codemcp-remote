@@ -129,7 +129,7 @@ def test_auth_config_structural_validation_is_fail_closed(tmp_path: Path) -> Non
         )
 
 
-def test_cloudflare_doctor_requires_auth_and_auth_secret(
+def test_cloudflare_doctor_supports_network_trust_without_oauth(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -150,7 +150,23 @@ def test_cloudflare_doctor_requires_auth_and_auth_secret(
 
     report = lifecycle.doctor_report(paths)
     assert report["checks"]["auth"]["status"] == "failed"
-    assert "requires OAuth Resource Server auth" in report["checks"]["auth"]["error"]
+    assert report["checks"]["auth"]["error"] == lifecycle.PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST
+    assert report["checks"]["network_trust"]["status"] == "disabled"
+
+    lifecycle.configure_network_trust(
+        paths,
+        mode="cloudflare-chatgpt",
+        allowed_hosts=["codemcp.quickclip.cc"],
+    )
+    lifecycle.configure_resource_auth(paths, mode="none")
+    report = lifecycle.doctor_report(paths)
+    assert report["checks"]["auth"]["status"] == "ready"
+    assert report["checks"]["auth"]["mode"] == "none"
+    assert report["checks"]["auth"]["oauth_secret_required"] is False
+    assert report["checks"]["network_trust"]["status"] == "ready"
+    assert report["checks"]["network_trust"]["allowed_hosts"] == ["codemcp.quickclip.cc"]
+    assert report["checks"]["identity_level"] == "network-only"
+    assert lifecycle.RESOURCE_AUTH_SECRET_ENV_NAME not in repr(report)
 
     _configure_cloudflare_auth(paths)
     report = lifecycle.doctor_report(paths)

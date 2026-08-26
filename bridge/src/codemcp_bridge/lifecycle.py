@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,7 @@ from .transports.openai_tunnel import (
 )
 
 APP_NAME = "codemcp-remote"
+CODEMCP_HOME_ENV_NAME = "CODEMCP_HOME"
 TunnelSettings = OpenAITunnelSettings
 _REMOTE_TRANSPORT = OPENAI_TUNNEL_PROVIDER
 _SECRET_NAME = _REMOTE_TRANSPORT.secret_env_name
@@ -68,6 +70,69 @@ class RuntimePaths:
     tunnel_env: Path
     state_file: Path
     secret_file: Path
+    layout: str = "legacy"
+
+    @property
+    def home(self) -> Path:
+        """The operator-selected writable runtime home."""
+
+        return self.app_root
+
+    @property
+    def checkpoint_dir(self) -> Path:
+        """The conventional checkpoint subtree for the selected runtime home."""
+
+        return self.data_dir / "checkpoints"
+
+    @property
+    def home_option(self) -> str:
+        """Return the CLI option that preserves this path layout across child processes."""
+
+        return "--home" if self.layout == "home" else "--app-root"
+
+
+def _absolute_path(value: Path | str, *, label: str) -> Path:
+    if not isinstance(value, (Path, str)):
+        raise LifecycleError(f"{label} must be an absolute path")
+    text = os.fspath(value)
+    if not text or not text.strip() or "\x00" in text:
+        raise LifecycleError(f"{label} must be a non-empty absolute path")
+    candidate = Path(text).expanduser()
+    if not candidate.is_absolute():
+        raise LifecycleError(f"{label} must be absolute; relative paths are not allowed")
+    try:
+        return candidate.resolve(strict=False)
+    except OSError as exc:
+        raise LifecycleError(f"{label} cannot be resolved: {exc}") from exc
+
+
+def resolve_runtime_home(
+    *,
+    explicit_home: Path | str | None = None,
+    legacy_app_root: Path | str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[Path, str]:
+    """Resolve the writable runtime home and identify its compatibility layout.
+
+    Explicit ``--home`` wins over ``CODEMCP_HOME``.  ``--app-root`` remains a
+    compatibility escape hatch for existing installations and intentionally
+    keeps the historical directory layout.  With neither override, the old
+    per-user default is preserved so existing OAuth/OpenAI installations are
+    not silently migrated.
+    """
+
+    if explicit_home is not None and legacy_app_root is not None:
+        raise LifecycleError("--home and --app-root cannot be used together")
+    env = os.environ if environ is None else environ
+    if explicit_home is not None:
+        return _absolute_path(explicit_home, label="--home"), "home"
+    if legacy_app_root is not None:
+        return _absolute_path(legacy_app_root, label="--app-root"), "legacy-app-root"
+
+    configured_home = env.get(CODEMCP_HOME_ENV_NAME)
+    if configured_home is not None and configured_home.strip():
+        return _absolute_path(configured_home, label=CODEMCP_HOME_ENV_NAME), "home"
+    return app_data_root(environ=dict(env)), "legacy-default"
 
 
 def app_data_root(*, environ: dict[str, str] | None = None, home: Path | None = None) -> Path:
@@ -79,14 +144,34 @@ def app_data_root(*, environ: dict[str, str] | None = None, home: Path | None = 
     return base.resolve(strict=False) / f".{APP_NAME}"
 
 
-def runtime_paths(runtime_root: Path, *, app_root: Path | None = None) -> RuntimePaths:
-    runtime = runtime_root.resolve(strict=False)
-    root = app_data_root() if app_root is None else app_root.resolve(strict=False)
+def resolve_runtime_paths(
+    runtime_root: Path,
+    *,
+    home: Path | str | None = None,
+    app_root: Path | str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> RuntimePaths:
+    """Build all writable paths from one validated runtime-home decision."""
+
+    runtime = _absolute_path(runtime_root, label="runtime root")
+    root, layout = resolve_runtime_home(
+        explicit_home=home,
+        legacy_app_root=app_root,
+        environ=environ,
+    )
     config_dir = root / "config"
     data_dir = root / "data"
-    log_dir = root / "logs"
-    run_dir = root / "run"
-    tunnel_dir = root / "tunnel"
+    if layout == "home":
+        log_dir = data_dir / "logs"
+        run_dir = data_dir / "runtime"
+        tunnel_dir = run_dir / "tunnel"
+    else:
+        # Preserve the historical default/--app-root layout for existing
+        # installations.  A new --home or CODEMCP_HOME opts into the explicit
+        # modern layout above without an implicit migration.
+        log_dir = root / "logs"
+        run_dir = root / "run"
+        tunnel_dir = root / "tunnel"
     secret_dir = root / "secrets"
     return RuntimePaths(
         runtime_root=runtime,
@@ -102,6 +187,24 @@ def runtime_paths(runtime_root: Path, *, app_root: Path | None = None) -> Runtim
         tunnel_env=config_dir / "tunnel.env",
         state_file=run_dir / "state.json",
         secret_file=secret_dir / "control-plane-api-key.dpapi",
+        layout="home" if layout == "home" else "legacy",
+    )
+
+
+def runtime_paths(
+    runtime_root: Path,
+    *,
+    app_root: Path | str | None = None,
+    home: Path | str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> RuntimePaths:
+    """Compatibility wrapper for the central runtime-path resolver."""
+
+    return resolve_runtime_paths(
+        runtime_root,
+        home=home,
+        app_root=app_root,
+        environ=environ,
     )
 
 
@@ -123,6 +226,7 @@ AUTH_MODE_NONE = "none"
 RESOURCE_AUTH_MODE = "oauth-resource-server"
 RESOURCE_AUTH_SECRET_ENV_NAME = "CODEMCP_RS_VERIFICATION_SECRET"
 RESOURCE_AUTH_SECRET_FILE_NAME = "mcp-rs-verification-secret.dpapi"
+PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST = "PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST"
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +289,7 @@ def _write_remote_config(
     network_trust: NetworkTrustConfig | None = None,
 ) -> Path:
     path = _remote_config_path(paths)
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".toml.tmp")
     text = (
         "[remote]\n"
@@ -392,6 +497,7 @@ def configure_resource_auth(
     resource: str | None = None,
     validation_resource_id: str | None = None,
 ) -> dict[str, Any]:
+    ensure_runtime_dirs(paths)
     provider, _ = load_transport_provider(paths)
     parsed = _read_remote_config(paths) or {}
     existing_network_trust, _ = _parse_network_trust_configuration(parsed)
@@ -447,6 +553,7 @@ def configure_network_trust(
 ) -> dict[str, Any]:
     """Persist a validated network-trust policy while preserving auth settings."""
 
+    ensure_runtime_dirs(paths)
     provider, _ = load_transport_provider(paths)
     parsed = _read_remote_config(paths) or {}
     auth_mode, auth, _ = _parse_auth_configuration(parsed)
@@ -524,10 +631,12 @@ def initialize_runtime(
 ) -> dict[str, Any]:
     ensure_runtime_dirs(paths)
     existing_provider, existing_source = load_transport_provider(paths)
-    existing_security = load_remote_security_settings(paths)
-    existing_auth = existing_security.resource_auth
-    existing_auth_mode = existing_security.auth_mode
-    existing_network_trust = existing_security.network_trust
+    # Parse the independent tables here so an explicitly incomplete
+    # ``auth.mode = none`` installation can be repaired by adding its trust
+    # policy.  The combined loader remains the fail-closed gate for use.
+    parsed = _read_remote_config(paths) or {}
+    existing_auth_mode, existing_auth, _ = _parse_auth_configuration(parsed)
+    existing_network_trust, _ = _parse_network_trust_configuration(parsed)
     provider = existing_provider if transport is None else get_transport_provider(transport)
     if existing_provider.provider_id != provider.provider_id and not force:
         if existing_source == "config" or paths.tunnel_env.exists():
@@ -585,6 +694,10 @@ def initialize_runtime(
     return {
         "status": "ok",
         "app_root": str(paths.app_root),
+        "home": str(paths.home),
+        "config_dir": str(paths.config_dir),
+        "data_dir": str(paths.data_dir),
+        "secret_dir": str(paths.secret_dir),
         "transport": provider.provider_id,
         "created": created,
     }
@@ -936,6 +1049,130 @@ def resource_auth_status(paths: RuntimePaths) -> dict[str, Any]:
         "validation_timeout_ms": int(auth.timeout_seconds * 1000),
         "secret_available": secret_available,
         "secret_source": secret_source,
+        "oauth_secret_required": True,
+    }
+
+
+def _network_trust_status(
+    settings: NetworkTrustConfig | None,
+    source: str,
+) -> dict[str, Any]:
+    if settings is None:
+        return {
+            "status": "disabled",
+            "mode": None,
+            "source": source,
+            "boundary": "network trust boundary",
+        }
+    return {
+        "status": "ready",
+        "mode": settings.mode,
+        "source": source,
+        "allowed_hosts": list(settings.allowed_hosts),
+        "allowed_origins": list(settings.allowed_origins),
+        "boundary": "network trust boundary",
+    }
+
+
+def security_profile_status(paths: RuntimePaths) -> dict[str, Any]:
+    """Return a redacted, profile-aware status for doctor and lifecycle output."""
+
+    try:
+        security = load_remote_security_settings(paths)
+    except LifecycleError as exc:
+        auth_mode: str | None = None
+        network_settings: NetworkTrustConfig | None = None
+        network_source = "invalid"
+        try:
+            parsed = _read_remote_config(paths) or {}
+            try:
+                auth_mode, _, _ = _parse_auth_configuration(parsed)
+            except LifecycleError:
+                auth_mode = None
+            try:
+                network_settings, network_source = _parse_network_trust_configuration(parsed)
+            except LifecycleError:
+                network_source = "invalid"
+        except LifecycleError:
+            pass
+        return {
+            "status": "invalid",
+            "profile": "invalid",
+            "auth_mode": auth_mode,
+            "auth": {
+                "status": "failed",
+                "mode": auth_mode or "unknown",
+                "source": "invalid",
+                "oauth_secret_required": auth_mode == RESOURCE_AUTH_MODE,
+                "error": str(exc),
+            },
+            "network_trust": (
+                _network_trust_status(network_settings, network_source)
+                if network_settings is not None
+                else {
+                    "status": "failed",
+                    "mode": None,
+                    "source": network_source,
+                    "boundary": "network trust boundary",
+                    "error": str(exc),
+                }
+            ),
+            "identity_level": "unknown",
+            "error": str(exc),
+        }
+
+    network_status = _network_trust_status(
+        security.network_trust,
+        security.network_trust_source,
+    )
+    if security.auth_mode == AUTH_MODE_NONE:
+        auth_status = {
+            "status": "ready",
+            "mode": AUTH_MODE_NONE,
+            "source": security.auth_source,
+            "oauth_secret_required": False,
+            "identity_level": "network-only",
+        }
+        profile = "network-trusted"
+        identity_level = "network-only"
+    elif security.resource_auth is not None:
+        auth_status = {**resource_auth_status(paths), "oauth_secret_required": True}
+        profile = "oauth-resource-server"
+        identity_level = "subject-client-scopes"
+    else:
+        auth_status = {
+            "status": "disabled",
+            "mode": None,
+            "source": security.auth_source,
+            "oauth_secret_required": False,
+        }
+        profile = "legacy"
+        identity_level = "local-only"
+
+    return {
+        "status": "ready",
+        "profile": profile,
+        "auth_mode": security.auth_mode,
+        "auth": auth_status,
+        "network_trust": network_status,
+        "identity_level": identity_level,
+    }
+
+
+def runtime_path_status(paths: RuntimePaths) -> dict[str, str]:
+    """Return non-secret paths exposed by doctor/status diagnostics."""
+
+    return {
+        "home": str(paths.home),
+        "config": str(paths.config_dir),
+        "bridge_config": str(paths.bridge_config),
+        "projects_config": str(paths.projects_config),
+        "data": str(paths.data_dir),
+        "checkpoints": str(paths.checkpoint_dir),
+        "logs": str(paths.log_dir),
+        "runtime": str(paths.run_dir),
+        "secrets": str(paths.secret_dir),
+        "layout": paths.layout,
     }
 
 
@@ -1027,11 +1264,22 @@ def start_services(
     provider, _ = load_transport_provider(paths)
     tunnel = provider.load_settings(_transport_context(paths), env_file=env_file)
     provider.validate_config(tunnel)
-    request_authenticator = load_request_authenticator(paths)
-    if provider.provider_id == "cloudflare" and request_authenticator is None:
-        raise LifecycleError(
-            "cloudflare transport requires OAuth Resource Server auth configuration"
-        )
+    try:
+        security = load_remote_security_settings(paths)
+    except LifecycleError as exc:
+        if provider.provider_id == "cloudflare" and "auth.mode = none requires" in str(exc):
+            raise LifecycleError(PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST) from exc
+        raise
+
+    if security.auth_mode == RESOURCE_AUTH_MODE:
+        load_request_authenticator(paths)
+    elif provider.provider_id == "cloudflare" and security.auth_mode != AUTH_MODE_NONE:
+        raise LifecycleError(PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST)
+    if provider.provider_id == "cloudflare" and security.network_trust is None:
+        if security.auth_mode == AUTH_MODE_NONE:
+            raise LifecycleError(PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST)
+        if security.auth_mode is None:
+            raise LifecycleError(PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST)
     secret = _secret_from_runtime(paths, provider)
     if not secret:
         raise LifecycleError(
@@ -1063,7 +1311,7 @@ def start_services(
                 str(bridge_path),
                 "--projects-config",
                 str(projects_path),
-                "--app-root",
+                paths.home_option,
                 str(paths.app_root),
             ],
             cwd=paths.app_root,
@@ -1082,7 +1330,7 @@ def start_services(
                 "_tunnel",
                 "--env-file",
                 str(tunnel.env_file),
-                "--app-root",
+                paths.home_option,
                 str(paths.app_root),
             ],
             cwd=paths.app_root,
@@ -1124,6 +1372,7 @@ def start_services(
 
 
 def status_services(paths: RuntimePaths) -> dict[str, Any]:
+    security_status = security_profile_status(paths)
     try:
         provider, transport_source = load_transport_provider(paths)
     except LifecycleError as exc:
@@ -1131,14 +1380,19 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
             "status": "unknown",
             "error": str(exc),
             "state_file": str(paths.state_file),
+            "paths": runtime_path_status(paths),
         }
     if not paths.state_file.is_file():
         return {
             "status": "stopped",
             "transport": provider.provider_id,
             "transport_source": transport_source,
-            "auth": resource_auth_status(paths),
+            "auth": security_status["auth"],
+            "network_trust": security_status["network_trust"],
+            "identity_level": security_status["identity_level"],
+            "security_profile": security_status["profile"],
             "state_file": str(paths.state_file),
+            "paths": runtime_path_status(paths),
         }
     try:
         state = json.loads(paths.state_file.read_text(encoding="utf-8"))
@@ -1160,12 +1414,16 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
         and tunnel_owned
         and bridge_health["status"] == "ok"
         and tunnel_health["status"] == "ok"
+        and security_status["status"] != "invalid"
     )
     return {
         "status": "running" if running else "degraded",
         "transport": state.get("transport", provider.provider_id),
         "transport_source": transport_source,
-        "auth": resource_auth_status(paths),
+        "auth": security_status["auth"],
+        "network_trust": security_status["network_trust"],
+        "identity_level": security_status["identity_level"],
+        "security_profile": security_status["profile"],
         "bridge": {
             "pid": state.get("bridge_pid"),
             "owned": bridge_owned,
@@ -1177,6 +1435,7 @@ def status_services(paths: RuntimePaths) -> dict[str, Any]:
             "health": tunnel_health,
         },
         "state_file": str(paths.state_file),
+        "paths": runtime_path_status(paths),
     }
 
 
@@ -1231,18 +1490,33 @@ def doctor_report(
         "source": transport_source,
         "config": str(_remote_config_path(paths)),
     }
-    auth_status = resource_auth_status(paths)
-    if auth_status["status"] == "ready":
+    security_status = security_profile_status(paths)
+    checks["paths"] = runtime_path_status(paths)
+    checks["network_trust"] = security_status["network_trust"]
+    checks["identity_level"] = security_status["identity_level"]
+    auth_status = security_status["auth"]
+    if provider.provider_id == "cloudflare":
+        if security_status["auth_mode"] == RESOURCE_AUTH_MODE:
+            if auth_status["status"] == "ready":
+                checks["auth"] = {**auth_status, "status": "ok"}
+            else:
+                error = auth_status.get("error")
+                if auth_status["status"] == "missing":
+                    error = f"{RESOURCE_AUTH_SECRET_ENV_NAME} is unavailable"
+                checks["auth"] = {**auth_status, "status": "failed", "error": error}
+        elif security_status["profile"] == "network-trusted":
+            checks["auth"] = auth_status
+        else:
+            checks["auth"] = {
+                **auth_status,
+                "status": "failed",
+                "mode": auth_status.get("mode") or "none",
+                "error": PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST,
+            }
+    elif auth_status["status"] == "ready":
         checks["auth"] = {**auth_status, "status": "ok"}
-    elif auth_status["status"] == "disabled" and provider.provider_id != "cloudflare":
-        checks["auth"] = auth_status
     else:
-        error = auth_status.get("error")
-        if auth_status["status"] == "disabled":
-            error = "cloudflare transport requires OAuth Resource Server auth configuration"
-        elif auth_status["status"] == "missing":
-            error = f"{RESOURCE_AUTH_SECRET_ENV_NAME} is unavailable"
-        checks["auth"] = {**auth_status, "status": "failed", "error": error}
+        checks["auth"] = auth_status
     secret = _secret_from_runtime(paths, provider)
     secret_path = _provider_secret_path(paths, provider)
     secret_source = (
@@ -1268,7 +1542,12 @@ def doctor_report(
         for name, value in checks.items()
         if isinstance(value, dict) and value.get("status") in {"failed", "missing", "unknown"}
     ]
-    return {"status": "ok" if not failed else "attention", "checks": checks}
+    return {
+        "status": "ok" if not failed else "attention",
+        "home": str(paths.home),
+        "config": str(paths.config_dir),
+        "checks": checks,
+    }
 
 
 def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:

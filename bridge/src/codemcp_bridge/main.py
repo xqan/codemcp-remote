@@ -18,10 +18,12 @@ from .lifecycle import (
     DEFAULT_TUNNEL_HEALTH_URL,
     LifecycleError,
     add_project,
+    configure_network_trust,
     configure_resource_auth,
     doctor_report,
     initialize_runtime,
     initialize_tunnel_profile,
+    load_remote_security_settings,
     load_request_authenticator,
     load_transport_provider,
     load_tunnel_settings,
@@ -71,6 +73,7 @@ def _parse_args() -> argparse.Namespace:
             "serve",
             "check",
             "init",
+            "configure",
             "project",
             "start",
             "status",
@@ -89,6 +92,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bridge-config", type=Path)
     parser.add_argument("--projects-config", type=Path)
     parser.add_argument("--env-file", type=Path)
+    parser.add_argument(
+        "--home",
+        type=Path,
+        help="writable runtime home (overrides CODEMCP_HOME)",
+    )
     parser.add_argument("--app-root", type=Path)
     parser.add_argument("--transport", choices=("openai-tunnel", "cloudflare"))
     parser.add_argument("--tunnel-id")
@@ -103,6 +111,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--store-api-key", action="store_true")
     parser.add_argument("--store-transport-secret", action="store_true")
     parser.add_argument("--auth-mode", choices=("none", "oauth-resource-server"))
+    parser.add_argument("--network-trust", choices=("cloudflare-chatgpt",))
+    parser.add_argument("--allowed-host", dest="allowed_hosts", action="append")
+    parser.add_argument("--allowed-origin", dest="allowed_origins", action="append")
     parser.add_argument("--authorization-server-issuer")
     parser.add_argument("--canonical-resource-uri")
     parser.add_argument("--validation-resource-id")
@@ -117,12 +128,21 @@ def _json(value: object) -> None:
 
 def main() -> int:
     args = _parse_args()
-    paths = runtime_paths(RUNTIME_ROOT, app_root=args.app_root)
 
     if args.command == "_worker":
         sys.argv = [sys.argv[0]]
         native_worker_main()
         return 0
+
+    try:
+        paths = runtime_paths(
+            RUNTIME_ROOT,
+            home=args.home,
+            app_root=args.app_root,
+        )
+    except LifecycleError as exc:
+        _json({"status": "failed", "error": str(exc)})
+        return 1
 
     if args.command == "_tunnel":
         try:
@@ -132,7 +152,7 @@ def main() -> int:
             _json({"status": "failed", "error": str(exc)})
             return 1
 
-    if args.command in {"init", "project", "start", "status", "stop", "doctor"}:
+    if args.command in {"init", "configure", "project", "start", "status", "stop", "doctor"}:
         try:
             if args.command == "init":
                 tunnel_id = args.tunnel_id or os.environ.get("CONTROL_PLANE_TUNNEL_ID", "")
@@ -149,6 +169,25 @@ def main() -> int:
                     metrics_addr=args.metrics_addr,
                     force=args.force,
                 )
+                network_fields = (args.network_trust, args.allowed_hosts, args.allowed_origins)
+                if args.network_trust is None and any(
+                    value is not None for value in network_fields[1:]
+                ):
+                    raise LifecycleError(
+                        "--network-trust is required when "
+                        "--allowed-host/--allowed-origin is supplied"
+                    )
+                if args.network_trust is not None:
+                    if not args.allowed_hosts:
+                        raise LifecycleError("--network-trust requires at least one --allowed-host")
+                    result.update(
+                        configure_network_trust(
+                            paths,
+                            mode=args.network_trust,
+                            allowed_hosts=args.allowed_hosts,
+                            allowed_origins=args.allowed_origins or (),
+                        )
+                    )
                 auth_fields = (
                     args.authorization_server_issuer,
                     args.canonical_resource_uri,
@@ -188,6 +227,47 @@ def main() -> int:
                 result["transport_config"] = str(config)
                 if provider.provider_id == "openai-tunnel":
                     result["tunnel_profile"] = str(config)
+            elif args.command == "configure":
+                result = {}
+                if args.network_trust is None and any(
+                    value is not None for value in (args.allowed_hosts, args.allowed_origins)
+                ):
+                    raise LifecycleError(
+                        "--network-trust is required when "
+                        "--allowed-host/--allowed-origin is supplied"
+                    )
+                if args.network_trust is not None:
+                    if not args.allowed_hosts:
+                        raise LifecycleError("--network-trust requires at least one --allowed-host")
+                    result.update(
+                        configure_network_trust(
+                            paths,
+                            mode=args.network_trust,
+                            allowed_hosts=args.allowed_hosts,
+                            allowed_origins=args.allowed_origins or (),
+                        )
+                    )
+                auth_fields = (
+                    args.authorization_server_issuer,
+                    args.canonical_resource_uri,
+                    args.validation_resource_id,
+                )
+                if args.auth_mode is None and any(value is not None for value in auth_fields):
+                    raise LifecycleError(
+                        "--auth-mode is required when OAuth auth fields are supplied"
+                    )
+                if args.auth_mode is not None:
+                    result.update(
+                        configure_resource_auth(
+                            paths,
+                            mode=args.auth_mode,
+                            issuer=args.authorization_server_issuer,
+                            resource=args.canonical_resource_uri,
+                            validation_resource_id=args.validation_resource_id,
+                        )
+                    )
+                if not result:
+                    raise LifecycleError("configure requires --network-trust or --auth-mode")
             elif args.command == "project":
                 if args.subcommand == "add":
                     if not args.project_id or not args.project_root:
@@ -266,14 +346,25 @@ def main() -> int:
         return 0
 
     try:
+        security = load_remote_security_settings(paths)
         request_authenticator = load_request_authenticator(paths)
+        network_trust = security.network_trust if security.auth_mode == "none" else None
+        network_resource = None
+        if network_trust is not None:
+            provider, _ = load_transport_provider(paths)
+            if provider.provider_id == "cloudflare":
+                network_resource = load_tunnel_settings(paths).public_url
     except LifecycleError as exc:
         print(f"configuration_error={exc}")
         return 1
 
     configure_logging(settings.storage.log_dir)
     logging.getLogger(__name__).info("Bridge logging initialized")
-    server, service = create_server(settings)
+    server, service = create_server(
+        settings,
+        network_trust=network_trust,
+        network_resource=network_resource,
+    )
     if request_authenticator is not None:
         install_resource_server_auth(server, request_authenticator)
     try:
