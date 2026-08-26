@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$OutputDir,
-    [string]$ISCCPath,
+    [string]$ISCCPath = "D:\Programs\Inno Setup 7\ISCC.exe",
     [string]$AppVersion = "0.1.0",
     [string]$TunnelClientVersion = "v0.0.12",
     [string]$CloudflaredVersion = "2026.7.3",
