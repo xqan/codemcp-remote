@@ -1,6 +1,6 @@
-# Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
+# Phase 5.5 — Cloudflare Transport + Network Trust + Optional OAuth
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 RFC 9728 and managed reinstall repository fixes are PASS/READY; live reinstall and ChatGPT proof remain pending**
+Status: **PHASE A COMPLETE — read-only architecture/config/security review recorded; implementation phases B-H are NOT STARTED; existing OAuth evidence and 5.5.7B work remain preserved**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,179 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side integration through `codemcp-remote` Phase 5.5.6 is complete. Phase 5.5.7 found a live RFC 9728 metadata/challenge blocker on 2026-08-26; repository fix commit `91017a0402656a773737209321bd66634828f295` was included in candidate `ead65ece...`, and the subsequent harness rerun fix adds a packaged `project remove --expected-root` operation in candidate `b0c99f7b8aa8a78076c7645f5ce073b118c66fa03b40a8870a8b542dd869a36e`. The currently installed binary still predates both fixes. The live staging issuer is `https://auth-staging.quickclip.cc`; the Cloudflare-published MCP resource is `https://codemcp.quickclip.cc/mcp`; the current clean `mcp-auth-server` repository HEAD observed for this gate is `b2372b61cf702874c6cae438ba504efe8bc0b4e6`. Final PASS still requires reinstalling the new candidate, repeating public metadata/challenge curl checks, capturing the deployed Worker version, then completing the ChatGPT OAuth/mutation/replay/restore/cleanup matrix.
+Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side OAuth Resource Server integration through Phase 5.5.6 is complete. That implementation is retained as the optional advanced OAuth profile. The earlier Phase 5.5.7 RFC 9728 metadata/challenge and managed reinstall fixes remain historical acceptance evidence; they are not invalidated by the new personal-deployment profile. The live OAuth staging issuer is `https://auth-staging.quickclip.cc`; the Cloudflare-published MCP resource is `https://codemcp.quickclip.cc/mcp`.
+
+The sections below retain historical Phase 5.5 implementation evidence. The Phase A contract in the next section is authoritative for the remaining work: Cloudflare network trust is the recommended single-user path, while OAuth Resource Server interoperability remains an optional advanced/enterprise path.
+
+## Phase A — Architecture/config/security review
+
+**Review date:** 2026-08-26
+**Review branch:** `codex/phase-a-network-trust-review`
+**Review baseline:** repository HEAD `65853c0` before the review-record commit
+**Scope:** read-only inspection of repository rules, runtime configuration, authentication, transport, lifecycle, replay/session ownership, tests, Windows acceptance harness, and current documentation.
+**Implementation status:** no runtime source, test, deployment configuration, secret, Cloudflare account state, or live endpoint was changed. Phase B has not started.
+
+### A.1 Executive conclusion
+
+The repository already has two useful foundations:
+
+- Cloudflare Tunnel publishes an origin that is validated as `127.0.0.1` and keeps the Bridge loopback-only.
+- The OAuth Resource Server path is implemented against the frozen `mcp-rs-verification-v1` contract, including RFC 9728 metadata/challenge behavior, safe principal audit propagation, and authenticated idempotency checks.
+
+The requested recommended personal deployment is not yet implementable. The current lifecycle explicitly rejects Cloudflare startup when no OAuth authenticator is configured, and there is no `network_trust` configuration, exact Host/Origin middleware, or network-trusted synthetic principal. The current 5.5.7 harness is also OAuth-first and requires `CODEMCP_RS_VERIFICATION_SECRET`.
+
+The target must therefore be modeled as two explicit profiles:
+
+| Profile | Runtime configuration | Security meaning | Intended deployment |
+| --- | --- | --- | --- |
+| `network-trusted` | `auth.mode = "none"` plus `network_trust.mode = "cloudflare-chatgpt"` and non-empty exact `allowed_hosts` | Network trust boundary only; `identity_level = network-only` | Single-user self-hosting, private ChatGPT Connector, Cloudflare Tunnel/WAF |
+| `oauth-resource-server` | `auth.mode = "oauth-resource-server"` plus the existing issuer/resource/contract settings | Real subject/client/scope identity supplied by the external authorization profile | Multi-user, enterprise, or deployments requiring user identity |
+
+Cloudflare’s IP allowlist must never be described as authentication, user identity, or strong identity. It proves only that the request arrived from an allowed OpenAI/ChatGPT Connector egress range. It does not identify a ChatGPT user, Workspace, account, or conversation. The OAuth profile is the only profile in this design that provides subject/client/scope identity semantics.
+
+### A.2 Evidence reviewed
+
+The review traced the following implementation and acceptance surfaces:
+
+- `bridge/src/codemcp_bridge/lifecycle.py`: versioned `remote.toml` provider/auth persistence, authenticator loading, Cloudflare startup gate, doctor/status, DPAPI secret handling, and process ownership.
+- `bridge/src/codemcp_bridge/resource_auth.py`: `mcp-rs-verification-v1`, `AuthenticatedPrincipal`, Bearer handling, RFC 9728 metadata, and auth context binding.
+- `bridge/src/codemcp_bridge/mcp_transport.py` and `mcp_server.py`: request-authenticator hook, `/mcp`, `/healthz`, metadata route, and existing service policy path.
+- `bridge/src/codemcp_bridge/settings.py` and `transports/cloudflare.py`: loopback constraints, public/origin URL validation, and Cloudflare process configuration.
+- `bridge/src/codemcp_bridge/operation_service.py`, `session_service.py`, `db/schema.py`, and `db/store.py`: idempotency, audit context, fixed `local-policy` storage ownership, session binding, and checkpoint/CAS ownership checks.
+- `bridge/tests/test_phase55_auth_configuration.py`, `test_phase55_oauth_resource_server.py`, `test_phase55_cloudflare_transport.py`, `test_phase55_security_gate.py`, and `test_phase557_clean_windows_harness.py`.
+- `scripts/validate-clean-windows-release.ps1`, the current Cloudflare and external-auth guides, the security/threat model, and this Phase 5.5 plan.
+
+### A.3 Existing controls that must remain unchanged
+
+The review found no reason to weaken or remove the existing project/security boundaries. Subsequent phases must preserve:
+
+- registered project allowlists and project/session binding;
+- sensitive-path filtering and fixed command allowlists;
+- mutation serialization, request-hash validation, replay semantics, and unknown-side-effect handling;
+- approval, checkpoint, Git CAS, restore, audit, and clean-worktree policy;
+- model egress denial;
+- loopback Bridge and Cloudflare origin binding at `127.0.0.1:46200`.
+
+The source does not currently implement Cloudflare IP enforcement in Python and does not hardcode OpenAI Connector ranges. That is the correct boundary. IP enforcement must be configured at Cloudflare Edge/WAF before the request can reach the Tunnel; it must not be recreated with request headers inside `codemcp-remote`.
+
+### A.4 Findings and gaps
+
+#### P0 — Cloudflare + No Auth cannot currently start
+
+`lifecycle.start_services()` calls `load_request_authenticator()` and rejects Cloudflare when it returns `None` with an OAuth-only error. `doctor_report()` reports the same state as failed. This directly blocks Profile A and also causes the current clean Windows harness to require an OAuth verification secret.
+
+#### P0 — The requested configuration model is absent
+
+`BridgeSettings` has no `AuthSettings` or `NetworkTrustSettings`. The versioned `remote.toml` reader/writer supports only the OAuth Resource Server table; `configure_resource_auth(mode="none")` removes the auth table instead of persisting an explicit `auth.mode = "none"`, and no trust policy is persisted. Missing trust policy therefore cannot yet be distinguished and fail-closed for a public Cloudflare deployment.
+
+Phase B should make the versioned runtime configuration explicit, preferably retaining `remote.toml` as the lifecycle-owned canonical file:
+
+```toml
+[auth]
+mode = "none"
+
+[network_trust]
+mode = "cloudflare-chatgpt"
+allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_origins = ["https://chatgpt.com"] # optional if-present validation
+```
+
+The existing OAuth fields remain in `[auth]` for `oauth-resource-server`. Unknown auth/trust modes and unknown security fields must fail closed. `auth.mode = "none"` without a valid Cloudflare network-trust policy must not be accepted for public Cloudflare startup. Pure loopback development must remain separately distinguishable from a public Cloudflare transport.
+
+#### P0 — Host/Origin enforcement and request context are missing
+
+The current transport manager exposes a generic authenticator hook but has no network-trust middleware. The Bridge does not currently perform exact, case-insensitive Host canonicalization or optional Origin validation. It must not trust `X-Forwarded-Host`, `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*` as runtime authorization evidence.
+
+The required Host policy is exact hostname matching after canonicalization: `codemcp.quickclip.cc` and `codemcp.quickclip.cc:443` are accepted; localhost, loopback, other hosts, subdomains, suffix attacks, wildcard entries, and `X-Forwarded-Host` overrides are rejected. Origin is an if-present check: missing Origin is accepted, exact `https://chatgpt.com` and `https://chatgpt.com:443` are accepted, and HTTP, subdomain, suffix-attack, `null`, or malformed origins are rejected.
+
+#### P0 — Replay and session identity need a common auth-context design
+
+The current `OperationService` stores OAuth details as an `auth.context` audit event and compares only the OAuth tuple `(contract_version, issuer, resource, subject, client_id)` during idempotent lookup. The database idempotency key remains `(project_id, session_id, client_request_id)`, and operation/session storage ownership is always `local-policy`. `local-policy` is a daemon/storage owner, not a caller identity.
+
+There is no network-trusted principal today. The implementation must not use `client_id = "anonymous"` or let empty/no-auth context share the OAuth replay namespace. Phase C must introduce a common auth context with an explicit type and namespace, for example:
+
+```text
+network-trusted:
+  auth_type = network-trusted
+  principal = chatgpt-egress
+  issuer = cloudflare-waf
+  resource = configured canonical MCP resource
+  identity_level = network-only
+  replay_namespace = network-chatgpt-v1
+
+oauth-resource-server:
+  auth_type = oauth
+  replay_namespace = oauth-<stable-digest>
+```
+
+The exact serialization must follow existing delimiter/identifier constraints. OAuth and network-trusted contexts must be distinct in audit, replay, operation ownership, and session binding. The migration must preserve existing records and must not reinterpret old OAuth records as network-trusted records.
+
+#### P1 — `/healthz` is currently registered on the public-capable Bridge app
+
+`mcp_server.py` registers `/healthz` on the same ASGI application that serves `/mcp`. The lifecycle probes it through loopback, but the current Tunnel/public routing does not by itself prove that it is inaccessible at the public hostname. The later deployment design must keep `/healthz` loopback/lifecycle-only and separately verify its public behavior. The WAF rule should protect the dedicated hostname as a whole, while public exposure of `/healthz` must not be assumed safe merely because `/mcp` is protected.
+
+#### P1 — WAF/IP provisioning is external and undocumented as the new boundary
+
+The repository contains no OpenAI Connector IP ranges, which is correct, but it also has no authoritative runbook for the Cloudflare IP List and WAF rule requested by Profile A. Phase F must document:
+
+1. a Cloudflare IP List named `chatgpt_connectors` populated from the official OpenAI Connector egress manifest;
+2. a whole-host block rule equivalent to `(http.host eq "codemcp.quickclip.cc" and not ip.src in $chatgpt_connectors)`;
+3. the fact that this is a network restriction, not user authentication;
+4. manual provisioning first if the official manifest contract is not stable enough for a parser;
+5. optional future sync tooling with strict schema/CIDR validation, non-empty/diff/dry-run checks, environment-only scoped API credentials, and no runtime dependency on Cloudflare credentials.
+
+No Cloudflare API call or account change is authorized in Phase A.
+
+#### P1 — Clean Windows acceptance is a single OAuth-first profile
+
+`scripts/validate-clean-windows-release.ps1` currently requires `AuthorizationServerIssuer`, `CanonicalResourceUri`, `ValidationResourceId`, and `CODEMCP_RS_VERIFICATION_SECRET` for Cloudflare Prepare/doctor. Its tests assert OAuth mode and external auth-server behavior. This must be split later into:
+
+- **5.5.7A:** recommended ChatGPT No-Auth + Cloudflare Network Trust; requires tunnel token via Windows DPAPI, public URL, exact allowed host, `auth.mode = none`, and `network_trust.mode = cloudflare-chatgpt`; does not require `CODEMCP_RS_VERIFICATION_SECRET`.
+- **5.5.7B:** optional External OAuth Resource Server interoperability; retains the existing issuer/resource/contract/secret and RFC 9728 evidence.
+
+The existing 5.5.7B evidence is retained and must not be marked failed or deleted.
+
+#### P2 — Documentation and compatibility language still describe the old primary path
+
+The README, Cloudflare guide, external-auth guide, security/threat model, acceptance material, and parts of the Phase 5.5 plan still describe Cloudflare as transport-only with OAuth as the required public path. The legacy OpenAI provider and its fallback behavior also remain in the code and must not be removed. These are documentation/contract alignment tasks for later phases; Phase A does not rewrite the operator guides.
+
+### A.5 Phase A architecture decisions for implementation
+
+The following decisions are the implementation contract for the next explicit continuation:
+
+1. **Cloudflare is the network enforcement boundary.** The Bridge never evaluates a client IP from HTTP headers and never embeds the current OpenAI ranges. WAF admission precedes Tunnel admission.
+2. **Host trust is a second Bridge boundary.** Use the actual `Host` header only, exact case-insensitive hostname comparison, default-port canonicalization for `:443`, no suffix matching, no wildcard v1, and no forwarded-host override.
+3. **Origin is auxiliary.** Validate it only when present; absence does not reject a ChatGPT backend request. It is not the authentication boundary.
+4. **No Auth means no OAuth installation.** Profile A must not install a bearer authenticator and must allow `/mcp` without `Authorization`, while still applying network trust and all existing project/operation/security policies.
+5. **The network principal is synthetic and explicit.** It exists only for audit, operation ownership, session binding, and replay isolation. It never claims to identify an individual ChatGPT user.
+6. **OAuth remains intact.** `mcp-rs-verification-v1`, RFC 9728 metadata/challenges, OAuth subjects/clients/scopes, and the external `mcp-auth-server` boundary remain available only through Profile B and must keep their current fail-closed behavior.
+7. **Public startup is fail-closed.** Cloudflare public transport plus No Auth starts only when `network_trust.mode = cloudflare-chatgpt` and `allowed_hosts` is non-empty and valid; otherwise it fails with a stable error such as `PUBLIC_NO_AUTH_REQUIRES_NETWORK_TRUST`. Local loopback-only development is a separate case.
+8. **Health is local-only.** Lifecycle health checks remain on loopback; public routing must not expose `/healthz` as an unintended public endpoint.
+9. **Backward compatibility is explicit.** The existing OpenAI transport remains available, and existing OAuth runtime state must either load unchanged or fail with a clear migration error; it must not silently become network-trusted.
+
+### A.6 Deferred phase sequence and stop gates
+
+Each item is a separate stop-gated phase. No later phase starts automatically:
+
+| Phase | Scope | Required output |
+| --- | --- | --- |
+| B | Auth/network-trust config model and fail-closed validation | Explicit profiles, unknown-mode rejection, targeted config tests |
+| C | Host/Origin middleware, common auth context, synthetic principal, replay/session isolation | Exact host/origin matrix and OAuth namespace regression tests |
+| D | CLI/init, doctor, lifecycle startup gate, health routing | Profile-aware CLI/doctor and public-start fail-closed tests |
+| E | Clean Windows 5.5.7A/5.5.7B harness | No-Auth recommended acceptance path plus preserved OAuth path |
+| F | Cloudflare deployment runbook and optional IP-list helper decision | WAF boundary documentation; manual provisioning if manifest contract is unstable |
+| G | Full security regression and installer impact review | Full test/lint/build/installer review with clean tree |
+| H | Live acceptance preparation instructions only | Stopped, evidence-oriented instructions; no live cleanup or v0.1.0 freeze |
+
+### A.7 Risks requiring explicit review later
+
+- The official OpenAI Connector egress manifest URL/schema and update cadence are not part of this repository’s current contract. Do not build a brittle updater until that contract is confirmed.
+- Cloudflare WAF/IP List state lives outside the repository; live evidence must distinguish WAF `BLOCK` from Bridge/Tunnel behavior and must not be substituted with a Python header check.
+- Adding auth-context or replay namespace state may require a backward-compatible SQLite migration. Existing OAuth records, checkpoints, approvals, and session ownership must remain readable and safe.
+- The current public-capable `/healthz` route and externally managed Tunnel ingress need an explicit route-level review before claiming that health is loopback-only.
+- Existing documentation and release harness assertions are intentionally inconsistent with Profile A until their later phase updates. This is known migration work, not evidence that OAuth was abandoned.
+
+**Phase A gate:** COMPLETE for read-only review. The branch is created, the review artifact is recorded, no Phase B implementation has started, and work stops here pending the user’s explicit `继续` instruction.
 
 ## 1. Context
 
