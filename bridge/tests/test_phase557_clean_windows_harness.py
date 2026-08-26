@@ -14,15 +14,26 @@ def _script() -> str:
     ).read_text(encoding="utf-8")
 
 
-def test_phase557_clean_windows_harness_is_cloudflare_first() -> None:
+def test_phase557a_clean_windows_harness_is_no_auth_network_trust_first() -> None:
     script = _script()
 
     assert '[string]$Transport = "cloudflare"' in script
+    assert '[string]$AcceptanceProfile = "5.5.7A"' in script
+    assert '[string]$AllowedHost = "codemcp.quickclip.cc"' in script
     assert '"--transport", "cloudflare"' in script
     assert '"--public-url", $PublicUrl' in script
     assert '"--origin-url", $OriginUrl' in script
     assert '"--metrics-addr", $MetricsAddr' in script
     assert '"--store-transport-secret"' in script
+    assert '"--auth-mode", "none"' in script
+    assert '"--network-trust", "cloudflare-chatgpt"' in script
+    assert '"--allowed-host", $AllowedHost' in script
+    assert '"--allowed-origin", $origin' in script
+
+
+def test_phase557b_retains_external_oauth_resource_server_profile() -> None:
+    script = _script()
+
     assert '"--auth-mode", "oauth-resource-server"' in script
     assert '"--authorization-server-issuer", $AuthorizationServerIssuer' in script
     assert '"--canonical-resource-uri", $CanonicalResourceUri' in script
@@ -84,10 +95,9 @@ def test_phase557_managed_upgrade_stops_owned_runtime_before_inno_setup() -> Non
     stop_index = script.index("Stop-ManagedAcceptanceRuntime -ExistingInstall $existingAcceptance")
     setup_index = script.index("$setupExit = Invoke-GuiProcessAndWait -FilePath $installer")
     assert stop_index < setup_index
-    assert (
-        'Invoke-JsonCommand -FilePath $ExistingInstall.release.exe -ArgumentList @("stop")'
-        in script
-    )
+    assert '$stopArguments = @("stop") + $runtimeArguments' in script
+    assert '"--app-root", $AcceptanceAppRoot' in script
+    assert '"--home", $recordedHome' in script
     assert "managed Phase 5.5.7 runtime did not stop cleanly" in script
     assert "runtime ownership could not be proven stopped" in script
     assert '"/NOSTOPLIFECYCLE"' in script
@@ -134,6 +144,10 @@ def test_phase557_prepare_rebuilds_project_and_records_fresh_baseline() -> None:
 
 def test_phase557_secrets_are_environment_only_and_rechecked_from_dpapi() -> None:
     script = _script()
+    oauth_secret_guard = (
+        'AcceptanceProfile -eq "5.5.7B" -and '
+        "[string]::IsNullOrWhiteSpace($env:CODEMCP_RS_VERIFICATION_SECRET)"
+    )
 
     assert "$env:TUNNEL_TOKEN" in script
     assert "$env:CODEMCP_RS_VERIFICATION_SECRET" in script
@@ -144,6 +158,28 @@ def test_phase557_secrets_are_environment_only_and_rechecked_from_dpapi() -> Non
     assert "$env:CODEMCP_RS_VERIFICATION_SECRET = $null" in script
     assert '$Doctor.checks.tunnel_token.source -ne "windows-dpapi"' in script
     assert '$Doctor.checks.auth.secret_source -ne "windows-dpapi"' in script
+    assert oauth_secret_guard in script
+
+
+def test_phase557a_does_not_require_oauth_verification_secret() -> None:
+    script = _script()
+    oauth_secret_guard = (
+        'AcceptanceProfile -eq "5.5.7B" -and '
+        "[string]::IsNullOrWhiteSpace($env:CODEMCP_RS_VERIFICATION_SECRET)"
+    )
+
+    assert oauth_secret_guard in script
+    assert "Authentication=No authentication" in script
+    assert '"--home", $AcceptanceHome' in script
+
+
+def test_phase557_profiles_use_explicit_runtime_home() -> None:
+    script = _script()
+
+    assert '$AcceptanceHome = Join-Path $env:LOCALAPPDATA "codemcp-remote"' in script
+    assert "function Get-AcceptanceRuntimeArguments" in script
+    assert 'return @("--home", $AcceptanceHome)' in script
+    assert "home = $AcceptanceHome" in script
 
 
 def test_phase557_local_contract_requires_cloudflared_loopback_and_external_auth() -> None:

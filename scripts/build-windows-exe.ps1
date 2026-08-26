@@ -107,7 +107,7 @@ if (-not $SkipSmoke) {
 
     $lifecycleSmokeRoot = Join-Path $WorkDir "lifecycle-smoke"
     Remove-Item -LiteralPath $lifecycleSmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
-    & $exePath status --app-root $lifecycleSmokeRoot
+    & $exePath status --home $lifecycleSmokeRoot
     if ($LASTEXITCODE -ne 0) {
         throw "frozen lifecycle status smoke failed with exit code $LASTEXITCODE"
     }

@@ -293,7 +293,7 @@ if (-not $SkipSmoke) {
         $runtimeSentinel = Join-Path $runtimeDir "preserve-on-upgrade-and-uninstall.txt"
         "phase-5.5.5-runtime-preservation" |
             Set-Content -LiteralPath $runtimeSentinel -Encoding ascii
-        & $installedMain status --app-root $runtimeDir
+        & $installedMain status --home $runtimeDir
         if ($LASTEXITCODE -ne 0) {
             throw "installed lifecycle status smoke failed"
         }
