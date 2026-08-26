@@ -1,6 +1,6 @@
 # Phase 5.5 — Cloudflare Transport + External MCP Auth Integration Execution Plan
 
-Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 repository-side acceptance is READY, LIVE Cloudflare + external OAuth + ChatGPT proof is BLOCKED/PENDING**
+Status: **IN PROGRESS — 5.5.1 through 5.5.6 complete; 5.5.7 repository-side acceptance is READY; live issuer and Cloudflare MCP route are assigned; Resource Server provisioning + ChatGPT proof remain pending**
 
 Target release: `v0.1.0`
 
@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side integration through `codemcp-remote` Phase 5.5.6 is complete. Phase 5.5.7 repository work is ready. The live gate is blocked until an exact clean `mcp-auth-server` build is deployed with a real canonical issuer and formal public-domain identity/session support; the currently observed `0.1.0` code baseline at `83167bcc5834c357432236da7c69ceb91292047f` is not a live deployment identity because its staging issuer remains `.invalid` and deployment-profile files are dirty.
+Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side integration through `codemcp-remote` Phase 5.5.6 is complete. Phase 5.5.7 repository work is ready. The live staging issuer is `https://auth-staging.quickclip.cc`; the Cloudflare-published MCP resource is `https://codemcp.quickclip.cc/mcp`; the current clean `mcp-auth-server` repository HEAD observed for this gate is `b2372b61cf702874c6cae438ba504efe8bc0b4e6`. Final PASS still requires provisioning this MCP Resource in the live Registry, capturing its dedicated verification credential and deployed Worker version, then completing the ChatGPT OAuth/mutation/replay/restore/cleanup matrix.
 
 ## 1. Context
 

@@ -1,6 +1,6 @@
 # Phase 5.5.7 — mcp-auth-server + ChatGPT Live Interoperability Acceptance
 
-Status: **IN PROGRESS — repository-side acceptance READY; LIVE deployment/ChatGPT proof BLOCKED**
+Status: **IN PROGRESS — repository-side acceptance READY; live issuer and Cloudflare MCP URL assigned; Resource Server provisioning/ChatGPT proof pending**
 
 Date: 2026-08-25
 
@@ -14,12 +14,17 @@ codemcp-remote
 
 mcp-auth-server
   version: 0.1.0
-  code baseline observed:
-  83167bcc5834c357432236da7c69ceb91292047f
+  current clean repository HEAD:
+  b2372b61cf702874c6cae438ba504efe8bc0b4e6
   @cloudflare/workers-oauth-provider: 0.10.3
+  live staging issuer:
+  https://auth-staging.quickclip.cc
+
+codemcp-remote public MCP resource:
+  https://codemcp.quickclip.cc/mcp
 ```
 
-The `mcp-auth-server` code baseline above is not yet the accepted live deployment identity: its staging profile currently uses an `.invalid` issuer placeholder, its Cloudflare deployment-profile files have uncommitted changes, and its README explicitly records the production identity/session integration as a deployment blocker.
+The live staging issuer and Cloudflare MCP route are now assigned. The current `mcp-auth-server` repository is clean at the HEAD above, and its Phase 8 acceptance already records `https://auth-staging.quickclip.cc` as the live public issuer. The exact deployed Worker version/build corresponding to this acceptance still must be captured before final PASS; repository HEAD alone is not treated as proof of the deployed Worker version.
 
 ## Final architecture under acceptance
 
@@ -117,9 +122,11 @@ Meaningful custom OAuth scope-to-tool enforcement remains **NOT PROVEN** and is 
 | `mcp-rs-verification-v1` consumer behavior | PASS | Resource Server regression suite |
 | Wrong-resource / inactive / outage unit behavior | PASS | Resource Server security regression |
 | Current full regression | PASS | 217 passed / 6 skipped / 0 failed |
-| Real public Cloudflare hostname/tunnel | PENDING LIVE | User-owned Cloudflare configuration required |
-| Real deployed auth issuer | BLOCKED | Current staging issuer is `.invalid`; real identity/session required |
-| Exact deployed auth-server commit/build | PENDING LIVE | Must record the clean commit actually deployed |
+| Real public Cloudflare hostname/tunnel | ASSIGNED / LIVE PROOF PENDING | `https://codemcp.quickclip.cc/mcp` |
+| Real deployed auth issuer | LIVE ISSUER ASSIGNED | `https://auth-staging.quickclip.cc`; positive OAuth still pending |
+| codemcp Resource Registry entry | PASS | resource_id `0a8721b3-8944-47a5-b1ce-7351963fcb71`; resource `https://codemcp.quickclip.cc/mcp` |
+| Clean Windows Prepare | LIVE PASS | installer SHA `7716e7bf7c5ceff536744f6342f1e7f6615eed770c7114c955a2bc70c33e6a93`; project `phase5-clean`; baseline `87fca7ed129cd2493e6b872331873a4664077128`; worker `local`; tunnel/auth secrets recovered from `windows-dpapi`; isolated PATH excludes Python/uv/pwsh |
+| Exact deployed auth-server commit/build | PARTIAL | Clean repo HEAD `b2372b61cf702874c6cae438ba504efe8bc0b4e6`; deployed Worker version still must be captured |
 | ChatGPT OAuth discovery | PENDING LIVE | Requires real issuer and public MCP URL |
 | CIMD/static-client interoperability | PENDING LIVE | Use current ChatGPT UI values |
 | Authorization Code + PKCE | PENDING LIVE | Requires real identity/session |
