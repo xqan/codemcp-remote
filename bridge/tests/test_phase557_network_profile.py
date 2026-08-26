@@ -83,7 +83,11 @@ def test_runtime_home_precedence_and_modern_layout(tmp_path: Path) -> None:
         "LOCALAPPDATA": str(tmp_path / "localappdata"),
     }
 
-    from_environment = lifecycle.resolve_runtime_paths(runtime, environ=environ)
+    from_environment = lifecycle.resolve_runtime_paths(
+        runtime,
+        default_home=runtime,
+        environ=environ,
+    )
     assert from_environment.home == env_home.resolve()
     assert from_environment.layout == "home"
     assert from_environment.config_dir == env_home.resolve() / "config"
@@ -96,6 +100,7 @@ def test_runtime_home_precedence_and_modern_layout(tmp_path: Path) -> None:
     explicit = lifecycle.resolve_runtime_paths(
         runtime,
         home=cli_home,
+        default_home=runtime,
         environ=environ,
     )
     assert explicit.home == cli_home.resolve()
@@ -110,6 +115,22 @@ def test_runtime_home_precedence_and_modern_layout(tmp_path: Path) -> None:
     assert legacy.layout == "legacy"
     assert legacy.log_dir == legacy_root.resolve() / "logs"
     assert legacy.run_dir == legacy_root.resolve() / "run"
+
+
+def test_runtime_home_uses_packaged_default_when_no_override(tmp_path: Path) -> None:
+    runtime = tmp_path / "installed"
+
+    resolved = lifecycle.resolve_runtime_paths(
+        runtime,
+        default_home=runtime,
+        environ={},
+    )
+
+    assert resolved.home == runtime.resolve()
+    assert resolved.layout == "home"
+    assert resolved.config_dir == runtime.resolve() / "config"
+    assert resolved.data_dir == runtime.resolve() / "data"
+    assert resolved.secret_dir == runtime.resolve() / "secrets"
 
 
 def test_runtime_home_rejects_relative_overrides(tmp_path: Path) -> None:

@@ -110,15 +110,17 @@ def resolve_runtime_home(
     *,
     explicit_home: Path | str | None = None,
     legacy_app_root: Path | str | None = None,
+    default_home: Path | str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> tuple[Path, str]:
     """Resolve the writable runtime home and identify its compatibility layout.
 
-    Explicit ``--home`` wins over ``CODEMCP_HOME``.  ``--app-root`` remains a
+    Explicit ``--home`` wins over ``CODEMCP_HOME``. ``--app-root`` remains a
     compatibility escape hatch for existing installations and intentionally
-    keeps the historical directory layout.  With neither override, the old
-    per-user default is preserved so existing OAuth/OpenAI installations are
-    not silently migrated.
+    keeps the historical directory layout. Packaged callers may supply
+    ``default_home`` so a frozen executable uses its installation directory
+    when no explicit or environment override is present. Source-mode callers
+    that omit ``default_home`` keep the historical per-user fallback.
     """
 
     if explicit_home is not None and legacy_app_root is not None:
@@ -132,6 +134,8 @@ def resolve_runtime_home(
     configured_home = env.get(CODEMCP_HOME_ENV_NAME)
     if configured_home is not None and configured_home.strip():
         return _absolute_path(configured_home, label=CODEMCP_HOME_ENV_NAME), "home"
+    if default_home is not None:
+        return _absolute_path(default_home, label="runtime default home"), "home"
     return app_data_root(environ=dict(env)), "legacy-default"
 
 
@@ -149,6 +153,7 @@ def resolve_runtime_paths(
     *,
     home: Path | str | None = None,
     app_root: Path | str | None = None,
+    default_home: Path | str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> RuntimePaths:
     """Build all writable paths from one validated runtime-home decision."""
@@ -157,6 +162,7 @@ def resolve_runtime_paths(
     root, layout = resolve_runtime_home(
         explicit_home=home,
         legacy_app_root=app_root,
+        default_home=default_home,
         environ=environ,
     )
     config_dir = root / "config"
@@ -196,6 +202,7 @@ def runtime_paths(
     *,
     app_root: Path | str | None = None,
     home: Path | str | None = None,
+    default_home: Path | str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> RuntimePaths:
     """Compatibility wrapper for the central runtime-path resolver."""
@@ -204,6 +211,7 @@ def runtime_paths(
         runtime_root,
         home=home,
         app_root=app_root,
+        default_home=default_home,
         environ=environ,
     )
 

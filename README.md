@@ -15,7 +15,7 @@ ChatGPT
   -> registered local Git project
 ```
 
-> **Pre-release:** the Phase A–G implementation and local regression gates are recorded, but live Cloudflare/WAF/ChatGPT acceptance and the final `v0.1.0` freeze remain pending. Follow [`docs/acceptance/acceptance-test-plan.md`](docs/acceptance/acceptance-test-plan.md) for the release gate.
+> **Pre-release:** the Cloudflare No-Auth network-trust path has completed Phase A–H live acceptance and is usable for controlled private operation. Stable public `v0.1.0` release remains blocked on the broader Phase 7 release gates in [`docs/acceptance/acceptance-test-plan.md`](docs/acceptance/acceptance-test-plan.md).
 
 Browse the [documentation center](docs/README.md) for current architecture,
 operator guides, release gates, plans, and historical validation records.
@@ -106,14 +106,13 @@ The Cloudflare Edge/WAF rule must protect the dedicated hostname before Tunnel i
 
 The allowlist proves only network provenance. It is not authentication, user identity, or strong identity. Profile A reports `identity_level = network-only`; use Profile B below when subject/client/scope identity is required.
 
-Initialize an installed runtime with an explicit home and no OAuth verification secret:
+Initialize an installed runtime without an OAuth verification secret. For a packaged Windows EXE, the installation directory is the default runtime home, so normal installed commands do not need `--home`:
 
 ```powershell
-$exe = "$env:LOCALAPPDATA\Programs\codemcp-remote\codemcp-remote.exe"
-$home = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+$exe = "D:\codemcp-remote\codemcp-remote.exe"
 $env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
 
-& $exe init --home $home `
+& $exe init `
   --transport cloudflare `
   --public-url "https://codemcp.quickclip.cc/mcp" `
   --auth-mode none `
@@ -123,21 +122,23 @@ $env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
   --store-transport-secret
 $env:TUNNEL_TOKEN = $null
 
-& $exe project add my_project "D:\workspace\my-project" --home $home
-& $exe doctor --home $home
-& $exe start --home $home
+& $exe project add my_project "D:\workspace\my-project"
+& $exe doctor
+& $exe start
 ```
 
-The tunnel token is stored with Windows DPAPI. `CODEMCP_RS_VERIFICATION_SECRET` is not required for Profile A. `--home` takes precedence over `CODEMCP_HOME`; `--app-root` remains a legacy compatibility option. `doctor` should show Cloudflare, `auth.mode = none`, network trust ready, the exact allowed host, `identity_level = network-only`, and a DPAPI tunnel-secret source.
+The tunnel token is stored with Windows DPAPI. `CODEMCP_RS_VERIFICATION_SECRET` is not required for Profile A. `--home` still overrides `CODEMCP_HOME`, and `CODEMCP_HOME` overrides the packaged EXE-directory default; `--app-root` remains a legacy compatibility option. `doctor` should show Cloudflare, `auth.mode = none`, network trust ready, the exact allowed host, `identity_level = network-only`, and a DPAPI tunnel-secret source.
 
 `/healthz` is a lifecycle probe, not a public application endpoint. Review Tunnel ingress separately so it is not exposed as an unintended public route.
 
 ## Installed release quick start
 
-After installing Git for Windows and `codemcp-remote-setup.exe`, the recommended quick start is the Profile A command sequence above. The older OpenAI Secure MCP Tunnel remains available as an explicit compatibility transport:
+After installing Git for Windows and `codemcp-remote-setup.exe`, the recommended quick start is the Profile A command sequence above. After first-time initialization, double-clicking `codemcp-remote.exe` starts the managed lifecycle; `codemcp-start.cmd` and `codemcp-stop.cmd` provide explicit one-click controls. See the complete [Windows build, install, and use guide](docs/guides/windows-build-install-use.md).
+
+The older OpenAI Secure MCP Tunnel remains available as an explicit compatibility transport:
 
 ```powershell
-$exe = "$env:LOCALAPPDATA\Programs\codemcp-remote\codemcp-remote.exe"
+$exe = "D:\codemcp-remote\codemcp-remote.exe"
 
 # Set CONTROL_PLANE_API_KEY only in the current process from your secret source.
 & $exe init --tunnel-id "<your tunnel id>" --store-api-key

@@ -43,6 +43,12 @@ from .native_codemcp_worker import main as native_worker_main
 from .settings import SettingsError, load_settings
 
 
+def is_frozen_runtime(*, frozen: bool | None = None) -> bool:
+    """Return whether the current process is a packaged executable."""
+
+    return bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+
+
 def runtime_root(
     *,
     frozen: bool | None = None,
@@ -50,11 +56,22 @@ def runtime_root(
 ) -> Path:
     """Return the repository root in source mode or the executable directory when frozen."""
 
-    effective_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
-    if effective_frozen:
+    if is_frozen_runtime(frozen=frozen):
         executable_path = Path(sys.executable) if executable is None else executable
         return executable_path.resolve().parent
     return Path(__file__).resolve().parents[3]
+
+
+def default_cli_command(*, frozen: bool | None = None) -> str:
+    """Start the managed lifecycle when a packaged executable is launched with no arguments."""
+
+    return "start" if is_frozen_runtime(frozen=frozen) else "serve"
+
+
+def default_runtime_home(runtime_root_path: Path, *, frozen: bool | None = None) -> Path | None:
+    """Use the installation directory as the packaged runtime home by default."""
+
+    return runtime_root_path.resolve() if is_frozen_runtime(frozen=frozen) else None
 
 
 RUNTIME_ROOT = runtime_root()
@@ -83,7 +100,7 @@ def _parse_args() -> argparse.Namespace:
             "_tunnel",
         ),
         nargs="?",
-        default="serve",
+        default=default_cli_command(),
     )
     parser.add_argument("subcommand", nargs="?")
     parser.add_argument("project_id", nargs="?")
@@ -95,7 +112,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--home",
         type=Path,
-        help="writable runtime home (overrides CODEMCP_HOME)",
+        help="writable runtime home (overrides CODEMCP_HOME; packaged default is the EXE directory)",
     )
     parser.add_argument("--app-root", type=Path)
     parser.add_argument("--transport", choices=("openai-tunnel", "cloudflare"))
@@ -139,6 +156,7 @@ def main() -> int:
             RUNTIME_ROOT,
             home=args.home,
             app_root=args.app_root,
+            default_home=default_runtime_home(RUNTIME_ROOT),
         )
     except LifecycleError as exc:
         _json({"status": "failed", "error": str(exc)})

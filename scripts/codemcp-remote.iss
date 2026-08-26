@@ -42,6 +42,8 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "addtopath"; Description: "Add codemcp-remote to the current user's PATH"; Flags: unchecked
 
 [Icons]
+Name: "{group}\Start codemcp-remote"; Filename: "{app}\codemcp-start.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\codemcp-remote.exe"
+Name: "{group}\Stop codemcp-remote"; Filename: "{app}\codemcp-stop.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\codemcp-remote.exe"
 Name: "{group}\codemcp-remote Doctor"; Filename: "{app}\codemcp-remote.exe"; Parameters: "doctor"; WorkingDir: "{app}"
 Name: "{group}\codemcp-remote Folder"; Filename: "{app}"
 Name: "{group}\Uninstall codemcp-remote"; Filename: "{uninstallexe}"

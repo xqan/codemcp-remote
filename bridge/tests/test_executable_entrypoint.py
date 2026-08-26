@@ -14,6 +14,15 @@ def test_runtime_root_uses_executable_directory_when_frozen(tmp_path: Path) -> N
     )
 
 
+def test_packaged_executable_defaults_to_start_and_install_directory(tmp_path: Path) -> None:
+    runtime = tmp_path / "installed"
+
+    assert main_module.default_cli_command(frozen=True) == "start"
+    assert main_module.default_cli_command(frozen=False) == "serve"
+    assert main_module.default_runtime_home(runtime, frozen=True) == runtime.resolve()
+    assert main_module.default_runtime_home(runtime, frozen=False) is None
+
+
 def test_internal_worker_dispatch_skips_bridge_configuration(
     monkeypatch,
 ) -> None:

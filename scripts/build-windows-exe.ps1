@@ -84,6 +84,8 @@ New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "config\bridge.example.toml") -Destination $configDir -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "config\projects.example.toml") -Destination $configDir -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "LICENSE") -Destination $appDir -Force
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts\codemcp-start.cmd") -Destination $appDir -Force
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts\codemcp-stop.cmd") -Destination $appDir -Force
 
 $exeSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant()
 $sha256File = Join-Path $appDir "SHA256SUMS.txt"

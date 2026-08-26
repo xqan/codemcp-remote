@@ -51,6 +51,8 @@ def test_installer_build_rejects_secrets_and_smokes_upgrade_preservation() -> No
     assert 'Join-Path $appDir "config\\remote.toml"' in script
     assert 'Join-Path $appDir "config\\tunnel.env"' in script
     assert 'Join-Path $installedLocation "cloudflared.exe"' in script
+    assert 'Join-Path $installedLocation "codemcp-start.cmd"' in script
+    assert 'Join-Path $installedLocation "codemcp-stop.cmd"' in script
     assert "installed cloudflared checksum differs from the verified staging payload" in script
     assert "silent installer upgrade smoke failed" in script
     assert "installer upgrade removed user runtime data" in script
@@ -69,6 +71,24 @@ def test_release_manifest_is_cloudflare_first_and_external_auth_is_not_bundled()
         in script
     )
     assert "local or bundled mcp-auth-server runtime" in script
+
+
+def test_packaged_windows_payload_includes_one_click_lifecycle_scripts() -> None:
+    build_script = _script("build-windows-exe.ps1")
+    installer = _script("codemcp-remote.iss")
+    start_script = _script("codemcp-start.cmd")
+    stop_script = _script("codemcp-stop.cmd")
+
+    assert "scripts\\codemcp-start.cmd" in build_script
+    assert "scripts\\codemcp-stop.cmd" in build_script
+    assert '"%~dp0codemcp-remote.exe" start' in start_script
+    assert '"%~dp0codemcp-remote.exe" stop' in stop_script
+    assert "--home" not in start_script
+    assert "--home" not in stop_script
+    assert "Start codemcp-remote" in installer
+    assert "Stop codemcp-remote" in installer
+    assert 'Filename: "{app}\\codemcp-start.cmd"' in installer
+    assert 'Filename: "{app}\\codemcp-stop.cmd"' in installer
 
 
 def test_inno_uninstall_does_not_target_user_runtime_data() -> None:

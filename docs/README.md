@@ -7,6 +7,7 @@
 - [项目总览](../README.md)
 - [当前实施计划](implementation-plan.md)
 - [当前架构](architecture/architecture.md)
+- [Windows 从构建到安装与使用](guides/windows-build-install-use.md)
 - [运维手册](guides/operations-runbook.md)
 - [Cloudflare Tunnel + ChatGPT network trust](guides/cloudflare-tunnel-setup.md)
 - [Secure MCP Tunnel 配置](guides/tunnel-setup.md)
@@ -37,6 +38,7 @@
 
 ### 执行指南
 
+- [Windows 从构建到安装与使用](guides/windows-build-install-use.md)
 - [codemcp 固定版本基线](guides/codemcp-baseline.md)
 - [运维手册](guides/operations-runbook.md)
 - [Cloudflare Tunnel + ChatGPT network trust（推荐个人部署）](guides/cloudflare-tunnel-setup.md)
@@ -66,8 +68,8 @@
 - 当前可执行说明以 `guides/`、`architecture/` 和 `acceptance/` 中的文档为准。
 - `releases/` 中的 Phase 0–5 文件是已完成阶段记录；`reports/` 中的内容是当时的
   验证证据，不能替代当前 runbook 或尚未完成的 release gate。
-- 稳定版 `v0.1.0` 仍受 Phase H live acceptance、Phase 6/7、secrets/supply-chain
-  和 freeze gate 阻断；本地 Phase A–G PASS 不代表公网 WAF 或 ChatGPT Connector 已经实测通过。
+- Cloudflare No-Auth network-trust 的 Phase A–H live acceptance 已通过；稳定版 `v0.1.0`
+  仍受更大的 Phase 6/7、secrets/supply-chain、clean-machine packaging 和 freeze gate 阻断。
 - 当前没有需要放入 `archive/` 的退役文档；后续被替代的文档按维护约定归档。
 
 ## 维护约定
