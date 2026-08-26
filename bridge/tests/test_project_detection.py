@@ -73,6 +73,38 @@ def test_unknown_project_returns_no_profile(tmp_path: Path) -> None:
     assert dict(result.evidence) == {}
 
 
+def test_detect_codemcp_remote_from_strict_repository_markers(tmp_path: Path) -> None:
+    (tmp_path / "bridge").mkdir()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "bridge" / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (tmp_path / "scripts" / "windows_entrypoint.py").write_text("# entrypoint\n", encoding="utf-8")
+    (tmp_path / "codemcp.toml").write_text("[commands.test]\n", encoding="utf-8")
+
+    result = detect_project_profile(tmp_path)
+
+    assert result.detected is True
+    assert result.ambiguous is False
+    assert result.profile_id == "codemcp-remote"
+    assert result.candidates == ("codemcp-remote",)
+    assert result.evidence["codemcp-remote"] == (
+        "bridge/pyproject.toml",
+        "scripts/windows_entrypoint.py",
+        "codemcp.toml",
+    )
+
+
+def test_partial_codemcp_remote_markers_do_not_select_profile(tmp_path: Path) -> None:
+    (tmp_path / "bridge").mkdir()
+    (tmp_path / "bridge" / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (tmp_path / "codemcp.toml").write_text("[commands.test]\n", encoding="utf-8")
+
+    result = detect_project_profile(tmp_path)
+
+    assert result.detected is False
+    assert result.profile_id is None
+    assert result.candidates == ()
+
+
 def test_symlink_marker_cannot_select_profile(tmp_path: Path) -> None:
     target = tmp_path / "real-pom.xml"
     target.write_text("<project/>\n", encoding="utf-8")

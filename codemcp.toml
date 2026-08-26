@@ -2,8 +2,10 @@ project_prompt = "Review for correctness, security, data consistency, compatibil
 
 [commands.test]
 command = [
-    "/mnt/d/Documents/CodexProject/codemcp-remote/.local/bridge-venv-wsl/bin/python",
-    "-m",
+    "uv",
+    "run",
+    "--project",
+    "bridge",
     "pytest",
     "-q",
     "bridge/tests",
@@ -13,7 +15,11 @@ doc = "Run the Bridge and codemcp integration test suites."
 
 [commands.format]
 command = [
-    "/mnt/d/Documents/CodexProject/codemcp-remote/.local/bridge-venv-wsl/bin/ruff",
+    "uv",
+    "run",
+    "--project",
+    "bridge",
+    "ruff",
     "format",
     "--check",
     "bridge/src",

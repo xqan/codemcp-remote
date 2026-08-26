@@ -7,6 +7,7 @@ import pytest
 from codemcp_bridge.errors import BridgeError
 from codemcp_bridge.git_guard import GitGuard
 from codemcp_bridge.policy_engine import PolicyEngine
+from codemcp_bridge.project_readiness import inspect_development_readiness
 from codemcp_bridge.project_registry import ProjectRegistry
 from codemcp_bridge.settings import load_settings
 
@@ -47,6 +48,33 @@ def test_detected_maven_profile_populates_fixed_commands(tmp_path: Path) -> None
     assert spec.commands["test"].timeout_seconds == 900
     assert spec.commands["test"].approval == "not-required"
     assert not (project / "codemcp.toml").exists()
+
+
+def test_codemcp_remote_repository_resolves_native_development_profile(tmp_path: Path) -> None:
+    repository = Path(__file__).resolve().parents[2]
+
+    spec = _load_project(
+        tmp_path,
+        f'[projects.demo]\nroot = "{repository.as_posix()}"\n',
+    )
+
+    assert spec.profile == "codemcp-remote"
+    assert spec.profile_source == "detected"
+    assert set(spec.commands) == {"format", "test"}
+    assert spec.commands["test"].argv == (
+        "uv",
+        "run",
+        "--project",
+        "bridge",
+        "pytest",
+        "-q",
+        "bridge/tests",
+        "tests/integration",
+    )
+    readiness = inspect_development_readiness(spec)
+    assert readiness.development_ready is True
+    assert readiness.matched_commands == ("format", "test")
+    assert readiness.issues == ()
 
 
 def test_explicit_generic_profile_suppresses_auto_detection(tmp_path: Path) -> None:

@@ -315,7 +315,7 @@ async def test_network_trust_injects_explicit_principal_and_health_is_host_prote
 
 
 @pytest.mark.asyncio
-async def test_network_trust_mcp_allows_no_auth_and_ignores_authorization_header(
+async def test_network_trust_mcp_codemcp_557_exposes_complete_public_tool_surface(
     tmp_path: Path,
 ) -> None:
     server, _ = create_server(
@@ -339,7 +339,40 @@ async def test_network_trust_mcp_allows_no_auth_and_ignores_authorization_header
                     await session.initialize()
                     tools = await session.list_tools()
 
-    assert any(tool.name == "project_open" for tool in tools.tools)
+    exposed_tools = {tool.name for tool in tools.tools}
+    assert exposed_tools == {
+        "project_open",
+        "project_status",
+        "file_read",
+        "code_search",
+        "file_list",
+        "file_edit",
+        "file_create",
+        "file_write",
+        "file_move",
+        "file_delete",
+        "directory_create",
+        "registered_command_run",
+        "format_run",
+        "test_run",
+        "git_status",
+        "git_diff",
+        "checkpoint_create",
+        "checkpoint_restore",
+        "operation_status",
+        "approval_confirm",
+        "operation_cancel",
+        "operation_reconcile",
+    }
+    assert {
+        "file_edit",
+        "file_create",
+        "file_write",
+        "checkpoint_create",
+        "checkpoint_restore",
+        "operation_status",
+        "approval_confirm",
+    } <= exposed_tools
 
 
 def _oauth_principal(*, subject: str = "subject-a") -> AuthenticatedPrincipal:

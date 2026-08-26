@@ -20,10 +20,23 @@ _PROFILE_MARKERS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     }
 )
 
+# The Bridge repository is a small monorepo rather than a single root-level
+# language project. Keep its detection strict so an unrelated project with a
+# similarly named directory cannot inherit the repository command catalog.
+_REQUIRED_PROFILE_MARKERS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "codemcp-remote": (
+            "bridge/pyproject.toml",
+            "scripts/windows_entrypoint.py",
+            "codemcp.toml",
+        ),
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ProjectDetection:
-    """A deterministic profile detection result derived only from root-level metadata."""
+    """A deterministic profile detection result derived only from repository metadata."""
 
     profile_id: str | None
     candidates: tuple[str, ...]
@@ -45,7 +58,7 @@ def _is_regular_marker(path: Path) -> bool:
 
 
 def detect_project_profile(root: Path) -> ProjectDetection:
-    """Detect one built-in profile from known root-level metadata.
+    """Detect one built-in profile from known repository metadata.
 
     Detection never executes project code and never resolves ambiguous multi-stack
     repositories by priority. Multiple distinct candidates therefore fail closed.
@@ -55,6 +68,10 @@ def detect_project_profile(root: Path) -> ProjectDetection:
     for profile_id, markers in _PROFILE_MARKERS.items():
         matches = tuple(marker for marker in markers if _is_regular_marker(root / marker))
         if matches:
+            found[profile_id] = matches
+    for profile_id, markers in _REQUIRED_PROFILE_MARKERS.items():
+        matches = tuple(marker for marker in markers if _is_regular_marker(root / marker))
+        if len(matches) == len(markers):
             found[profile_id] = matches
 
     candidates = tuple(sorted(found))

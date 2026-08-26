@@ -17,6 +17,7 @@ def test_builtin_profile_registry_has_expected_profiles() -> None:
         "node-npm",
         "node-pnpm",
         "python",
+        "codemcp-remote",
         "go",
         "rust",
     }
@@ -61,6 +62,35 @@ def test_generic_profile_has_no_implicit_execution_capability() -> None:
     profile = get_builtin_profile("generic")
     assert profile is not None
     assert dict(profile.commands) == {}
+
+
+def test_codemcp_remote_profile_has_native_source_commands() -> None:
+    profile = get_builtin_profile("codemcp-remote")
+    assert profile is not None
+    assert set(profile.commands) == {"format", "test"}
+    assert profile.commands["format"].argv == (
+        "uv",
+        "run",
+        "--project",
+        "bridge",
+        "ruff",
+        "format",
+        "--check",
+        "bridge/src",
+        "bridge/tests",
+        "tests/integration",
+    )
+    assert profile.commands["test"].argv == (
+        "uv",
+        "run",
+        "--project",
+        "bridge",
+        "pytest",
+        "-q",
+        "bridge/tests",
+        "tests/integration",
+    )
+    assert all(command.approval == "not-required" for command in profile.commands.values())
 
 
 def test_builtin_profile_registry_is_immutable() -> None:

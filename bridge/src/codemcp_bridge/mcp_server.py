@@ -41,6 +41,36 @@ from .settings import BridgeSettings, CommandSpec, ProjectSpec
 logger = logging.getLogger(__name__)
 
 
+# Keep the public MCP surface explicit. The network-trusted profile changes
+# authentication semantics, not the project and mutation safety boundary.
+PUBLIC_MCP_TOOL_NAMES = frozenset(
+    {
+        "project_open",
+        "project_status",
+        "file_read",
+        "code_search",
+        "file_list",
+        "file_edit",
+        "file_create",
+        "file_write",
+        "file_move",
+        "file_delete",
+        "directory_create",
+        "registered_command_run",
+        "format_run",
+        "test_run",
+        "git_status",
+        "git_diff",
+        "checkpoint_create",
+        "checkpoint_restore",
+        "operation_status",
+        "approval_confirm",
+        "operation_cancel",
+        "operation_reconcile",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class _Outcome:
     data: dict[str, Any]
@@ -72,6 +102,18 @@ class AdapterLike(Protocol):
 
 
 Operation = Callable[[str], Awaitable[_Outcome]]
+
+
+def _validate_public_tool_surface(server: FastMCP) -> None:
+    """Fail startup if a registered server loses part of the Bridge contract."""
+
+    registered_names = frozenset(
+        tool.name
+        for tool in server._tool_manager.list_tools()  # noqa: SLF001
+    )
+    missing = sorted(PUBLIC_MCP_TOOL_NAMES - registered_names)
+    if missing:
+        raise RuntimeError("Bridge public MCP tool contract is incomplete: " + ", ".join(missing))
 
 
 class BridgeFastMCP(FastMCP):
@@ -2628,6 +2670,7 @@ def create_server(
             request_hash,
         )
 
+    _validate_public_tool_surface(server)
     return server, service
 
 
