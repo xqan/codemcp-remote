@@ -84,6 +84,21 @@ def build_command_invocation(
         migrated_argv = _migrate_legacy_wsl_bridge_command(project, command.argv)
         if migrated_argv is not None:
             local_argv = migrated_argv
+        elif project.profile == "python" and local_argv and local_argv[0].casefold() in {
+            "python",
+            "python.exe",
+        }:
+            venv_python = project.root / ".venv" / "Scripts" / "python.exe"
+            if venv_python.is_file() and not venv_python.is_symlink():
+                local_argv = (str(venv_python.resolve()), *local_argv[1:])
+            else:
+                resolved_python = shutil.which(local_argv[0])
+                if resolved_python is not None:
+                    local_argv = (resolved_python, *local_argv[1:])
+                else:
+                    py_launcher = shutil.which("py")
+                    if py_launcher is not None:
+                        local_argv = (py_launcher, "-3", *local_argv[1:])
         else:
             resolved_executable = shutil.which(local_argv[0])
             if resolved_executable is not None:

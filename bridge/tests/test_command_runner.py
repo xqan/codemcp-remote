@@ -95,6 +95,60 @@ def test_local_python_src_test_prepends_src_to_pythonpath(tmp_path: Path) -> Non
     assert invocation.environment["PYTHONPATH"].split(os.pathsep)[0] == str(project.root / "src")
 
 
+def test_local_windows_python_prefers_project_virtualenv(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, command = _python_project(tmp_path)
+    venv_python = project.root / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_bytes(b"")
+    monkeypatch.setattr(
+        "codemcp_bridge.command_runner.shutil.which",
+        lambda executable: r"C:\System\python.exe" if executable == "python" else None,
+    )
+
+    invocation = build_command_invocation(
+        _settings(tmp_path, project, "local"),
+        project,
+        command,
+        os_name="nt",
+    )
+
+    assert invocation.executable == str(venv_python.resolve())
+    assert invocation.arguments == command.argv[1:]
+    assert invocation.cwd == project.root
+
+
+def test_local_windows_python_falls_back_to_py_launcher(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project, _ = _python_project(tmp_path)
+    command = CommandSpec(
+        command_id="doctor",
+        kind="doctor",
+        argv=("python", "--version"),
+        timeout_seconds=60,
+        approval="not-required",
+    )
+    monkeypatch.setattr(
+        "codemcp_bridge.command_runner.shutil.which",
+        lambda executable: r"C:\Windows\py.exe" if executable == "py" else None,
+    )
+
+    invocation = build_command_invocation(
+        _settings(tmp_path, project, "local"),
+        project,
+        command,
+        os_name="nt",
+    )
+
+    assert invocation.executable == r"C:\Windows\py.exe"
+    assert invocation.arguments == ("-3", "--version")
+    assert invocation.cwd == project.root
+
+
 def test_local_windows_resolves_fixed_executable_through_path(
     tmp_path: Path,
     monkeypatch,
