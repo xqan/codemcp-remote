@@ -307,6 +307,61 @@ class ProjectRegistry:
             return [target], False
         return safe_children, True
 
+    def safe_directory_tree(
+        self,
+        project: ProjectSpec,
+        target: Path,
+        *,
+        max_entries: int = 1000,
+    ) -> tuple[list[tuple[str, bool]], bool]:
+        """Return a bounded recursive tree without exposing sensitive or linked paths."""
+
+        if max_entries <= 0:
+            raise ValueError("max_entries must be positive")
+        try:
+            children = sorted(target.iterdir(), key=lambda item: item.name.lower(), reverse=True)
+        except OSError as exc:
+            raise BridgeError(
+                "BACKEND_UNAVAILABLE",
+                "directory could not be listed",
+                {"path": self.relative_path(project, target)},
+            ) from exc
+
+        stack: list[tuple[Path, str]] = [(child, child.name) for child in children]
+        entries: list[tuple[str, bool]] = []
+        while stack:
+            entry, relative_to_target = stack.pop()
+            if entry.name.startswith(".") or entry.name == "__pycache__":
+                continue
+
+            project_relative = entry.relative_to(project.root).as_posix()
+            if _is_reparse_point(entry) or is_sensitive_relative_path(project_relative):
+                continue
+
+            try:
+                is_directory = entry.is_dir()
+                is_file = entry.is_file()
+            except OSError:
+                continue
+            if not is_directory and not is_file:
+                continue
+            if len(entries) >= max_entries:
+                return entries, True
+
+            normalized = PurePosixPath(relative_to_target).as_posix()
+            entries.append((normalized, is_directory))
+            if not is_directory:
+                continue
+
+            try:
+                nested = sorted(entry.iterdir(), key=lambda item: item.name.lower(), reverse=True)
+            except OSError:
+                continue
+            prefix = PurePosixPath(normalized)
+            stack.extend((child, (prefix / child.name).as_posix()) for child in nested)
+
+        return entries, False
+
     @staticmethod
     def relative_path(project: ProjectSpec, path: Path) -> str:
         return path.resolve(strict=False).relative_to(project.root.resolve(strict=False)).as_posix()

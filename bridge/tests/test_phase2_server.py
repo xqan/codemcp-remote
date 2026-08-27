@@ -570,6 +570,46 @@ async def test_code_search_excludes_sensitive_paths_before_and_after_grep(
 
 
 @pytest.mark.asyncio
+async def test_file_list_is_bridge_local_without_codemcp_config_and_filters_sensitive_paths(
+    git_project: Path,
+) -> None:
+    (git_project / "codemcp.toml").unlink()
+    (git_project / "local.env").write_text("TOKEN=do-not-return\n", encoding="utf-8")
+    (git_project / "secrets").mkdir()
+    (git_project / "secrets" / "private.key").write_text("private material\n", encoding="utf-8")
+    (git_project / ".hidden").write_text("hidden\n", encoding="utf-8")
+    (git_project / "safe").mkdir()
+    (git_project / "safe" / "nested").mkdir()
+    (git_project / "safe" / "nested" / "visible.txt").write_text("visible\n", encoding="utf-8")
+
+    adapter = FakeAdapter()
+    service = create_app(_settings(git_project), adapter=adapter)[1]
+    await service.start()
+    session = service.sessions.create("demo")
+
+    root = await service.file_list(None, "demo", session.session_id, None)
+
+    assert root["status"] == "succeeded"
+    assert root["data"]["path"] == "."
+    assert root["data"]["text"].startswith("- ./")
+    assert "src/" in root["data"]["text"]
+    assert "visible.txt" in root["data"]["text"]
+    assert "local.env" not in root["data"]["text"]
+    assert "secrets" not in root["data"]["text"]
+    assert "private.key" not in root["data"]["text"]
+    assert ".hidden" not in root["data"]["text"]
+    assert all(name != "LS" for name, _ in adapter.calls)
+
+    src = await service.file_list(None, "demo", session.session_id, "src")
+    assert src["status"] == "succeeded"
+    assert src["data"]["path"] == "src"
+    assert src["data"]["text"].startswith("- src/")
+    assert "hello.txt" in src["data"]["text"]
+    assert all(name != "LS" for name, _ in adapter.calls)
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_file_edit_is_isolated_to_the_requested_target(git_project: Path) -> None:
     notes = git_project / "src" / "notes.txt"
     notes.write_text("baseline notes\n", encoding="utf-8")

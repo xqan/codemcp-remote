@@ -797,17 +797,32 @@ class BridgeService:
             project, target, _ = self.registry.resolve_path(project_id, path, allow_root=True)
             if not target.is_dir():
                 raise BridgeError("FILE_NOT_FOUND", "a directory is required")
-            result = await self.adapter.call(
+
+            entries, traversal_truncated = self.registry.safe_directory_tree(
                 project,
-                "LS",
-                {"path": target, "chat_id": session_id},
+                target,
+                max_entries=1000,
             )
-            if _is_codemcp_error(result):
-                raise BridgeError("BACKEND_UNAVAILABLE", "codemcp rejected LS", status="failed")
+            relative_target = self.registry.relative_path(project, target)
+            root_label = "./" if relative_target == "." else f"{relative_target}/"
+            lines = [f"- {root_label}"]
+            for relative_entry, is_directory in entries:
+                parts = PurePosixPath(relative_entry).parts
+                suffix = "/" if is_directory else ""
+                lines.append(f"{'  ' * len(parts)}- {parts[-1]}{suffix}")
+
+            text = "\n".join(lines)
+            encoded = text.encode("utf-8")
+            output_truncated = len(encoded) > self.settings.policy.max_result_bytes
+            if output_truncated:
+                text = encoded[: self.settings.policy.max_result_bytes].decode(
+                    "utf-8",
+                    errors="ignore",
+                )
             return _Outcome(
-                {"path": self.registry.relative_path(project, target), "text": result.text},
+                {"path": relative_target, "text": text},
                 [],
-                result.truncated,
+                traversal_truncated or output_truncated,
             )
 
         return await self._execute(
