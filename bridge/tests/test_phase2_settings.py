@@ -128,7 +128,7 @@ def test_minimal_project_uses_conservative_security_defaults(tmp_path: Path) -> 
         "demo"
     ]
 
-    assert project.allowed_branches == ("main", "master", "codex/*")
+    assert project.allowed_branches == ("develop", "develop/*", "codex/*", "feature/*")
     assert project.require_clean_workspace is True
 
 

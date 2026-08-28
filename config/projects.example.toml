@@ -1,6 +1,6 @@
 [projects.sample_project]
 root = "D:/workspace/example-project"
-allowed_branches = ["main", "develop", "feature/*"]
+allowed_branches = ["develop", "develop/*", "codex/*", "feature/*"]
 require_clean_workspace = true
 codemcp_config = "codemcp.toml"
 

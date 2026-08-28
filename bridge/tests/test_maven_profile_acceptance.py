@@ -49,7 +49,7 @@ async def test_root_only_maven_profile_runs_doctor_compile_and_test(
         "<groupId>example</groupId><artifactId>demo</artifactId><version>1</version></project>\n",
         encoding="utf-8",
     )
-    _git(project, "init", "-b", "main")
+    _git(project, "init", "-b", "develop")
     _git(project, "config", "user.name", "Maven acceptance")
     _git(project, "config", "user.email", "maven-acceptance@example.invalid")
     _git(project, "add", "pom.xml")

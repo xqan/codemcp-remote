@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-DEFAULT_ALLOWED_BRANCHES = ("main", "master", "codex/*")
+DEFAULT_ALLOWED_BRANCHES = ("develop", "develop/*", "codex/*", "feature/*")
 DEFAULT_REQUIRE_CLEAN_WORKSPACE = True
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 60.0
 

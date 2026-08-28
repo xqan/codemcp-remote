@@ -36,7 +36,7 @@ def _git_project(path: Path) -> Path:
     path.mkdir()
     (path / "README.md").write_text("# hot reload test\n", encoding="utf-8")
     (path / "codemcp.toml").write_text("", encoding="utf-8")
-    _git(path, "init", "-b", "main")
+    _git(path, "init", "-b", "develop")
     _git(path, "config", "user.name", "Project registry hot reload test")
     _git(path, "config", "user.email", "registry-hot-reload@example.invalid")
     _git(path, "add", ".")
