@@ -19,7 +19,9 @@ def test_phase557a_clean_windows_harness_is_no_auth_network_trust_first() -> Non
 
     assert '[string]$Transport = "cloudflare"' in script
     assert '[string]$AcceptanceProfile = "5.5.7A"' in script
-    assert '[string]$AllowedHost = "codemcp.quickclip.cc"' in script
+    assert '[string]$AllowedHost = "mcp.example.com"' in script
+    assert "[int]$BridgePort = 46200" in script
+    assert '$AcceptanceBridgeUrl = "http://127.0.0.1:$BridgePort/mcp"' in script
     assert '"--transport", "cloudflare"' in script
     assert '"--public-url", $PublicUrl' in script
     assert '"--origin-url", $OriginUrl' in script
@@ -81,6 +83,8 @@ def test_phase557_managed_install_state_matches_fixed_acceptance_identity() -> N
     assert "ExpectedProjectId" in script
     assert "ExpectedTransport" in script
     assert "ExpectedPublicUrl" in script
+    assert "ExpectedBridgeUrl" in script
+    assert "bridge_url" in script
     assert "ExpectedAuthorizationServerIssuer" in script
     assert "ExpectedCanonicalResourceUri" in script
     assert "ExpectedValidationResourceId" in script
@@ -186,7 +190,8 @@ def test_phase557_local_contract_requires_cloudflared_loopback_and_external_auth
     script = _script()
 
     assert 'Join-Path $release.install_dir "cloudflared.exe"' in script
-    assert '"http://127.0.0.1:46200/mcp"' in script
+    assert "$Doctor.checks.configuration.bridge_url -ne $ExpectedBridgeUrl" in script
+    assert "$Doctor.checks.cloudflare_settings.origin_url -ne $ExpectedBridgeUrl" in script
     assert '"mcp-rs-verification-v1"' in script
     assert "Assert-NoEmbeddedAuthServerState" in script
     assert '"*mcp-auth-server*"' in script
@@ -212,6 +217,7 @@ def test_phase557_retains_explicit_openai_transport_compatibility() -> None:
     assert '$Transport -eq "cloudflare"' in script
     assert '"--transport", "openai-tunnel"' in script
     assert '"--tunnel-id", $TunnelId' in script
+    assert '"--bridge-url", $AcceptanceBridgeUrl' in script
     assert '"--store-api-key"' in script
 
 

@@ -60,14 +60,14 @@ def _configure_network_profile(paths: lifecycle.RuntimePaths) -> None:
         paths,
         tunnel_id="",
         transport="cloudflare",
-        public_url="https://codemcp.quickclip.cc/mcp",
+        public_url="https://mcp.example.com/mcp",
         origin_url="http://127.0.0.1:46200/mcp",
         metrics_addr="127.0.0.1:46202",
     )
     lifecycle.configure_network_trust(
         paths,
         mode="cloudflare-chatgpt",
-        allowed_hosts=["CODEMCP.QUICKCLIP.CC"],
+        allowed_hosts=["MCP.EXAMPLE.COM"],
         allowed_origins=["https://chatgpt.com:443"],
     )
     lifecycle.configure_resource_auth(paths, mode="none")
@@ -146,7 +146,7 @@ def test_cloudflare_public_start_requires_network_trust(tmp_path: Path, monkeypa
         paths,
         tunnel_id="",
         transport="cloudflare",
-        public_url="https://codemcp.quickclip.cc/mcp",
+        public_url="https://mcp.example.com/mcp",
         origin_url="http://127.0.0.1:46200/mcp",
         metrics_addr="127.0.0.1:46202",
     )
@@ -216,10 +216,10 @@ def test_cloudflare_network_profile_starts_without_oauth_secret(
     assert processes[1].args[-2:] == ["--home", str(paths.home)]
     assert lifecycle.RESOURCE_AUTH_SECRET_ENV_NAME not in repr(result)
     bridge_checks = [item for item in http_checks if item[0].endswith("/healthz")]
-    assert bridge_checks == [("http://127.0.0.1:46200/healthz", {"Host": "codemcp.quickclip.cc"})]
+    assert bridge_checks == [("http://127.0.0.1:46200/healthz", {"Host": "mcp.example.com"})]
     assert endpoint_checks[0] == (
         "http://127.0.0.1:46200/healthz",
-        {"Host": "codemcp.quickclip.cc"},
+        {"Host": "mcp.example.com"},
     )
 
 
@@ -266,5 +266,5 @@ def test_serve_wires_network_profile_without_installing_oauth(
     assert main_module.main() == 0
     assert captured["settings"] is settings
     assert captured["network_trust"].mode == "cloudflare-chatgpt"
-    assert captured["network_resource"] == "https://codemcp.quickclip.cc/mcp"
+    assert captured["network_resource"] == "https://mcp.example.com/mcp"
     assert captured["transport"] == "streamable-http"

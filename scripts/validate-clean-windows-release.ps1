@@ -9,12 +9,14 @@ param(
     [ValidateSet("5.5.7A", "5.5.7B")]
     [string]$AcceptanceProfile = "5.5.7A",
     [string]$PublicUrl,
-    [string]$AllowedHost = "codemcp.quickclip.cc",
+    [string]$AllowedHost = "mcp.example.com",
     [string[]]$AllowedOrigin,
     [string]$AuthorizationServerIssuer,
     [string]$CanonicalResourceUri,
     [string]$ValidationResourceId = "codemcp-resource",
-    [string]$OriginUrl = "http://127.0.0.1:46200/mcp",
+    [ValidateRange(1, 65535)]
+    [int]$BridgePort = 46200,
+    [string]$OriginUrl,
     [string]$MetricsAddr = "127.0.0.1:46202",
     [string]$TunnelId,
     [string]$ProjectId = "phase5-clean",
@@ -30,6 +32,16 @@ $AcceptanceHome = Join-Path $env:LOCALAPPDATA "codemcp-remote"
 $AcceptanceAppRoot = $AcceptanceHome
 $DefaultProjectRoot = Join-Path $env:LOCALAPPDATA "codemcp-remote-phase5\project"
 $Phase5StateFile = Join-Path $AcceptanceHome "phase5-validation.json"
+$AcceptanceBridgeUrl = "http://127.0.0.1:$BridgePort/mcp"
+if ([string]::IsNullOrWhiteSpace($OriginUrl)) {
+    $OriginUrl = $AcceptanceBridgeUrl
+} elseif (-not [string]::Equals(
+    $OriginUrl,
+    $AcceptanceBridgeUrl,
+    [System.StringComparison]::OrdinalIgnoreCase
+)) {
+    throw "-OriginUrl must match the selected -BridgePort loopback MCP endpoint: $AcceptanceBridgeUrl"
+}
 
 function Invoke-GuiProcessAndWait {
     param(
@@ -162,6 +174,8 @@ function Assert-ManagedAcceptanceState {
         [string]$ExpectedAcceptanceProfile,
         [string]$ExpectedAllowedHost,
         [string]$ExpectedPublicUrl,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedBridgeUrl,
         [string]$ExpectedAuthorizationServerIssuer,
         [string]$ExpectedCanonicalResourceUri,
         [string]$ExpectedValidationResourceId
@@ -222,6 +236,19 @@ function Assert-ManagedAcceptanceState {
     }
     if (-not $appRootMatches) {
         throw "existing codemcp-remote installation is not a managed Phase 5.5.7 acceptance install"
+    }
+
+    $stateBridgeUrl = [string](Get-StateField -State $State -Name "bridge_url")
+    if ([string]::IsNullOrWhiteSpace($stateBridgeUrl)) {
+        # Older managed acceptance state predates bridge_url recording and used the fixed default.
+        $stateBridgeUrl = "http://127.0.0.1:46200/mcp"
+    }
+    if (-not [string]::Equals(
+        $stateBridgeUrl,
+        $ExpectedBridgeUrl,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "existing codemcp-remote installation Bridge endpoint does not match the acceptance configuration"
     }
 
     if ([string](Get-StateField -State $State -Name "transport") -ne $ExpectedTransport) {
@@ -334,6 +361,8 @@ function Get-ExistingManagedAcceptanceInstall {
         [string]$ExpectedAcceptanceProfile,
         [string]$ExpectedAllowedHost,
         [string]$ExpectedPublicUrl,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedBridgeUrl,
         [string]$ExpectedAuthorizationServerIssuer,
         [string]$ExpectedCanonicalResourceUri,
         [string]$ExpectedValidationResourceId
@@ -374,6 +403,7 @@ function Get-ExistingManagedAcceptanceInstall {
         -ExpectedAcceptanceProfile $ExpectedAcceptanceProfile `
         -ExpectedAllowedHost $ExpectedAllowedHost `
         -ExpectedPublicUrl $ExpectedPublicUrl `
+        -ExpectedBridgeUrl $ExpectedBridgeUrl `
         -ExpectedAuthorizationServerIssuer $ExpectedAuthorizationServerIssuer `
         -ExpectedCanonicalResourceUri $ExpectedCanonicalResourceUri `
         -ExpectedValidationResourceId $ExpectedValidationResourceId
@@ -538,7 +568,9 @@ function Assert-DoctorContract {
         $Doctor,
         [ValidateSet("5.5.7A", "5.5.7B")]
         [string]$ExpectedAcceptanceProfile = "5.5.7A",
-        [string]$ExpectedAllowedHost = "codemcp.quickclip.cc"
+        [string]$ExpectedAllowedHost = "mcp.example.com",
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedBridgeUrl
     )
 
     if ($Doctor.status -ne "ok") {
@@ -546,6 +578,9 @@ function Assert-DoctorContract {
     }
     if ($Doctor.checks.configuration.worker_mode -ne "local") {
         throw "clean-machine release is not using the native local worker"
+    }
+    if ([string]$Doctor.checks.configuration.bridge_url -ne $ExpectedBridgeUrl) {
+        throw "doctor did not report the selected loopback Bridge MCP endpoint"
     }
     if ($Doctor.checks.git.status -ne "ok") {
         throw "doctor cannot find Git after runtime PATH isolation"
@@ -556,8 +591,8 @@ function Assert-DoctorContract {
         if ($Doctor.checks.cloudflare_settings.status -ne "ok") {
             throw "doctor did not validate Cloudflare transport settings"
         }
-        if ([string]$Doctor.checks.cloudflare_settings.origin_url -ne "http://127.0.0.1:46200/mcp") {
-            throw "Cloudflare origin is not the fixed loopback MCP endpoint"
+        if ([string]$Doctor.checks.cloudflare_settings.origin_url -ne $ExpectedBridgeUrl) {
+            throw "Cloudflare origin does not match the selected loopback Bridge MCP endpoint"
         }
         if ($Doctor.checks.cloudflared.status -ne "ok") {
             throw "doctor cannot find the bundled cloudflared"
@@ -653,7 +688,8 @@ function Invoke-Start {
     Assert-DoctorContract `
         -Doctor $doctor `
         -ExpectedAcceptanceProfile $AcceptanceProfile `
-        -ExpectedAllowedHost $AllowedHost
+        -ExpectedAllowedHost $AllowedHost `
+        -ExpectedBridgeUrl $AcceptanceBridgeUrl
     $appRoot = $AcceptanceAppRoot
     Assert-NoEmbeddedAuthServerState -AppRoot $appRoot
 
@@ -730,6 +766,7 @@ function Invoke-Start {
         current_installer_sha256 = $phase5CurrentInstallerSha256
         installed_executable_sha256 = $phase5InstalledExecutableSha256
         worker_mode = [string]$doctor.checks.configuration.worker_mode
+        bridge_url = [string]$doctor.checks.configuration.bridge_url
         git_path = $gitPath
         transport = $provider
         transport_secret_source = $transportSecretSource
@@ -954,6 +991,7 @@ $existingAcceptance = Get-ExistingManagedAcceptanceInstall `
     -ExpectedAcceptanceProfile $AcceptanceProfile `
     -ExpectedAllowedHost $AllowedHost `
     -ExpectedPublicUrl $PublicUrl `
+    -ExpectedBridgeUrl $AcceptanceBridgeUrl `
     -ExpectedAuthorizationServerIssuer $AuthorizationServerIssuer `
     -ExpectedCanonicalResourceUri $CanonicalResourceUri `
     -ExpectedValidationResourceId $ValidationResourceId
@@ -1067,6 +1105,7 @@ $initArgs = if ($Transport -eq "cloudflare") {
         "--home", $AcceptanceHome,
         "--transport", "openai-tunnel",
         "--tunnel-id", $TunnelId,
+        "--bridge-url", $AcceptanceBridgeUrl,
         "--store-api-key"
     )
 }
@@ -1083,7 +1122,8 @@ $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList (@("doctor") +
 Assert-DoctorContract `
     -Doctor $doctor `
     -ExpectedAcceptanceProfile $AcceptanceProfile `
-    -ExpectedAllowedHost $AllowedHost
+    -ExpectedAllowedHost $AllowedHost `
+    -ExpectedBridgeUrl $AcceptanceBridgeUrl
 
 $registration = Remove-AcceptanceProjectRegistration `
     -FilePath $release.exe `
@@ -1104,7 +1144,8 @@ $doctorAfterProject = Invoke-JsonCommand -FilePath $release.exe -ArgumentList (@
 Assert-DoctorContract `
     -Doctor $doctorAfterProject `
     -ExpectedAcceptanceProfile $AcceptanceProfile `
-    -ExpectedAllowedHost $AllowedHost
+    -ExpectedAllowedHost $AllowedHost `
+    -ExpectedBridgeUrl $AcceptanceBridgeUrl
 if ([int]$doctorAfterProject.checks.configuration.projects -lt 1) {
     throw "doctor did not observe the registered Phase 5 project"
 }
@@ -1141,6 +1182,7 @@ $phase5State = [ordered]@{
     installed_executable_sha256 = $installedExecutableSha256
     previous_installed_executable_sha256 = $existingAcceptance.previous_installed_executable_sha256
     install_dir = $release.install_dir
+    bridge_url = [string]$doctorAfterProject.checks.configuration.bridge_url
     transport = $provider
     public_url = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.cloudflare_settings.public_url } else { $null }
     auth_mode = if ($provider -eq "cloudflare") { [string]$doctorAfterProject.checks.auth.mode } else { $null }
@@ -1177,6 +1219,7 @@ $phase5State | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Phase5StateFi
     project_root = $projectRootPath
     baseline_head = $baselineHead
     worker_mode = [string]$doctorAfterProject.checks.configuration.worker_mode
+    bridge_url = [string]$doctorAfterProject.checks.configuration.bridge_url
     git_path = $gitPath
     transport = $provider
     transport_secret_source = $transportSecretSource

@@ -1,6 +1,6 @@
 # Cloudflare Tunnel + ChatGPT Network Trust
 
-Status: **READY FOR PHASE H LIVE ACCEPTANCE — this runbook has not performed live endpoint, WAF, or ChatGPT Connector verification**
+Status: **PHASE H LIVE ACCEPTANCE COMPLETE — real ChatGPT access and Cloudflare BLOCK/ALLOW evidence are recorded; the optional stopped-Tunnel `1033` proof was intentionally skipped. Stable `v0.1.0` remains blocked by the separate Phase 6/7 and release-wide gates.**
 
 This is the recommended v0.1.0 personal-deployment path. ChatGPT Connector uses `Authentication = No authentication`; Cloudflare Edge/WAF supplies the external network restriction, while `codemcp-remote` keeps its local project, operation, approval, checkpoint, Git CAS, restore, audit, and loopback security policies.
 
@@ -17,7 +17,7 @@ OpenAI / ChatGPT Connector egress network
 Cloudflare Edge/WAF IP allowlist
         |
         v
-https://codemcp.quickclip.cc/mcp
+https://mcp.example.com/mcp
         |
         v
 Cloudflare Tunnel
@@ -52,7 +52,7 @@ The IP policy belongs at Cloudflare Edge/WAF. Do not reproduce it in Python and 
 In the user-owned Cloudflare account:
 
 1. create or select a Cloudflare Tunnel;
-2. add the dedicated hostname `codemcp.quickclip.cc`;
+2. add a dedicated hostname such as `mcp.example.com`;
 3. route it to `http://127.0.0.1:46200`;
 4. preserve the `/mcp` path used by the Connector; and
 5. do not add a second public origin or a public health route.
@@ -77,7 +77,7 @@ For the dedicated hostname, create a Cloudflare WAF Custom Rule equivalent to:
 
 ```text
 (
-  http.host eq "codemcp.quickclip.cc"
+  http.host eq "mcp.example.com"
   and not ip.src in $chatgpt_connectors
 )
 ```
@@ -91,7 +91,7 @@ The WAF rule is the IP enforcement boundary. A request blocked there must not re
 ```toml
 [network_trust]
 mode = "cloudflare-chatgpt"
-allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_hosts = ["mcp.example.com"]
 allowed_origins = ["https://chatgpt.com"] # optional, if-present validation
 ```
 
@@ -108,10 +108,10 @@ $env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
 
 & $exe init --home $home `
   --transport cloudflare `
-  --public-url "https://codemcp.quickclip.cc/mcp" `
+  --public-url "https://mcp.example.com/mcp" `
   --auth-mode none `
   --network-trust cloudflare-chatgpt `
-  --allowed-host codemcp.quickclip.cc `
+  --allowed-host mcp.example.com `
   --allowed-origin "https://chatgpt.com" `
   --store-transport-secret
 $env:TUNNEL_TOKEN = $null
@@ -141,7 +141,7 @@ auth.status: ready
 auth.oauth_secret_required: false
 network_trust.mode: cloudflare-chatgpt
 network_trust.status: ready
-network_trust.allowed_hosts: [codemcp.quickclip.cc]
+network_trust.allowed_hosts: [mcp.example.com]
 identity_level: network-only
 transport.provider: cloudflare
 tunnel_token.source: windows-dpapi
@@ -154,12 +154,12 @@ For public Cloudflare transport, a missing trust policy or empty host list must 
 From a normal public network that is not in `$chatgpt_connectors`, request the dedicated hostname:
 
 ```powershell
-curl.exe -i https://codemcp.quickclip.cc/mcp
+curl.exe -i https://mcp.example.com/mcp
 ```
 
 Expected result: Cloudflare WAF `403` (or the account's configured block response). Capture only non-sensitive status/timestamp evidence. The request must be blocked at Cloudflare and must not reach the Bridge. Do not substitute a Python response or a spoofed forwarding header for this test.
 
-When the codemcp lifecycle is stopped, the separate stopped-lifecycle probe should observe the Cloudflare Tunnel-unavailable behavior (commonly Cloudflare `1033`, depending on account presentation). This is a Phase H live check, not a result established by this runbook.
+When the codemcp lifecycle is stopped, Cloudflare may present Tunnel-unavailable behavior such as `1033`, depending on account presentation. The Phase H acceptance intentionally skipped this disruptive proof to preserve the working Connector; it is a documented optional deviation and is not evidence required to reinterpret the already-recorded network-trust BLOCK/ALLOW result.
 
 ## 7. ChatGPT Connector Scan Tools
 
@@ -167,7 +167,7 @@ In ChatGPT, create or edit the Connector with:
 
 ```text
 Authentication: No authentication
-URL: https://codemcp.quickclip.cc/mcp
+URL: https://mcp.example.com/mcp
 ```
 
 Run `Scan Tools`. The scan must complete only after the WAF list contains the actual Connector egress range and the local lifecycle reports a healthy Bridge/Tunnel. A successful scan does not establish human identity; it establishes reachability through the configured network boundary.
@@ -211,7 +211,7 @@ Use Profile B for multi-user, enterprise, or deployments requiring a real subjec
 [auth]
 mode = "oauth-resource-server"
 issuer = "https://<authorization-server>"
-canonical_resource_uri = "https://codemcp.quickclip.cc/mcp"
+canonical_resource_uri = "https://mcp.example.com/mcp"
 validation_resource_id = "<resource-id>"
 ```
 

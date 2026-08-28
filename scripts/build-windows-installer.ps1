@@ -260,6 +260,8 @@ if (-not $SkipSmoke) {
             (Join-Path $installedLocation "codemcp-stop.cmd"),
             (Join-Path $installedLocation "LICENSE"),
             (Join-Path $installedLocation "THIRD_PARTY_NOTICES.txt"),
+            (Join-Path $installedLocation "THIRD_PARTY\codemcp\LICENSE.txt"),
+            (Join-Path $installedLocation "THIRD_PARTY\codemcp\NOTICE.txt"),
             (Join-Path $installedLocation "THIRD_PARTY\cloudflared\LICENSE"),
             (Join-Path $installedLocation "THIRD_PARTY\cloudflared\NOTICE.txt"),
             (Join-Path $installedLocation "THIRD_PARTY\tunnel-client\LICENSE")

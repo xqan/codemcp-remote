@@ -156,7 +156,7 @@ def test_cloudflare_doctor_supports_network_trust_without_oauth(
     lifecycle.configure_network_trust(
         paths,
         mode="cloudflare-chatgpt",
-        allowed_hosts=["codemcp.quickclip.cc"],
+        allowed_hosts=["mcp.example.com"],
     )
     lifecycle.configure_resource_auth(paths, mode="none")
     report = lifecycle.doctor_report(paths)
@@ -164,7 +164,7 @@ def test_cloudflare_doctor_supports_network_trust_without_oauth(
     assert report["checks"]["auth"]["mode"] == "none"
     assert report["checks"]["auth"]["oauth_secret_required"] is False
     assert report["checks"]["network_trust"]["status"] == "ready"
-    assert report["checks"]["network_trust"]["allowed_hosts"] == ["codemcp.quickclip.cc"]
+    assert report["checks"]["network_trust"]["allowed_hosts"] == ["mcp.example.com"]
     assert report["checks"]["identity_level"] == "network-only"
     assert lifecycle.RESOURCE_AUTH_SECRET_ENV_NAME not in repr(report)
 

@@ -1,639 +1,688 @@
-# codemcp-remote 开源整改计划（v0.13 — Open Source Readiness）
+# codemcp-remote 开源整改计划（v0.1.0 Open Source Readiness）
 
-> 基线日期：2026-08-24  
-> 目标版本：完成整改后发布 `v0.1.0`  
-> 当前定位：Windows 11 + WSL2 下，通过 OpenAI Secure MCP Tunnel 将 ChatGPT 连接到本机受控 MCP Bridge，并由 codemcp 执行受限代码操作。
+> 更新基线：2026-08-28  
+> 目标版本：`v0.1.0`  
+> 当前分支：`codex/open-source-readiness`  
+> 整改起始 HEAD：`7d39cf97594aa9425067d158722f8ddbba302486`；最终 release-candidate HEAD 只在 Final Release Gate sign-off 时冻结并记录  
+> 状态：**PRE-RELEASE / STABLE RELEASE BLOCKED**
 
-## 1. 目标
+## 1. 目的
 
-本计划的目标不是继续扩展 codemcp-remote 的核心功能，而是把现有工程从“可用的内部项目”提升为“可公开审查、可安全安装、可重复验收、可持续维护的开源项目”。
+本计划用于把 codemcp-remote 从“已可稳定用于个人受控环境”的工程，收口为“可公开审查、可安全安装、可重复验收、可持续维护”的首个稳定开源版本。
 
-完成整改后应满足：
+本计划只处理 `v0.1.0` 开源发布所需的安全、可靠性、文档、治理、供应链和发布门禁，不再把已经完成的能力重复列为待开发功能。
 
-1. 陌生用户能够仅依据公开文档完成安装、项目注册、启动、诊断和基本使用。
-2. 安全边界、威胁模型、已知限制和漏洞报告方式公开且可验证。
-3. Phase 7 的功能、安全、可靠性和文档验收全部通过。
-4. CI 能持续验证代码质量、测试、依赖和安全基线。
-5. 仓库不存在已知凭据泄露，发布流程不会包含本地配置或敏感文件。
-6. 能生成可重复的 `v0.1.0` 发布产物，并附 SHA-256 校验值。
-7. 开源治理文件、贡献流程和版本维护策略齐备。
+任何 stable `v0.1.0` tag 都必须以真实 Release Gate 证据为依据；“代码已经实现”“本机可用”“历史某次测试通过”均不能替代最终 release-candidate 验收。
 
-## 2. 当前基线与主要缺口
+---
 
-截至本计划创建时，仓库已经具备：
+## 2. 当前真实产品基线
 
-- loopback-only MCP Bridge；
-- SQLite session / operation / approval / audit 生命周期；
-- 幂等 mutation、项目级写入保护和失败恢复；
-- Bridge-owned Git checkpoint、diff、CAS rollback；
-- WSL2 codemcp worker；
-- Secure MCP Tunnel 启动、诊断和远程合同验收；
-- Windows 11 一键启动/停止的初步运维能力；
-- 项目注册、命令白名单和敏感路径默认拒绝策略；
-- 单元、集成和阶段性验证文档。
+以下内容以当前仓库实现、README、验收记录和测试为准，取代 2026-08-24 初版计划中的旧假设。
 
-当前主要开源缺口：
+### 2.1 已安装 Windows 产品
 
-- 根目录缺少正式 `LICENSE`；
-- 缺少 `SECURITY.md`；
-- 缺少 `docs/architecture/security-model.md`；
-- 缺少 `docs/architecture/threat-model.md`；
-- 缺少 `docs/acceptance/acceptance-test-plan.md`；
-- README 仍偏内部阶段记录，不是面向首次使用者的产品入口；
-- 缺少 `.github/` 下的 CI、Issue/PR 模板和依赖维护配置；
-- 缺少公开的贡献指南、行为准则、变更日志和版本支持策略；
-- 尚未完成 Phase 6 剩余的连续重启、异常退出、日志脱敏、升级/回退验证；
-- 尚未完成 Phase 7 最终验收；
-- 尚未完成整个 Git 历史的 secrets 扫描和发布前清理确认；
-- 尚未形成标准化 release artifact + SHA-256 流程。
+当前 `v0.1.0` 目标运行形态：
 
-## 3. 整改原则
+- Windows 11 x64-compatible；
+- 交付 `codemcp-remote.exe` / `codemcp-remote-setup.exe`；
+- **安装后的产品运行不要求 Python、uv、PowerShell 7 或 WSL2**；
+- **Git for Windows 是明确的运行时前置条件**；
+- 默认 mutation worker 为 **Native Windows local worker**；
+- WSL2 Ubuntu 仅保留为 source-mode compatibility fallback；
+- `codemcp==0.3.0` 固定版本，通过 Bridge-owned Windows compatibility wrapper 使用，不维护上游 fork。
 
-### P0：安全优先
+源码开发仍要求 Python 3.12+、uv 和 PowerShell 7；这与已安装产品的运行时前置条件必须在文档中明确区分。
 
-这是一个具备本地源码读取、修改、测试和 Git 操作能力的远程执行项目。任何“使用体验”优化都不能削弱项目注册、路径限制、命令白名单、审批、审计、Git CAS 或 fail-closed 行为。
+### 2.2 推荐远程路径
 
-### P1：先完成已有设计承诺，再增加新功能
+`v0.1.0` 推荐的个人部署 Profile A：
 
-整改期间原则上不新增以下能力：
+```text
+ChatGPT Connector (Authentication = No authentication)
+  -> OpenAI / ChatGPT Connector egress
+  -> Cloudflare Edge / WAF IP allowlist
+  -> Cloudflare Tunnel
+  -> 127.0.0.1:46200
+  -> codemcp-remote Bridge
+  -> native Windows codemcp worker
+  -> registered local Git project
+```
 
-- 多用户身份系统；
-- 任意 shell；
-- 自动 push / merge / rebase / deploy；
-- 新模型 provider；
-- Bridge 内 Agent loop；
-- 非必要的新 transport；
-- 原生 Windows mutation 支持。
+关键边界：
 
-如果整改过程中发现现有安全或可靠性缺陷，可以修复；功能扩展进入后续版本。
+- Cloudflare WAF/IP allowlist 是 **network trust boundary**，不是用户认证；
+- Profile A 的 identity level 是 `network-only`，不能声称识别具体 ChatGPT 用户、Workspace、账号或会话；
+- Bridge 始终只监听 loopback；
+- Cloudflare ingress 必须由外部 WAF/网络策略限制，不能依赖 Python 读取 forwarded headers 做授权；
+- OpenAI Secure MCP Tunnel 仍作为 optional compatibility transport；
+- Profile B `oauth-resource-server` 保留为 optional advanced/enterprise profile，不作为 `v0.1.0` 推荐个人部署路径。
 
-### P2：陌生机器可复现
+### 2.3 当前 MCP / 安全能力
 
-所有发布结论必须能够在干净 Windows 11 环境中复现，不能依赖开发机已有 PATH、缓存、虚拟环境、Tunnel profile 或人工残留状态。
+当前公开 MCP contract 为 22 tools：
 
-### P3：文档必须与代码一致
+1. `project_open`
+2. `project_status`
+3. `file_read`
+4. `code_search`
+5. `file_list`
+6. `file_edit`
+7. `file_create`
+8. `file_write`
+9. `file_move`
+10. `file_delete`
+11. `directory_create`
+12. `registered_command_run`
+13. `format_run`
+14. `test_run`
+15. `git_status`
+16. `git_diff`
+17. `checkpoint_create`
+18. `checkpoint_restore`
+19. `operation_status`
+20. `approval_confirm`
+21. `operation_cancel`
+22. `operation_reconcile`
 
-README、示例配置、CLI、脚本、支持矩阵和安全文档中的命令必须实际执行验证。禁止保留已经失效的阶段性事实作为当前说明。
+必须继续保持：
+
+- 不暴露任意 shell；
+- 不允许 caller-controlled executable path / arbitrary argv；
+- 不允许任意本机绝对路径绕过 project registry；
+- 敏感路径默认拒绝；
+- mutation 具备 canonical request hash、幂等、项目级串行化；
+- 高风险操作保留短时一次性 approval；
+- Bridge-owned Git checkpoint；
+- branch/HEAD compare-and-swap rollback；
+- 不确定副作用进入 `unknown` / reconcile，不透明重放；
+- Bridge/codemcp 不调用模型，ChatGPT 是唯一推理引擎。
+
+### 2.4 项目授权控制面
+
+当前项目注册已经从“改配置后重启”升级为：
+
+```text
+local CLI project add/remove
+  -> validated atomic projects.toml replacement
+  -> running Bridge observes validated registry change
+  -> no Bridge / Tunnel / Connector restart required
+```
+
+规则：
+
+- 本机 CLI 是唯一项目授权管理控制面；
+- MCP 不提供 project add/remove/reload/reconfigure；
+- `project add/remove` 需要保持 root ownership、last-known-good、revocation 和 fail-closed 语义；
+- 直接编辑 `projects.toml` 仅用于可信离线维护/恢复，不作为普通用户流程。
+
+### 2.5 已完成的关键验证
+
+已经有真实证据的能力包括：
+
+- GNU AGPL v3 / `AGPL-3.0-only` 已落库；
+- `SECURITY.md`、security model、threat model 已存在；
+- README 已重构为 public-user 入口；
+- GitHub governance/CI 配置已落库；
+- Windows EXE、Installer、release-candidate ZIP 和 SHA-256 流程已经实现；
+- Native Windows worker 已成为默认路径；
+- project registry hot reload 已实现并有自动测试；
+- Cloudflare No-Auth network-trust Phase A–H 已完成；
+- Phase H 真实链路已经证明：
+  - ChatGPT Connector 可访问完整 22-tool surface；
+  - mutation；
+  - identical replay；
+  - explicit approval；
+  - checkpoint / CAS restore；
+  - exact clean-baseline recovery；
+  - ordinary public source 被 Cloudflare Block；
+  - ChatGPT Connector source 被 Allow。
+- Phase H 最新记录的完整 registered test gate 为 `316 passed, 6 skipped`，format gate 为 `72 files already formatted`。
+
+上述记录是已有能力证据，不代表最终 `v0.1.0` Release Gate 已完成。
+
+---
+
+## 3. 当前状态总览
+
+| Stage / Track | 当前状态 | 是否阻塞 stable `v0.1.0` | 说明 |
+|---|---|---:|---|
+| Stage 0 — Readiness baseline | **COMPLETE** | 否 | 初始开源整改基线已建立；最终 release freeze 仍在末尾执行 |
+| Stage 1 — License / Security / Threat Model | **COMPLETE（Third-Party Notices 决策待 Stage 6）** | 部分 | 核心法律/安全文档已完成 |
+| Stage 2 — Phase 6 Windows Operations | **IN PROGRESS** | **是** | 真实主机可靠性、故障、日志、路径矩阵仍缺最终证据 |
+| Stage 3 — Phase 7 Final Acceptance | **IN PROGRESS / BLOCKED BY PREREQUISITES** | **是** | 本地回归有 PASS，但最终功能/安全/可靠性/真实项目 Gate 未闭环 |
+| Stage 4 — README / Onboarding | **REPOSITORY IMPLEMENTATION COMPLETE** | 是 | 最终 clean-machine 文档执行验证和全仓文档一致性待完成 |
+| Stage 5 — GitHub Governance / CI | **REPOSITORY IMPLEMENTATION COMPLETE** | 是 | GitHub hosted 首次运行、Dependabot、ruleset/branch protection 待验证 |
+| Stage 6 — Secrets / Privacy / Supply Chain | **PENDING** | **是** | Git history、artifact、dependency/license audit 未形成最终 PASS |
+| Stage 7 — Release Packaging | **IMPLEMENTATION SUBSTANTIALLY COMPLETE** | **是** | Installer/ZIP/SHA 已有；strict clean-machine/final-RC packaging 仍未闭环 |
+| Network Trust Phase A–H | **COMPLETE** | 否 | 推荐 Profile A 的 live path 已完成，不能替代 Phase 6/7 |
+| Optional OAuth Profile B | **IMPLEMENTED / OPTIONAL** | 否* | *仅在 `v0.1.0` 不把其 live OAuth 端到端能力作为默认发布承诺时不阻塞 |
 
 ---
 
 # 4. 整改阶段
 
-## Stage 0 — 发布冻结与基线确认
+## Stage 0 — 发布边界与当前基线
 
-**优先级：P0**
+**优先级：P0**  
+**状态：COMPLETE（最终 release freeze 不在本阶段提前执行）**
 
-### 目标
+### 已完成
 
-冻结当前功能边界，建立开源整改基线，避免整改期间同时发生无关功能扩张。
+- 已确定首个 stable 版本为 `v0.1.0`；
+- 已冻结“ChatGPT-only reasoning / Bridge as policy gateway / codemcp as execution backend”的核心边界；
+- 已固定 `codemcp==0.3.0`；
+- 已明确 installed runtime 与 source-development runtime 的区别；
+- 已明确 Native Windows worker 为默认路径；
+- 已明确 Cloudflare Profile A 为推荐个人远程路径；
+- 当前更新分支、HEAD 和 clean worktree 已记录。
 
-### 任务
+### 发布前仍需重新捕获
 
-1. 确认当前支持范围：
-   - Windows 11 主机；
-   - WSL2 Ubuntu mutation worker；
-   - Python 3.12+；
-   - `codemcp==0.3.0`；
-   - OpenAI Secure MCP Tunnel；
-   - 单用户本机 policy profile。
-2. 记录当前分支、HEAD、测试基线。
-3. 运行完整现有测试套件。
-4. 执行 `git diff --check`。
-5. 确认工作树 clean。
-6. 建立 `v0.13` 整改 checklist，所有后续提交映射到本计划。
+最终 RC 必须重新记录：
 
-### 验收
-
-- 当前功能支持矩阵无歧义；
-- 全部现有测试通过；
-- 工作树 clean；
-- 没有未记录的 blocker。
+- exact branch / commit；
+- worktree clean；
+- tool contract；
+- dependency lock；
+- installer/package identity；
+-最终测试结果。
 
 ---
 
 ## Stage 1 — License、Security 与 Threat Model
 
-**优先级：P0**
+**优先级：P0**  
+**状态：CORE COMPLETE**
 
-### 目标
+### 已完成
 
-让潜在用户在安装前能够明确知道：代码如何授权、系统信任什么、不信任什么、发生漏洞如何报告。
+- [x] 根目录 `LICENSE`；
+- [x] GNU AGPL v3，SPDX `AGPL-3.0-only`；
+- [x] `bridge/pyproject.toml` license 一致；
+- [x] `SECURITY.md`；
+- [x] `docs/architecture/security-model.md`；
+- [x] `docs/architecture/threat-model.md`；
+- [x] 关键威胁已映射到自动测试或 Phase 6/7 验收项。
 
-### 新增文件
+### Stage 6 联动项
 
-- `LICENSE`
-- `SECURITY.md`
-- `docs/architecture/security-model.md`
-- `docs/architecture/threat-model.md`
-
-### 任务
-
-#### 1. LICENSE
-
-- 项目采用 GNU Affero General Public License v3.0，SPDX 标识为 `AGPL-3.0-only`；
-- 根目录加入正式 GNU AGPL v3 license 文本；
-- 核对 `bridge/pyproject.toml` 的 license 声明与根 LICENSE 一致；
-- `codemcp==0.3.0` 继续作为 Apache-2.0 第三方依赖单独记录，不改变其上游许可证；
-- 必要时新增 Third-Party Notices，并明确项目代码与第三方依赖的许可证边界。
-
-#### 2. SECURITY.md
-
-至少包含：
-
-- 当前支持版本；
-- 漏洞报告渠道；
-- 不应公开提交安全漏洞的说明；
-- 响应与披露原则；
-- 安全问题范围；
-- 非安全问题如何提交；
-- 凭据泄露后的处置建议。
-
-#### 3. security-model.md
-
-至少明确：
-
-- ChatGPT、Tunnel、Bridge、codemcp worker、Git repo 的信任边界；
-- Bridge 为唯一对外 MCP Server；
-- loopback-only 原则；
-- project registry；
-- 路径沙箱；
-- 命令白名单；
-- secret deny rules；
-- approval token；
-- audit；
-- idempotency；
-- checkpoint / CAS rollback；
-- unknown side-effect；
-- fail-closed 策略；
-- 当前不提供的安全保证。
-
-#### 4. threat-model.md
-
-至少覆盖：
-
-- path traversal；
-- symlink / junction / reparse point escape；
-- arbitrary shell / argument injection；
-- prompt injection from repository content；
-- malicious project configuration；
-- secret exfiltration；
-- approval replay / cross-session / cross-project；
-- idempotency collision / replay；
-- operation state corruption；
-- Tunnel disconnect during mutation；
-- worker crash during mutation；
-- external Git modification race；
-- log leakage；
-- dependency / supply-chain risk；
-- compromised local user / compromised ChatGPT workspace 的边界。
-
-每类威胁记录：
-
-`Threat → Preconditions → Existing Mitigation → Residual Risk → Validation`
-
-### 当前执行状态（2026-08-24）
-
-- [x] 开源协议确定为 GNU AGPL v3，项目 SPDX 标识为 `AGPL-3.0-only`；
-- [x] 根目录加入完整、未修改的 GNU AGPL v3 `LICENSE` 正文；
-- [x] `bridge/pyproject.toml` 已切换为 `AGPL-3.0-only`；
-- [x] 新增 `SECURITY.md`；
-- [x] 新增 `docs/architecture/security-model.md`；
-- [x] 新增 `docs/architecture/threat-model.md`；
-- [x] 已将 threat model 每个 P0 威胁映射到现有自动测试或明确的 Phase 6/7 验收项；映射完成不代表验收已 PASS；
-- [ ] Stage 6 dependency audit 时复核全部第三方依赖许可证，并决定是否生成完整 Third-Party Notices。
-
-### 验收
-
-- 安全文档和代码实际行为一致；
-- 所有关键安全机制都有对应测试或明确的人工验收；
-- 未验证的安全假设不得写成已保证事实。
+- [ ] 复核全部第三方 dependency license；
+- [ ] 明确是否生成 `THIRD_PARTY_NOTICES.md`；
+- [ ] 如果生成，区分本项目 AGPL 与第三方依赖各自许可证。
 
 ---
 
-## Stage 2 — Phase 6 运维化收尾
+## Stage 2 — Phase 6 Windows 运维与可靠性收口
 
-**优先级：P0**
+**优先级：P0**  
+**状态：IN PROGRESS — RELEASE BLOCKER**
+
+权威记录：
+
+`docs/acceptance/phase-6-validation.md`
 
 ### 目标
 
-完成 implementation plan 已经承诺但尚未完成的 Phase 6 验收。
+证明推荐 release path 在真实 Windows 11 环境中具备可重复启动、诊断、停止、异常恢复和安全日志行为。
 
-### 任务
+### Mandatory Profile A 验收
 
-1. 连续执行启动 → 健康检查 → 停止 → 重启至少 20 次。
-2. 分别模拟：
-   - Bridge 异常退出；
-   - tunnel-client 异常退出；
-   - codemcp worker 异常退出；
-   - 端口占用；
-   - stale PID / stale lock；
-   - WSL 不可用；
-   - Git 不可用；
-   - Tunnel 未认证。
-3. 验证进程树清理，不残留 worker。
-4. 验证日志：
-   - 不包含 runtime API key；
-   - 不包含完整敏感文件内容；
-   - 不记录未经脱敏 token；
-   - 错误日志仍足以诊断问题。
-5. 验证 UTF-8、中文路径、空格路径、CRLF/LF。
-6. 建立依赖升级前检查。
-7. 建立 codemcp 升级失败后的回退步骤。
+必须针对：
 
-### 产物
+```text
+Windows packaged runtime
++ Native Windows worker
++ Git for Windows
++ Cloudflare Tunnel
++ No-Auth network trust Profile A
+```
 
-- 更新 `docs/guides/operations-runbook.md`；
-- 新增或更新 Phase 6 validation 记录；
-- 必要的回归测试。
+完成并记录：
 
-### 验收
+- [ ] 20/20 `start -> doctor -> stop` 生命周期；
+- [ ] Bridge 异常退出恢复；
+- [ ] `cloudflared` / managed Tunnel 异常退出恢复；
+- [ ] native codemcp worker 异常退出；
+- [ ] Bridge 端口被非本项目进程占用时 fail closed；
+- [ ] Tunnel/health 端口冲突时不误杀无关进程；
+- [ ] stale process metadata / stale state 安全恢复；
+- [ ] Git unavailable 时给出 actionable diagnostic；
+- [ ] Cloudflare tunnel credential 缺失/无效时不泄漏 secret；
+- [ ] mutation 边界断线时不透明重放；
+- [ ] command timeout / owned process-tree cleanup；
+- [ ] synthetic secret/log canary scan；
+- [ ] 空格路径；
+- [ ] 中文路径/文件名；
+- [ ] CRLF；
+- [ ] LF；
+- [ ] supported long Windows path；
+- [ ] upgrade / rollback procedure 对当前 pinned baseline 复核。
 
-满足 implementation plan Phase 6 Acceptance Criteria：
+### Compatibility 路径
 
-- 用户可按 README 在 Windows 11 完成安装和启动；
-- doctor 能定位常见问题；
-- codemcp 升级前后有明确版本检查和回退方式。
+WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 mandatory default path。
+
+处理原则：
+
+- 若 `v0.1.0` 继续公开声明为“支持的 compatibility path”，保留相应测试/文档；
+- 不再把“WSL 不可用”当作 Native Windows 默认安装路径的 P0 前置条件；
+- 不得让 compatibility path 的旧假设覆盖当前默认产品架构。
+
+### Exit
+
+只有 Phase 6 validation 的 mandatory release checklist 全部有真实证据，Stage 2 才能 PASS。
 
 ---
 
-## Stage 3 — Phase 7 最终验收
+## Stage 3 — Phase 7 最终 Release Acceptance
 
-**优先级：P0**
+**优先级：P0**  
+**状态：IN PROGRESS — RELEASE BLOCKER**
 
-### 新增文件
+权威记录：
 
-- `docs/acceptance/acceptance-test-plan.md`
+`docs/acceptance/acceptance-test-plan.md`
 
-### 目标
+### 3.1 Automated release-candidate gate
 
-把目前散落的阶段验证转化成一次可重复执行的正式 Release Gate。
+最终 RC 必须重新执行并记录：
 
-### 验收矩阵
+- [ ] complete registered test workflow；
+- [ ] Ruff lint；
+- [ ] Ruff format check；
+- [ ] package/build checks；
+- [ ] `git diff --check` 等价检查；
+- [ ] worktree 在只读检查后保持 clean；
+- [ ] 22-tool MCP contract 与预期完全一致。
 
-#### A. 功能
+历史的 `312 passed` / `316 passed` 属于已有证据，不代替 final RC re-run。
 
-- project_open；
-- project_status；
-- file_list / file_read；
-- code_search；
-- file_create / file_edit / file_write / file_move / file_delete；
-- registered commands；
-- format / test；
-- git_status / git_diff；
-- checkpoint create / restore；
-- operation status / cancel；
-- approval flow。
+### 3.2 Functional acceptance
 
-#### B. 安全
+完整验证当前 22-tool surface，包括此前旧计划遗漏的：
 
-验证以下输入全部 fail closed：
+- `directory_create`；
+- `operation_reconcile`；
+- `approval_confirm`；
+- `file_create` / `file_write` 的当前 hash/baseline 语义。
 
-- 未登记 project_id；
-- absolute arbitrary path；
-- `../` traversal；
-- symlink / junction escape；
-- secret file；
-- binary file；
-- 未登记 command；
-- 参数注入；
-- 错误 approval；
-- approval replay；
-- cross-session approval；
-- cross-project operation；
-- forged request hash；
-- Git branch / HEAD race；
-- dirty workspace 未授权写入。
+### 3.3 Security negative matrix
 
-#### C. 可靠性
+至少重新覆盖：
 
-- duplicate request；
+- unknown project；
+- arbitrary absolute path；
+- traversal；
+- symlink / junction / reparse escape；
+- sensitive path read/search/diff；
+- binary / oversized file；
+- unregistered command；
+- runtime argv / executable injection；
+- dirty workspace；
+- forged canonical request hash；
+- idempotency conflict；
+- wrong/expired/reused approval；
+- cross-session / cross-project operation；
+- checkpoint tamper；
+- branch/HEAD CAS race；
+- prompt injection cannot widen Bridge authorization；
+- non-loopback configuration rejection；
+- secret/log canary；
+- Host/Origin boundary；
+- ordinary public source cannot reach Bridge；
+- model/provider egress remains absent。
+
+### 3.4 Reliability / recovery matrix
+
+必须验证：
+
+- duplicate mutation replay；
+- changed-hash conflict；
+- Bridge restart before/after backend boundary；
+- pending approval across restart；
 - Tunnel disconnect；
-- Bridge crash；
 - worker crash；
-- timeout；
-- cancel；
-- unknown side-effect；
-- restart recovery；
-- CAS rollback conflict；
-- simultaneous mutation rejection。
+- timeout/process-tree cleanup；
+- external Git race；
+- reconcile verified-not-applied；
+- reconcile verified-applied；
+- 20-cycle lifecycle result。
 
-#### D. 真实项目
+### 3.5 Real-project acceptance
 
-至少验证：
+最终 Gate 仍要求至少 10 个完整远程修改任务，而不是 10 个孤立 tool call：
 
-- 一个真实 Java 项目；
-- 一个包含前端构建命令的项目；
-- 连续 10 次真实远程修改任务；
-- 每次逐项核对 operation、audit、Git diff、checkpoint。
+- 至少一个真实 Java 项目；
+- 至少一个具有前端 build/test workflow 的项目；
+- 覆盖 checkpoint / restore / reconcile；
+- 每个任务记录 branch/HEAD、session、operation、commands、diff、approval、unknown state 和最终 test；
+- 公共验收记录不得复制 proprietary source 内容。
 
-### 验收
+### 3.6 ChatGPT-only reasoning boundary
 
-- Release Gate 全部通过；
-- 所有失败项必须形成 blocker 或明确 documented limitation；
-- P0/P1 blocker 清零后才允许进入 Release Packaging。
+必须确认：
+
+- Bridge 无 model provider；
+- 无 hidden agent loop；
+- codemcp 是 execution backend，不是第二推理 agent；
+- repo prompt/content 不能自行获得高权限；
+- 观察到的网络流量能区分合法 Tunnel 控制流量与禁止的 model/provider egress。
 
 ---
 
-## Stage 4 — README 与首次使用体验重构
+## Stage 4 — README、Onboarding 与文档一致性
 
-**优先级：P1**
+**优先级：P1**  
+**状态：REPOSITORY IMPLEMENTATION COMPLETE / FINAL VERIFICATION PENDING**
 
-### 目标
+### 已完成
 
-让从未接触项目的用户可以在 5–15 分钟内判断是否适合自己，并知道如何开始。
+主 README 已经反映：
 
-### README 推荐结构
+- packaged Windows runtime；
+- Native Windows worker；
+- Git for Windows prerequisite；
+- Cloudflare Profile A；
+- optional OAuth Profile B；
+- project add/remove hot reload；
+-无任意 shell；
+-无 auto push/merge/deploy；
+- public-user Quick Start。
 
-1. 项目一句话定位；
-2. Why codemcp-remote；
-3. Architecture diagram；
-4. Security properties；
-5. Current limitations；
-6. Requirements；
-7. Quick Start；
-8. Register your first project；
-9. Start Bridge + Tunnel；
-10. Connect from ChatGPT；
-11. Run first read-only call；
-12. Run first mutation；
-13. Approval / checkpoint / rollback；
-14. Doctor / Troubleshooting；
-15. Supported platforms；
-16. Security；
-17. Contributing；
-18. License。
+### 文档对齐状态（2026-08-28）
 
-### 必须明确的限制
+当前规范文档已完成仓库侧对齐：
 
-- 当前 mutation worker 依赖 WSL2；
-- native Windows Git-backed mutation 不支持；
-- Secure MCP Tunnel / ChatGPT developer-mode 能力取决于用户账号和 workspace 能力；
-- Bridge 不是多用户身份系统；
-- Bridge 不允许任意 shell；
-- 不自动 push / merge / deploy；
-- codemcp 固定在已验证版本。
+- [x] `docs/implementation-plan.md` 已从绿色场景/旧 Phase 计划改为当前 `v0.1.0` 实施基线；
+- [x] `docs/architecture/architecture.md` 已改为 Cloudflare Profile A + Native Windows 默认拓扑；
+- [x] `docs/guides/operations-runbook.md` 已以 packaged managed CLI 为主运维路径；
+- [x] `docs/guides/codemcp-baseline.md` 已明确 Native Windows 默认、WSL2 compatibility fallback；
+- [x] `docs/acceptance/phase-6-validation.md` 已改为 packaged Windows / Cloudflare / local worker mandatory matrix；
+- [x] `docs/acceptance/acceptance-test-plan.md` 已同步 22-tool contract、当前治理文件与最终 RC Gate；
+- [x] 主 README 的 source-development 与 operator 流程已不再把 Secure MCP scripts 当默认路径；
+- [x] Cloudflare runbook 已同步 Phase H COMPLETE 与 optional `1033` deviation；
+- [x] security/threat model 中相关 worker/transport/release-matrix 表述已同步当前边界。
 
-### 清理历史性描述
+`docs/releases/` 与 `docs/reports/` 中的旧 WSL2 / Secure MCP-first 描述保留为 historical evidence，不应被重写成当前事实；`docs/README.md` 已明确区分 current normative docs 与 historical records。
 
-将不再代表当前状态的初创内容从主 README / 当前架构文档移出，必要时保留到 ADR 或历史记录。
+### 最终验收
 
-### 验收
-
-找一个没有参与开发的人，仅按 README 操作：
-
-- 能完成依赖检查；
-- 能复制安全示例配置；
-- 能注册 sample project；
-- 能启动服务；
-- doctor 正常；
-- 能理解支持范围和安全边界。
+- [ ] 从 final artifact / clean Windows 环境只按 README 完成安装；
+- [ ] 注册项目；
+- [ ] `doctor`；
+- [ ] start；
+- [ ] read-only call；
+- [ ] controlled mutation；
+- [ ] stop；
+- [ ] 用户能理解 Profile A 是 network trust 而非 user authentication；
+- [ ] known limitations 与代码一致；
+- [x] 当前规范文档不存在 WSL2-required / native-Windows-unsupported 等错误现行声明；历史记录仅作为 historical evidence 保留。
 
 ---
 
 ## Stage 5 — GitHub 开源治理与 CI
 
-**优先级：P1**
+**优先级：P1**  
+**状态：REPOSITORY IMPLEMENTATION COMPLETE / HOSTED ACTIVATION PENDING**
 
-**状态：仓库侧实施完成；GitHub hosted 首次运行/规则集激活待仓库托管后验证。**
+验证记录：
 
-验证记录：`docs/reports/testing/stage-5-validation.md`
+`docs/reports/testing/stage-5-validation.md`
 
-### 新增文件 / 目录
+### 已落库
 
-- `CONTRIBUTING.md`
-- `CODE_OF_CONDUCT.md`
-- `CHANGELOG.md`
-- `.github/workflows/ci.yml`
-- `.github/ISSUE_TEMPLATE/`
-- `.github/pull_request_template.md`
-- `.github/dependabot.yml`
+- [x] `CONTRIBUTING.md`
+- [x] `CODE_OF_CONDUCT.md`
+- [x] `CHANGELOG.md`
+- [x] `.github/workflows/ci.yml`
+- [x] bug report issue form
+- [x] feature request issue form
+- [x] PR template
+- [x] Dependabot configuration
 
-可选：
+### GitHub hosted 验收
 
-- `.github/workflows/codeql.yml`
-- `.github/workflows/release.yml`
+仓库进入正式 GitHub 开源发布流程后必须验证：
 
-### CI 最低要求
+- [ ] first hosted CI run 在 Ubuntu / Windows 成功；
+- [ ] PR 自动获得 required CI checks；
+- [ ] Dependabot 正确识别 uv 和 GitHub Actions；
+- [ ] release branch/main branch ruleset 要求必要 checks；
+- [ ] Issue forms / PR template 渲染正确；
+- [ ] hosted CI 使用最小权限，不持久化不必要 credentials。
 
-每次 push / pull request：
-
-1. 安装 Python 3.12；
-2. `uv sync --project bridge`；
-3. `ruff check`；
-4. pytest；
-5. package build；
-6. `git diff --check` 等价检查；
-7. 关键配置 schema / doctor check。
-
-安全检查建议：
-
-- CodeQL；
-- dependency review；
-- `pip-audit` 或等价 Python dependency audit；
-- secret scanner。
-
-### 贡献指南
-
-至少说明：
-
-- 开发环境；
-- 测试命令；
-- 代码风格；
-- 安全相关修改要求；
-- 新工具暴露的安全审查要求；
-- PR 验收标准；
-- 不接受的设计方向。
-
-### 验收
-
-- 新 PR 可以自动得到明确 Pass/Fail；
-- 主分支不能在明显测试失败时发布；
-- dependency 更新有可见检查。
+本地存在 workflow 文件不能等价于 hosted CI PASS。
 
 ---
 
-## Stage 6 — Secrets、隐私与供应链发布审查
+## Stage 6 — Secrets、隐私与供应链审查
 
-**优先级：P0**
+**优先级：P0**  
+**状态：PENDING — RELEASE BLOCKER**
 
-### 目标
+### 必做
 
-确认“当前仓库看起来没有 secret”之外，Git 历史、构建产物和示例配置也安全。
+- [ ] 扫描当前 tracked working tree；
+- [ ] 扫描整个 Git history；
+- [ ] 扫描 `.github/`、scripts、configs、docs、tests、fixtures；
+- [ ] 扫描 final release artifact；
+- [ ] 确认未打包：
+  - 本地 `projects.toml`；
+  - Tunnel profile；
+  - `.local/`；
+  - logs；
+  - SQLite；
+  - DPAPI/runtime secret material；
+  -真实用户路径/账号数据。
+- [ ] dependency vulnerability audit；
+- [ ] dependency license audit；
+- [ ] `codemcp==0.3.0` provenance / license 复核；
+- [ ] 决定 `THIRD_PARTY_NOTICES.md`。
 
-### 任务
+### Secret 发现规则
 
-1. 扫描整个 Git history：
-   - API key；
-   - token；
-   - tunnel ID（按敏感级别决定是否公开）；
-   - 本地真实项目路径；
-   - email/password；
-   - private key；
-   - `.env`；
-   - SQLite / log artifact。
-2. 检查 git tracked files。
-3. 检查 release build 内容。
-4. 检查示例配置不存在真实用户值。
-5. 检查测试 fixture 不包含真实代码或凭据。
-6. 对依赖做许可证和漏洞检查。
-7. 明确是否需要 `THIRD_PARTY_NOTICES.md`。
-8. 如果发现历史 secret：
-   - 先吊销 / rotate；
-   - 再清理历史；
-   - 重新扫描；
-   - 不把“删除当前文件”当作清理完成。
+如果发现历史凭据：
 
-### 验收
+1. 先 revoke / rotate；
+2. 再清理 Git history；
+3. 重新扫描；
+4. 重新生成 release candidate；
+5. 删除当前文件不等于历史清理完成。
 
-- history secret scan PASS；
-- working tree secret scan PASS；
-- release artifact scan PASS；
-- dependency license / vulnerability 没有未接受的 blocker。
+### Exit
 
----
+必须形成可审计的：
 
-## Stage 7 — Release Packaging
-
-**优先级：P1**
-
-### 目标
-
-建立任何人都可以验证的正式发布产物。
-
-### 发布内容
-
-建议至少包含：
-
-- Source archive；
-- Windows 安装/启动说明；
-- Bridge Python package 或明确的源码安装方式；
-- example configs；
-- release notes；
-- `SHA256SUMS.txt`。
-
-### 版本策略
-
-第一次正式公开版本：
-
-`v0.1.0`
-
-在 Phase 7 未完成前只允许：
-
-- `0.1.0-alpha.*`
-- 或不创建 stable release。
-
-### Release Checklist
-
-- [ ] working tree clean
-- [ ] CI PASS
-- [ ] Phase 7 PASS
-- [ ] security tests PASS
-- [ ] secret scan PASS
-- [ ] dependency audit PASS
-- [ ] README quick start 重新验证
-- [ ] CHANGELOG 更新
-- [ ] version 更新
-- [ ] release artifact 生成
-- [ ] SHA-256 生成并核对
-- [ ] tag 指向正确 commit
-- [ ] release notes 包含 known limitations
-
-### 验收
-
-从 GitHub Release 下载的源码/产物可以在一台干净 Windows 11 + WSL2 环境中根据 README 完成启动。
+- working tree scan PASS；
+- Git history scan PASS；
+- artifact scan PASS；
+- dependency audit PASS 或明确 accepted risk；
+- license review PASS。
 
 ---
 
-# 5. 优先级与阻断关系
+## Stage 7 — Release Packaging 与 Clean Machine
 
-## P0 — 不完成不得发布 stable
+**优先级：P1**  
+**状态：IMPLEMENTATION SUBSTANTIALLY COMPLETE / STRICT PASS PENDING**
 
-1. LICENSE；
-2. SECURITY；
-3. security model；
-4. threat model；
-5. Phase 6 剩余可靠性验收；
-6. Phase 7 acceptance；
-7. Git history secret scan；
-8. release artifact secret scan；
-9. 关键安全 blocker 修复。
+### 已实现
 
-## P1 — `v0.1.0` 前应完成
+当前已经具备：
 
-1. README 重构；
-2. CONTRIBUTING；
-3. CHANGELOG；
-4. GitHub Actions CI；
-5. Issue / PR 模板；
-6. Dependabot；
-7. release packaging；
-8. SHA-256。
+- packaged `codemcp-remote.exe`；
+- Inno Setup installer；
+- `codemcp-remote-setup.exe`；
+- release-candidate Windows ZIP；
+- SHA-256 manifest / checksum 流程；
+- clean Windows validation harness；
+- Windows PowerShell 5.1-compatible validation path；
+- bundled `cloudflared`；
+- optional bundled `tunnel-client`；
+- DPAPI transport-secret handling；
+- Native Windows worker；
+- installer identity / upgrade ownership checks。
 
-## P2 — 可在 `v0.1.x / v0.2` 继续
+### 为什么仍不能标记 PASS
 
-1. CodeQL 深度增强；
-2. 自动 release workflow；
-3. 更多平台；
-4. 更多 transport adapter；
-5. 多用户身份与 RBAC；
-6. native Windows mutation；
-7. codemcp fork / 替代执行后端。
+现有记录明确说明 strict Packaging Phase 5 尚未正式关闭：
+
+- live mutation 使用了 `codemcp-remote` 仓库中的临时 acceptance file，而不是固定 disposable `phase5-clean` repo；
+- Cleanup/uninstall 为保持当前工作 Connector 而被延后；
+- 因此这次 Phase H live success 不能直接升级为 strict clean-machine packaging PASS。
+
+### Final RC 必须执行
+
+- [ ] 从最终 commit 重新构建 installer；
+- [ ] 从最终 commit 重新构建 ZIP；
+- [ ] 生成并核对 SHA-256；
+- [ ] 在 clean Windows 11 环境安装；
+- [ ] 隔离 PATH 后确认 Python/uv/pwsh 不可见；
+- [ ] `worker_mode=local`；
+- [ ] Git prerequisite 正确；
+- [ ] Profile A tunnel token 使用 DPAPI；
+- [ ] 注册 disposable `phase5-clean`；
+- [ ] start Bridge + Tunnel；
+- [ ] 真实 ChatGPT Connector 对 disposable repo 完成 read/mutation/replay/restore；
+- [ ] final Git state 精确恢复 baseline；
+- [ ] Cleanup/uninstall PASS；
+- [ ] artifact 再做 secret scan；
+- [ ] release notes / known limitations / exact commit identity 一致。
+
+### 当前 Authenticode
+
+现有 candidate 记录为 `NotSigned`。
+
+在 `v0.1.0` 前必须明确二选一：
+
+- 对 installer/code signing 做正式签名；或
+- 将未签名作为明确 known limitation，并评估 Windows SmartScreen/用户信任影响。
+
+不能既保持 `NotSigned` 又在文档中暗示已签名发布。
 
 ---
 
-# 6. 推荐执行顺序
+# 5. 当前阻塞项
 
-严格按以下顺序推进：
+## P0 — 未关闭不得发布 stable
 
-1. Stage 0：冻结 + baseline；
-2. Stage 1：License / Security / Threat Model；
-3. Stage 2：完成 Phase 6；
-4. Stage 3：完成 Phase 7；
-5. Stage 6：Secrets / supply-chain 审查；
-6. Stage 4：README / onboarding；
-7. Stage 5：GitHub CI / governance；
-8. Stage 7：Release Packaging；
-9. 最终 Release Gate；
-10. tag `v0.1.0`。
+1. **Phase 6 mandatory Windows real-host matrix PASS**；
+2. **Phase 7 final release-candidate acceptance PASS**；
+3. **Git history / working tree / artifact secret scans PASS**；
+4. **dependency vulnerability + license audit PASS/accepted**；
+5. **strict clean-machine packaging / disposable repo / cleanup PASS**；
+6. **关键安全 finding 全部关闭或明确阻止 release**；
+7. **当前规范文档不能继续包含与真实产品相冲突的运行时声明**。
 
-原因：先把安全模型和已有工程承诺闭环，再包装 README 和 CI，可以避免文档与实现反复返工。
+## P1 — `v0.1.0` 前必须收口
+
+1. GitHub hosted CI 首次 PASS；
+2. required checks / branch ruleset；
+3. Dependabot hosted activation；
+4. clean-machine README onboarding；
+5. final CHANGELOG；
+6. final known limitations；
+7. final release artifact；
+8. final SHA-256；
+9. release notes；
+10. tag 与已验收 commit 一致。
+
+## P2 — `v0.1.x / v0.2` 可继续
+
+- CodeQL / dependency review 深化；
+-自动 release workflow；
+- code signing 自动化；
+-更多平台；
+-更多 transport adapter；
+-多用户身份 / RBAC；
+- OAuth Profile B 更完整 live interoperability matrix；
+- codemcp fork /替代执行后端（仅在实际兼容性问题需要时）。
+
+Native Windows mutation **不再是 P2**，因为它已经是当前默认实现。
 
 ---
 
-# 7. 最终 Release Gate
+# 6. 从当前状态开始的推荐执行顺序
 
-只有以下条件全部成立，才能发布 stable `v0.1.0`：
+不再沿用“Stage 0 -> 1 -> 2 -> 3 -> 6 -> 4 -> 5 -> 7”的旧线性顺序，因为 Stage 4/5/7 的大量实现已经提前完成。
+
+从当前分支开始建议：
+
+1. **当前计划与规范文档对齐：COMPLETE**；
+2. **Phase 6 Windows mandatory real-host matrix**；
+3. 修复 Phase 6 暴露的 blocker；
+4. **Phase 7 final RC automated + functional + security + reliability gate**；
+5. **10 个 real-project remote tasks**；
+6. **Stage 6 secrets / dependency / license / supply-chain audit**；
+7. **strict clean-machine packaging acceptance**；
+8. **GitHub hosted CI / Dependabot / ruleset activation**；
+9. 从最终 release commit **重新构建** installer + ZIP；
+10. 重新生成 SHA-256、artifact scan、CHANGELOG、release notes；
+11. Final Release Gate sign-off；
+12. tag `v0.1.0` 并发布 GitHub Release。
+
+原则：
+
+> 所有最终证据必须绑定同一个 release-candidate commit。  
+> 任何修复只要改变 release artifact 或安全语义，就必须重新执行受影响的 Gate。
+
+---
+
+# 7. Final Release Gate
+
+Stable `v0.1.0` 只有在下表全部满足后才可批准：
 
 | Gate | 要求 |
 |---|---|
-| Functional | 全部核心 MCP 工具通过验收 |
-| Security | threat model 中关键攻击路径有测试或明确验证 |
-| Reliability | crash / restart / timeout / disconnect / unknown / rollback 均通过 |
-| Secrets | working tree、Git history、release artifact 扫描通过 |
-| Docs | README + Security + Threat Model + Runbook 完整 |
-| CI | 测试、lint、build 在干净环境自动通过 |
-| Packaging | Release artifact 可安装、可启动 |
-| Integrity | 提供 SHA-256 |
-| Limitations | 已知限制公开且与实际行为一致 |
-| Git | release commit clean，tag 指向已验收 commit |
+| Release identity | exact branch / commit / lock / artifact identity 已记录 |
+| Automated suite | final RC tests / lint / format / build PASS |
+| MCP contract | 22-tool surface 与安全 contract VERIFIED |
+| Functional | 核心 MCP 正常路径全部 PASS |
+| Security | negative matrix / threat-model P0 paths PASS |
+| Reliability | crash / restart / timeout / disconnect / unknown / reconcile / rollback PASS |
+| Phase 6 | mandatory Windows real-host operations PASS |
+| Real projects | 10/10 remote tasks 有完整 operation/audit/Git lineage |
+| ChatGPT-only boundary | 无 hidden model/provider/agent loop |
+| Network trust | Profile A live boundary保持 PASS |
+| Secrets | working tree + Git history + artifact scan PASS |
+| Supply chain | dependency vulnerability/license review PASS |
+| Docs | README / architecture / guides / limitations 与实现一致 |
+| GitHub CI | hosted required checks PASS |
+| Packaging | final clean-machine installer/ZIP PASS |
+| Cleanup | uninstall/cleanup contract PASS |
+| Integrity | SHA-256 对 final artifacts VERIFIED |
+| Signing | signed，或 NotSigned 被明确接受并记录为 limitation |
+| Git | worktree clean，tag 指向唯一已验收 commit |
 
-任何 P0 blocker 未关闭，禁止发布 stable tag。
+任何 P0 blocker、无法解释的 skip、secret exposure、unsafe mutation ambiguity、文档与实际行为冲突，都必须保持：
+
+```text
+release_decision = BLOCKED
+```
 
 ---
 
 # 8. Definition of Done
 
-本整改计划完成的定义：
+本 Open Source Readiness 计划只有在以下条件同时成立时才结束：
 
-1. `Phase 0–7` 全部形成可验证闭环；
-2. 仓库具备标准开源法律、安全、贡献和维护文件；
-3. CI 能自动阻止明显质量回归；
-4. 安全攻击矩阵通过；
-5. 故障恢复矩阵通过；
-6. Git history 与 release artifact 不包含已知秘密；
-7. 新用户可按 README 独立启动；
-8. release 可重复构建并附 SHA-256；
-9. `v0.1.0` 的 known limitations 清晰公开；
-10. 从此后新增高权限工具必须同步更新 threat model、tests 和安全文档。
+1. 默认产品架构明确为 Windows packaged runtime + Native Windows worker；
+2. 推荐个人公网路径明确为 Cloudflare Profile A network trust；
+3. optional Secure MCP / OAuth / WSL2 compatibility path 不再污染默认产品说明；
+4.法律、安全、贡献、治理文件完整；
+5. Phase 6 PASS；
+6. Phase 7 PASS；
+7. 10 个真实远程任务 PASS；
+8. secrets / Git history / artifact scan PASS；
+9. dependency vulnerability/license review PASS；
+10. README 在 clean Windows 上独立可执行；
+11. GitHub hosted CI/ruleset 已激活并 PASS；
+12. final installer/ZIP 可从同一个已验收 commit 重复构建；
+13. final artifact clean-machine acceptance PASS；
+14. SHA-256 与 release artifact 一致；
+15. known limitations 包含真实剩余边界，包括 network-only identity 与 signing 状态；
+16. release tag 精确指向已验收 commit；
+17. `v0.1.0` GitHub Release 发布后，第三方无需开发机隐含状态即可安装、诊断和开始受控使用。
 
-完成以上条件后，codemcp-remote 才从“可公开代码仓库”进入“可供第三方实际安装使用的开源项目”状态。
+完成以上条件后，codemcp-remote 才从 **pre-release / controlled private operation** 进入 **stable public open-source release**。

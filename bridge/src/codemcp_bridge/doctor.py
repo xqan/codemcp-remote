@@ -90,6 +90,7 @@ def _validate_configuration() -> list[str]:
     bridge = _load_toml(BRIDGE_CONFIG)
     server = bridge.get("server", {})
     policy = bridge.get("policy", {})
+    network = bridge.get("network", {})
 
     if server.get("host") != "127.0.0.1":
         errors.append("server.host must be 127.0.0.1")
@@ -102,6 +103,10 @@ def _validate_configuration() -> list[str]:
             errors.append(f"policy.{key} must be false")
     if policy.get("require_clean_workspace") is not True:
         errors.append("policy.require_clean_workspace must be true")
+    if network.get("model_egress") != "deny":
+        errors.append("network.model_egress must be deny")
+    if network.get("remote_transport") != "provider-selected":
+        errors.append("network.remote_transport must be provider-selected")
 
     projects = _load_toml(PROJECT_CONFIG)
     registered_projects = projects.get("projects", {})
@@ -162,7 +167,9 @@ def collect_diagnostics() -> dict[str, Any]:
         "network_policy": {
             "model_egress": "deny",
             "bridge_listener": "loopback-only",
-            "tunnel_client_is_the_only_remote_transport": True,
+            "remote_transport": "provider-selected",
+            "recommended_remote_transport": "cloudflare",
+            "secure_mcp_tunnel_optional": True,
         },
         "configuration_errors": configuration_errors,
     }

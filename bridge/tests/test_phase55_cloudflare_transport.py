@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -324,6 +325,46 @@ def test_versioned_transport_config_selects_cloudflare_and_preserves_legacy_defa
             tunnel_id="tunnel_12345678",
             transport="openai-tunnel",
         )
+
+
+def test_initialize_runtime_keeps_cloudflare_origin_and_bridge_endpoint_aligned(
+    tmp_path: Path,
+) -> None:
+    paths = _lifecycle_paths(tmp_path)
+    (paths.runtime_root / "config" / "bridge.example.toml").write_text(
+        "[server]\n"
+        'host = "127.0.0.1"\n'
+        "port = 46200\n"
+        'path = "/mcp"\n'
+        'transport = "streamable-http"\n'
+        "\n"
+        "[storage]\n"
+        'data_dir = ".local"\n'
+        'sqlite_file = ".local/bridge.sqlite3"\n'
+        'log_dir = ".local/logs"\n',
+        encoding="utf-8",
+    )
+
+    lifecycle.initialize_runtime(
+        paths,
+        tunnel_id="",
+        transport="cloudflare",
+        public_url="https://mcp.example.com/mcp",
+        origin_url="http://127.0.0.1:47210/mcp",
+        metrics_addr="127.0.0.1:47212",
+    )
+
+    bridge = tomllib.loads(paths.bridge_config.read_text(encoding="utf-8"))
+    cloudflare_settings = CLOUDFLARE_TUNNEL_PROVIDER.load_settings(
+        lifecycle._transport_context(paths)
+    )
+    assert bridge["server"] == {
+        "host": "127.0.0.1",
+        "port": 47210,
+        "path": "/mcp",
+        "transport": "streamable-http",
+    }
+    assert cloudflare_settings.origin_url == "http://127.0.0.1:47210/mcp"
 
 
 def test_cloudflare_status_requires_owned_and_healthy_provider_process(

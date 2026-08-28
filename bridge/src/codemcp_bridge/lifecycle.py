@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from ctypes import wintypes
@@ -623,6 +624,55 @@ def _rewrite_bridge_storage(template: str, paths: RuntimePaths) -> str:
     return updated
 
 
+def _rewrite_bridge_endpoint(template: str, endpoint_url: str) -> str:
+    """Keep the generated Bridge listener aligned with the selected transport endpoint."""
+
+    try:
+        parsed = urllib.parse.urlsplit(endpoint_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise LifecycleError(f"Bridge MCP endpoint is invalid: {exc}") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname != "127.0.0.1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path.rstrip("/") != "/mcp"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise LifecycleError("Bridge MCP endpoint must be an HTTP(S) /mcp endpoint on 127.0.0.1")
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+
+    server_match = re.search(
+        r"(?ms)^\[server\]\s*\n(?P<body>.*?)(?=^\[|\Z)",
+        template,
+    )
+    if server_match is None:
+        if endpoint_url == DEFAULT_BRIDGE_URL:
+            return template
+        raise LifecycleError("bridge template is missing the [server] table")
+
+    body = server_match.group("body")
+    replacements = {
+        "host": f"host = {_toml_quote(parsed.hostname)}",
+        "port": f"port = {port}",
+        "path": f"path = {_toml_quote(parsed.path.rstrip('/') or '/')}",
+    }
+    for key, replacement in replacements.items():
+        body, count = re.subn(
+            rf"(?m)^{re.escape(key)}\s*=.*$",
+            replacement,
+            body,
+            count=1,
+        )
+        if count != 1:
+            raise LifecycleError(f"bridge template [server] is missing {key}")
+
+    return template[: server_match.start("body")] + body + template[server_match.end("body") :]
+
+
 def initialize_runtime(
     paths: RuntimePaths,
     *,
@@ -659,7 +709,9 @@ def initialize_runtime(
 
     created: list[str] = []
     if force or not paths.bridge_config.exists():
+        endpoint_url = origin_url if provider.provider_id == "cloudflare" else bridge_url
         bridge_text = _rewrite_bridge_storage(template.read_text(encoding="utf-8"), paths)
+        bridge_text = _rewrite_bridge_endpoint(bridge_text, endpoint_url)
         paths.bridge_config.write_text(bridge_text, encoding="utf-8")
         created.append(str(paths.bridge_config))
 
@@ -1634,6 +1686,9 @@ def doctor_report(
             "status": "ok",
             "projects": len(settings.projects),
             "worker_mode": settings.codemcp.worker_mode,
+            "bridge_url": (
+                f"http://{settings.server.host}:{settings.server.port}{settings.server.path}"
+            ),
         }
     except SettingsError as exc:
         checks["configuration"] = {"status": "failed", "error": str(exc)}

@@ -89,7 +89,7 @@ def _network_config(
 ) -> NetworkTrustConfig:
     return NetworkTrustConfig(
         mode="cloudflare-chatgpt",
-        allowed_hosts=("codemcp.quickclip.cc",),
+        allowed_hosts=("mcp.example.com",),
         allowed_origins=allowed_origins,
     )
 
@@ -139,7 +139,7 @@ async def _network_app(
         _settings(tmp_path),
         adapter=_NoopAdapter(),
         network_trust=_network_config(allowed_origins=allowed_origins),
-        network_resource="https://codemcp.quickclip.cc/mcp",
+        network_resource="https://mcp.example.com/mcp",
     )
     app = server.streamable_http_app()
     async with app.router.lifespan_context(app):
@@ -156,13 +156,13 @@ def _headers(*pairs: tuple[str, str]) -> list[tuple[bytes, bytes]]:
     [
         "localhost",
         "127.0.0.1",
-        "foo.codemcp.quickclip.cc",
-        "codemcp.quickclip.cc.attacker.com",
-        "quickclip.cc",
-        "codemcp.quickclip.cc:444",
-        "https://codemcp.quickclip.cc",
-        "codemcp.quickclip.cc/mcp",
-        "user@codemcp.quickclip.cc",
+        "foo.mcp.example.com",
+        "mcp.example.com.attacker.com",
+        "example.com",
+        "mcp.example.com:444",
+        "https://mcp.example.com",
+        "mcp.example.com/mcp",
+        "user@mcp.example.com",
     ],
 )
 async def test_network_trust_rejects_non_exact_hosts(tmp_path: Path, host: str) -> None:
@@ -179,11 +179,11 @@ async def test_network_trust_rejects_non_exact_hosts(tmp_path: Path, host: str) 
     "headers",
     [
         [],
-        _headers(("Host", "codemcp.quickclip.cc"), ("Host", "codemcp.quickclip.cc")),
-        _headers(("Host", "codemcp.quickclip.cc"), ("Host", "evil.example.com")),
+        _headers(("Host", "mcp.example.com"), ("Host", "mcp.example.com")),
+        _headers(("Host", "mcp.example.com"), ("Host", "evil.example.com")),
         _headers((":authority", "evil.example.com")),
-        _headers(("Host", "codemcp.quickclip.cc"), (":authority", "evil.example.com")),
-        _headers(("Host", "evil.example.com"), ("X-Forwarded-Host", "codemcp.quickclip.cc")),
+        _headers(("Host", "mcp.example.com"), (":authority", "evil.example.com")),
+        _headers(("Host", "evil.example.com"), ("X-Forwarded-Host", "mcp.example.com")),
     ],
 )
 async def test_network_trust_rejects_missing_conflicting_or_forwarded_host(
@@ -204,7 +204,7 @@ async def test_network_trust_accepts_authority_when_it_is_the_actual_request_aut
     async with _network_app(tmp_path) as app:
         status, _, body = await _invoke(
             app,
-            _headers((":authority", "codemcp.quickclip.cc:443")),
+            _headers((":authority", "mcp.example.com:443")),
         )
 
     assert status == 200
@@ -212,9 +212,7 @@ async def test_network_trust_accepts_authority_when_it_is_the_actual_request_aut
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "host", ["codemcp.quickclip.cc", "codemcp.quickclip.cc:443", "CODEMCP.QUICKCLIP.CC"]
-)
+@pytest.mark.parametrize("host", ["mcp.example.com", "mcp.example.com:443", "MCP.EXAMPLE.COM"])
 async def test_network_trust_accepts_exact_canonical_hosts(tmp_path: Path, host: str) -> None:
     async with _network_app(tmp_path) as app:
         status, _, body = await _invoke(app, _headers(("Host", host)))
@@ -241,7 +239,7 @@ async def test_network_trust_rejects_invalid_present_origins(tmp_path: Path, ori
     async with _network_app(tmp_path) as app:
         status, response_headers, body = await _invoke(
             app,
-            _headers(("Host", "codemcp.quickclip.cc"), ("Origin", origin)),
+            _headers(("Host", "mcp.example.com"), ("Origin", origin)),
         )
 
     assert status == 403
@@ -258,7 +256,7 @@ async def test_network_trust_accepts_exact_origin_and_default_port(
     async with _network_app(tmp_path) as app:
         status, _, body = await _invoke(
             app,
-            _headers(("Host", "codemcp.quickclip.cc"), ("Origin", origin)),
+            _headers(("Host", "mcp.example.com"), ("Origin", origin)),
         )
 
     assert status == 200
@@ -270,10 +268,10 @@ async def test_network_trust_origin_is_if_present_and_empty_allowlist_is_fail_cl
     tmp_path: Path,
 ) -> None:
     async with _network_app(tmp_path, allowed_origins=()) as app:
-        missing_status, _, _ = await _invoke(app, _headers(("Host", "codemcp.quickclip.cc")))
+        missing_status, _, _ = await _invoke(app, _headers(("Host", "mcp.example.com")))
         present_status, _, body = await _invoke(
             app,
-            _headers(("Host", "codemcp.quickclip.cc"), ("Origin", "https://chatgpt.com")),
+            _headers(("Host", "mcp.example.com"), ("Origin", "https://chatgpt.com")),
         )
 
     assert missing_status == 200
@@ -290,7 +288,7 @@ async def test_network_trust_rejects_multiple_origins_without_echoing_headers(
         status, _, body = await _invoke(
             app,
             _headers(
-                ("Host", "codemcp.quickclip.cc"),
+                ("Host", "mcp.example.com"),
                 ("Origin", "https://chatgpt.com"),
                 ("Origin", malicious),
             ),
@@ -306,7 +304,7 @@ async def test_network_trust_injects_explicit_principal_and_health_is_host_prote
     tmp_path: Path,
 ) -> None:
     async with _network_app(tmp_path) as app:
-        status, _, body = await _invoke(app, _headers(("Host", "codemcp.quickclip.cc")))
+        status, _, body = await _invoke(app, _headers(("Host", "mcp.example.com")))
         denied_status, _, denied_body = await _invoke(app, _headers(("Host", "evil.example.com")))
 
     assert status == 200
@@ -328,11 +326,11 @@ async def test_network_trust_mcp_codemcp_557_exposes_complete_public_tool_surfac
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
             transport=transport,
-            base_url="http://codemcp.quickclip.cc",
+            base_url="http://mcp.example.com",
             headers={"Authorization": "Bearer must-not-invoke-oauth"},
         ) as http:
             async with streamable_http_client(
-                "http://codemcp.quickclip.cc/mcp",
+                "http://mcp.example.com/mcp",
                 http_client=http,
             ) as (read_stream, write_stream, _):
                 async with ClientSession(read_stream, write_stream) as session:
@@ -380,7 +378,7 @@ def _oauth_principal(*, subject: str = "subject-a") -> AuthenticatedPrincipal:
     return AuthenticatedPrincipal(
         contract_version=CONTRACT_VERSION,
         issuer="https://auth.example.com",
-        resource="https://codemcp.quickclip.cc/mcp",
+        resource="https://mcp.example.com/mcp",
         subject=subject,
         client_id="oauth-client",
         scopes=("file:read",),
@@ -390,10 +388,10 @@ def _oauth_principal(*, subject: str = "subject-a") -> AuthenticatedPrincipal:
 
 
 def test_network_principal_is_deterministic_and_not_user_or_waf_identity() -> None:
-    principal = NetworkTrustedPrincipal(resource="https://codemcp.quickclip.cc/mcp")
+    principal = NetworkTrustedPrincipal(resource="https://mcp.example.com/mcp")
     details = auth_audit_details(principal)
 
-    assert principal == NetworkTrustedPrincipal(resource="https://codemcp.quickclip.cc/mcp")
+    assert principal == NetworkTrustedPrincipal(resource="https://mcp.example.com/mcp")
     assert details == {
         "auth_kind": "network-trusted",
         "auth_type": "network-trusted",
@@ -403,7 +401,7 @@ def test_network_principal_is_deterministic_and_not_user_or_waf_identity() -> No
         "issuer": "network-trust://cloudflare-chatgpt",
         "subject": "network-chatgpt-v1",
         "replay_namespace": "network-chatgpt-v1",
-        "resource": "https://codemcp.quickclip.cc/mcp",
+        "resource": "https://mcp.example.com/mcp",
     }
     assert "client_id" not in details
     assert auth_context_identity(details) == ("network-trusted", "network-chatgpt-v1")
@@ -424,9 +422,9 @@ async def test_network_middleware_propagates_principal_to_downstream_scope() -> 
     middleware = NetworkTrustMiddleware(
         downstream,
         config=_network_config(),
-        resource="https://codemcp.quickclip.cc/mcp",
+        resource="https://mcp.example.com/mcp",
     )
-    status, _, _ = await _invoke(middleware, _headers(("Host", "codemcp.quickclip.cc")))
+    status, _, _ = await _invoke(middleware, _headers(("Host", "mcp.example.com")))
 
     assert status == 204
     assert isinstance(seen["principal"], NetworkTrustedPrincipal)
@@ -514,7 +512,7 @@ def test_legacy_oauth_replay_key_remains_readable(tmp_path: Path) -> None:
         details={
             "contract_version": "1",
             "issuer": "https://auth.example.com",
-            "resource": "https://codemcp.quickclip.cc/mcp",
+            "resource": "https://mcp.example.com/mcp",
             "subject": "subject-a",
             "client_id": "oauth-client",
             "scopes": ["file:read"],
@@ -615,11 +613,11 @@ async def test_network_trust_can_be_installed_before_app_creation(tmp_path: Path
     install_network_trust(
         server,
         _network_config(),
-        resource="https://codemcp.quickclip.cc/mcp",
+        resource="https://mcp.example.com/mcp",
     )
     app = server.streamable_http_app()
     async with app.router.lifespan_context(app):
-        status, _, body = await _invoke(app, _headers(("Host", "codemcp.quickclip.cc")))
+        status, _, body = await _invoke(app, _headers(("Host", "mcp.example.com")))
 
     assert status == 200
     assert json.loads(body)["status"] == "ok"
@@ -628,7 +626,7 @@ async def test_network_trust_can_be_installed_before_app_creation(tmp_path: Path
 def test_network_principal_resource_is_optional_but_validated() -> None:
     assert NetworkTrustedPrincipal().resource is None
     with pytest.raises(ValueError, match="absolute HTTPS URI"):
-        NetworkTrustedPrincipal(resource="http://codemcp.quickclip.cc/mcp")
+        NetworkTrustedPrincipal(resource="http://mcp.example.com/mcp")
 
 
 def test_oauth_audit_projection_keeps_stable_identity_and_adds_namespace() -> None:
@@ -645,7 +643,7 @@ def test_oauth_audit_projection_keeps_stable_identity_and_adds_namespace() -> No
 def test_resource_auth_config_import_remains_available() -> None:
     config = ResourceServerValidationConfig(
         issuer="https://auth.example.com",
-        resource="https://codemcp.quickclip.cc/mcp",
+        resource="https://mcp.example.com/mcp",
         validation_resource_id="resource-code",
         validation_secret="secret",
     )

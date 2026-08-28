@@ -180,10 +180,10 @@ Initialize:
 ```powershell
 & $exe init `
   --transport cloudflare `
-  --public-url "https://codemcp.quickclip.cc/mcp" `
+  --public-url "https://mcp.example.com/mcp" `
   --auth-mode none `
   --network-trust cloudflare-chatgpt `
-  --allowed-host codemcp.quickclip.cc `
+  --allowed-host mcp.example.com `
   --allowed-origin "https://chatgpt.com" `
   --store-transport-secret
 ```
@@ -213,7 +213,7 @@ Project registration is a **local administrative control-plane action**. Only th
 Add a project:
 
 ```powershell
-& $exe project add codemcp-remote "D:\Documents\CodexProject\codemcp-remote"
+& $exe project add my-project "D:\workspace\my-project"
 ```
 
 A successful result includes:
@@ -232,8 +232,8 @@ If the Bridge is already running, the next authorization-sensitive request detec
 Remove a project with an explicit expected-root guard:
 
 ```powershell
-& $exe project remove codemcp-remote `
-  --expected-root "D:\Documents\CodexProject\codemcp-remote"
+& $exe project remove my-project `
+  --expected-root "D:\workspace\my-project"
 ```
 
 Removal is also automatically observed by the running Bridge. New access is denied immediately on the next request, and existing active sessions for the removed project are blocked. Re-adding the same project ID does not revive those old sessions.
@@ -335,7 +335,7 @@ Populate it from the official OpenAI/ChatGPT Connector egress manifest.
 Protect the dedicated MCP hostname with a whole-host WAF rule equivalent to:
 
 ```text
-(http.host eq "codemcp.quickclip.cc" and not ip.src in $chatgpt_connectors)
+(http.host eq "mcp.example.com" and not ip.src in $chatgpt_connectors)
 ```
 
 Action:
@@ -354,7 +354,7 @@ Create a ChatGPT Connector with:
 
 ```text
 URL:
-https://codemcp.quickclip.cc/mcp
+https://mcp.example.com/mcp
 
 Authentication:
 No authentication

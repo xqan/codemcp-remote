@@ -1,223 +1,400 @@
 # Operations Runbook
 
-## Phase 0 local validation
+> Updated: 2026-08-28  
+> Scope: current `v0.1.0` Windows operation and recovery
+
+This runbook describes the current operator path. Detailed build/install instructions are in [`windows-build-install-use.md`](windows-build-install-use.md).
+
+## 1. Supported operating modes
+
+### Recommended installed mode
+
+```text
+Windows 11
+  + codemcp-remote.exe
+  + Git for Windows
+  + Native Windows worker
+  + Cloudflare Tunnel
+  + Profile A network trust
+```
+
+Normal installed operation does not require Python, `uv`, PowerShell 7 or WSL2.
+
+### Source-development mode
+
+Source development requires:
+
+- Python 3.12+;
+- `uv`;
+- PowerShell 7;
+- Git for Windows.
+
+WSL2 is optional and used only when explicitly testing the compatibility fallback worker.
+
+OpenAI Secure MCP Tunnel is an optional compatibility transport.
+
+## 2. First-time installed initialization
+
+Recommended Profile A:
+
+```powershell
+$exe = "D:\codemcp-remote\codemcp-remote.exe"
+$env:TUNNEL_TOKEN = "<load locally from a secret manager>"
+
+& $exe init `
+  --transport cloudflare `
+  --public-url "https://<your-mcp-host>/mcp" `
+  --auth-mode none `
+  --network-trust cloudflare-chatgpt `
+  --allowed-host <your-mcp-host> `
+  --allowed-origin "https://chatgpt.com" `
+  --store-transport-secret
+
+$env:TUNNEL_TOKEN = $null
+```
+
+The Cloudflare Tunnel token is stored using Windows DPAPI when `--store-transport-secret` is selected.
+
+Do not place the plaintext token in:
+
+- the repository;
+- example configuration;
+- command history copied into public logs/issues;
+- ChatGPT messages;
+- unrestricted runtime logs.
+
+Profile A is network trust only. It does not identify a human user, ChatGPT account, Workspace or conversation.
+
+## 3. Project registration
+
+Project registration is a local administrative control-plane operation.
+
+Add:
+
+```powershell
+& $exe project add my-project "D:\workspace\my-project"
+```
+
+Remove with expected-root protection:
+
+```powershell
+& $exe project remove my-project `
+  --expected-root "D:\workspace\my-project"
+```
+
+A running Bridge observes validated registry changes automatically.
+
+Normal project add/remove does not require restarting:
+
+- Bridge;
+- Tunnel;
+- installed EXE lifecycle;
+- ChatGPT Connector.
+
+MCP clients cannot add, remove, reload or reconfigure project authorization.
+
+Direct editing of `projects.toml` is reserved for trusted offline maintenance or recovery.
+
+## 4. Normal lifecycle
+
+### Diagnose before start
+
+```powershell
+& $exe doctor
+```
+
+For the recommended Profile A, verify at least:
+
+- configuration is valid;
+- Bridge bind is loopback;
+- Git prerequisite is available;
+- `worker_mode = local`;
+- transport is Cloudflare;
+- `auth.mode = none`;
+- `network_trust.mode = cloudflare-chatgpt`;
+- exact allowed host is present;
+- `identity_level = network-only`;
+- transport credential source is protected as expected.
+
+### Start
+
+```powershell
+& $exe start
+```
+
+The managed lifecycle starts the loopback Bridge and the configured remote transport.
+
+The Native Windows codemcp worker is started on demand when an operation needs it.
+
+### Status
+
+```powershell
+& $exe status
+```
+
+Status output should expose bounded/sanitized operational state, not raw project roots, registered command argv or secret values through public health data.
+
+### Stop
+
+```powershell
+& $exe stop
+```
+
+Stop only product-owned process trees.
+
+An unrelated process that happens to occupy a managed port must never be killed merely because of the port number.
+
+The packaged one-click launchers may also be used:
+
+```text
+codemcp-start.cmd
+codemcp-stop.cmd
+```
+
+## 5. Recommended Cloudflare boundary
+
+The public path is:
+
+```text
+ChatGPT Connector
+  -> OpenAI/ChatGPT Connector egress
+  -> Cloudflare WAF IP allowlist
+  -> Cloudflare Tunnel
+  -> 127.0.0.1:46200/mcp
+```
+
+Requirements:
+
+- Bridge stays on loopback;
+- Cloudflare origin targets the loopback MCP endpoint;
+- WAF/IP admission happens at Cloudflare Edge;
+- current Connector egress ranges are managed externally rather than hardcoded in the Bridge;
+- `/healthz` must not be unintentionally exposed as a public application endpoint;
+- forwarded client-IP headers are not an authorization source.
+
+An ordinary public request should be blocked before it reaches the Bridge.
+
+## 6. Logs and local state
+
+Runtime logs, SQLite state, registry configuration and validation evidence are local operational data.
+
+Do not commit:
+
+- runtime logs;
+- `.local/`;
+- SQLite databases;
+- DPAPI secret files;
+- local transport profiles containing private state;
+- real `projects.toml`;
+- acceptance credentials.
+
+Logs must redact common secret forms, including:
+
+- `TUNNEL_TOKEN`;
+- Bearer tokens;
+- API-key-shaped values;
+- approval tokens;
+- optional OAuth verification secrets;
+- `CONTROL_PLANE_API_KEY` on the Secure MCP compatibility path.
+
+Worker stderr and command output must remain bounded.
+
+Denied secret-file content must not appear in unrestricted diagnostics.
+
+## 7. Common failure handling
+
+### Bridge unhealthy
+
+Run:
+
+```powershell
+& $exe doctor
+& $exe status
+```
+
+Then stop/start the owned lifecycle if required.
+
+A restart must not silently replay a mutation whose backend outcome is uncertain.
+
+### Cloudflare Tunnel unhealthy
+
+Verify:
+
+- transport configuration;
+- protected tunnel-token source;
+- public URL;
+- loopback origin;
+- local metrics/health state;
+- external Cloudflare Tunnel/WAF configuration.
+
+The local Bridge can remain diagnosable even when the public transport is unavailable.
+
+### Git unavailable
+
+Git for Windows is a product runtime prerequisite.
+
+If Git cannot be resolved, protected mutation must not run.
+
+Fix the runtime prerequisite, rerun `doctor`, then resume.
+
+### Native worker failure
+
+A worker failure during a mutation must surface as failure or `unknown` according to the known side-effect boundary.
+
+Do not retry an uncertain mutation with a new identity until the prior operation has been reconciled.
+
+### Project becomes blocked
+
+Inspect:
+
+```text
+operation_status
+git_status
+```
+
+If a mutation is `unknown`, use the explicit `operation_reconcile` flow with repository evidence.
+
+Do not manually clear SQLite operation state.
+
+### Approval pending
+
+High-risk operations use short-lived one-time approval tokens.
+
+Plaintext approval tokens are not persisted.
+
+A restart or stale approval must fail closed rather than reconstructing plaintext approval state.
+
+## 8. Checkpoint and rollback operation
+
+Before mutation, the Bridge creates or records the protected Git baseline and Bridge-owned checkpoint evidence.
+
+For manual restore:
+
+1. inspect `git_status`;
+2. inspect the target checkpoint/diff as required;
+3. request `checkpoint_restore` with the current expected HEAD;
+4. complete explicit approval;
+5. verify final branch/HEAD and clean worktree.
+
+Restore must reject:
+
+- wrong project/session scope;
+- dirty worktree;
+- external branch change;
+- external HEAD change;
+- missing/tampered checkpoint ref;
+- stale expected HEAD.
+
+An uncertain Git reset outcome becomes `UNKNOWN_SIDE_EFFECT`.
+
+## 9. Source-development operations
 
 From the repository root:
 
-~~~text
+```powershell
 uv sync --project bridge
 uv run --project bridge codemcp-bridge doctor --json
 uv run --project bridge pytest -q
-~~~
+```
 
-The Phase 0 doctor should report:
+Source lifecycle helpers remain available:
 
-- Python 3.12 or newer
-- Git is installed
-- the Bridge and project example configurations are valid
-- the codemcp baseline is release 0.3.0 at the pinned commit
-- model egress is denied
-- codemcp is installed and pinned from Phase 1 onward
-
-## Phase 6 local lifecycle control
-
-Use the one-click launcher after the Tunnel profile has been initialized:
-
-~~~text
+```powershell
+pwsh -File .\scripts\start-bridge.ps1
 pwsh -File .\scripts\start-all.ps1
 pwsh -File .\scripts\doctor.ps1
-~~~
-
-On the first run, initialize the local Tunnel profile explicitly:
-
-~~~text
-pwsh -File .\scripts\start-all.ps1 -Initialize
-~~~
-
-Project registration is a local administrative control-plane operation. MCP clients do not expose `project add`, `project remove`, `project reload`, or project-configuration mutation.
-
-For source-mode development, the local registry remains the Git-ignored `config/projects.toml`. Keep `config/projects.example.toml` as the shareable template. On a fresh checkout, create the local file first:
-
-~~~powershell
-Copy-Item config/projects.example.toml config/projects.toml
-~~~
-
-Normal authorization changes should then use the local CLI rather than direct file editing. The CLI validates the candidate and atomically replaces `projects.toml`. A running Bridge observes the validated change automatically on the next authorization-sensitive request, so project add/remove does not require a Bridge, Tunnel, or ChatGPT Connector restart.
-
-Direct `projects.toml` editing is reserved for trusted offline maintenance or recovery.
-
-`start-all.ps1` starts Bridge first, waits for its loopback health endpoint,
-then starts tunnel-client and waits for Tunnel `readyz`. If either endpoint is
-already healthy and its process command line belongs to this repository/profile,
-the existing service is reused. An unknown process occupying a health endpoint
-is rejected. The configured codemcp worker is started on demand by the Bridge
-when a registered project operation requires it. Native Windows is the default;
-WSL2 is retained as an explicit fallback mode.
-
-The Tunnel wrapper writes its merged stdout/stderr to
-`.local/logs/tunnel-client.log`, with the same 5 MB limit and three backups as
-the Bridge log. Common API-key, Bearer-token, and token fields are redacted
-before the line is written. `start-all.ps1` follows the Bridge
-`[storage].log_dir`; use `-LogDir` on either startup script to override it.
-
-`doctor.ps1` reports structured checks for configuration paths, SQLite state,
-the configured worker mode, Git repository state, Bridge configuration and health,
-and Tunnel readiness. Native worker mode does not require a WSL2 distribution or
-WSL worker venv; those checks are enforced only when `worker_mode = "wsl2"`.
-A missing database or log directory before first initialization is reported as
-`not_initialized`.
-Use `-SkipTunnel` when diagnosing the local Bridge without Tunnel credentials.
-For a non-default Bridge configuration, pass `-BridgeConfig` and
-`-ProjectsConfig` to both `start-all.ps1` and `doctor.ps1`.
-
-Bridge runtime logs are written to `.local/logs/bridge.log` with three 5 MB
-backups. Worker stderr is written to
-`.local/logs/workers/<project_id>.stderr.log` and uses the same size-based
-rotation. Bridge log messages redact common API-key, Bearer-token, and token
-fields; the worker receives a restricted environment without runtime API keys.
-Logs remain local sensitive state and must not be committed to Git or sent to
-ChatGPT as unrestricted source context.
-
-On Windows PowerShell, follow a worker log with explicit UTF-8 decoding:
-
-~~~powershell
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-Get-Content -LiteralPath .local/logs/workers/codemcp-remote.stderr.log -Encoding UTF8 -Tail 50 -Wait
-~~~
-
-The Bridge normalizes WSL launcher diagnostics and Python worker stderr to UTF-8
-when a worker starts. Restart the Bridge once after upgrading so an old mixed
-encoding log is rotated automatically.
-
-For isolated troubleshooting, the underlying foreground scripts remain
-available:
-
-~~~text
-pwsh -File .\scripts\start-bridge.ps1
-pwsh -File .\scripts\start-tunnel.ps1
-~~~
-
-Preview the process trees that Phase 6 will stop:
-
-~~~text
-pwsh -File .\scripts\stop-all.ps1 -WhatIf
-~~~
-
-Stop only the project-owned Bridge, Tunnel profile and codemcp worker trees:
-
-~~~text
 pwsh -File .\scripts\stop-all.ps1
-~~~
+```
 
-`stop-all.ps1` matches the repository Bridge command line, the configured
-Tunnel profile directory, native codemcp workers, and WSL2 fallback workers. It
-does not terminate an unrelated process that merely occupies port 46200 or 46201;
-such a listener is
-reported for manual investigation. Run it with permission to query
-`Win32_Process` when a service was started elevated.
+These scripts are development/compatibility operational tools. They must not be interpreted as evidence that the installed product requires PowerShell 7 or a source checkout.
 
-### Phase 6 release validation
+The source lifecycle supports the configured worker mode; Native Windows is the default and WSL2 is an explicit fallback.
 
-Before a stable release, run the repeatable lifecycle gate on the supported
-Windows 11 host:
+## 10. Compatibility paths
 
-~~~powershell
+### WSL2 worker fallback
+
+When explicitly selecting WSL2:
+
+```toml
+[codemcp]
+worker_mode = "wsl2"
+```
+
+prepare the source-mode worker environment as documented by the repository.
+
+WSL-specific failures apply only to this compatibility mode.
+
+### OpenAI Secure MCP Tunnel
+
+The older Secure MCP path remains available for compatibility.
+
+Its wrapper must continue to enforce:
+
+- OpenAI control plane;
+- loopback MCP target;
+- no plaintext API key in the profile;
+- no direct codemcp exposure.
+
+This is not the recommended `v0.1.0` personal public path.
+
+### OAuth Resource Server Profile B
+
+Use Profile B only when subject/client/scope identity is required.
+
+Profile B identity semantics must remain separate from Profile A `network-only` identity.
+
+## 11. Phase 6 release validation
+
+The authoritative release matrix is:
+
+[`../acceptance/phase-6-validation.md`](../acceptance/phase-6-validation.md)
+
+Stable release requires more than one successful start.
+
+Mandatory evidence includes:
+
+- 20/20 packaged lifecycle cycles;
+- Bridge/Cloudflare/native-worker crash recovery;
+- unrelated listener protection;
+- Git/transport credential failures;
+- timeout/process-tree cleanup;
+- secret/log canaries;
+- Windows path/encoding matrix;
+- dependency upgrade/rollback review.
+
+The repository source runner remains supporting evidence:
+
+```powershell
 pwsh -File .\scripts\validate-lifecycle.ps1 -Iterations 20
-~~~
+```
 
-On a clean host whose Tunnel profile has not been materialized, add
-`-InitializeFirst`. The validator intentionally does not expose `-Force`.
-Each iteration runs `start-all.ps1`, `doctor.ps1`, and `stop-all.ps1`, then
-stores redacted local evidence under `.local/validation/`. It exits non-zero at
-the first failed lifecycle step and attempts owned-process cleanup.
+but it does not replace the packaged-runtime release gate.
 
-The 20-cycle runner is only one part of Phase 6. Bridge/Tunnel/worker crashes,
-port conflicts, dependency failures, timeout/process-tree cleanup, secret-log
-canaries, path/encoding cases, and dependency rollback must also be validated.
-The authoritative matrix and current PASS/PENDING state are recorded in the
-[Phase 6 validation plan](../acceptance/phase-6-validation.md). Do not mark Phase 6 PASS
-from the lifecycle runner alone.
+## 12. Dependency rollback
 
-## Phase 5 local Bridge and remote transports
+Before a dependency upgrade:
 
-The local Bridge can be started for loopback-only validation with:
+- record the clean known-good commit;
+- preserve the lock file;
+- run the full automated suite and compatibility matrix;
+- compare the public 22-tool contract;
+- rerun affected Phase 6/7 security and reliability gates.
 
-~~~text
-pwsh -File .\scripts\start-bridge.ps1
-curl http://127.0.0.1:46200/healthz
-~~~
+If rollback is required:
 
-On Windows, the default codemcp worker runs natively through
-`codemcp_bridge.native_codemcp_worker`. The wrapper keeps upstream
-`codemcp==0.3.0` unchanged while applying the narrow Windows subprocess and
-newline compatibility fixes. WSL2 Ubuntu remains available with
-`codemcp.worker_mode = "wsl2"` and `scripts/bootstrap-wsl.ps1`. This is a local
-development server. The Phase 5 tunnel wrapper is configured separately and
-never points directly at codemcp.
+1. stop owned processes;
+2. restore known-good dependency metadata/lock;
+3. rebuild from the known-good commit;
+4. rerun `doctor`;
+5. rerun tests;
+6. rerun at least one packaged lifecycle cycle;
+7. reconcile any repository operation that was already `unknown`.
 
-Do not expose codemcp directly to ChatGPT. The startup order is Bridge,
-codemcp worker on demand, the selected transport (`cloudflared` for the
-recommended public path or `tunnel-client` for compatibility), then ChatGPT
-tool discovery. The Bridge is the only MCP server exposed to the transport.
-See the [Cloudflare network-trust setup guide](cloudflare-tunnel-setup.md) for
-the recommended path and the [Secure MCP Tunnel setup guide](tunnel-setup.md)
-for the optional compatibility path.
+Dependency rollback does not prove that an uncertain repository mutation was undone.
 
-### Recommended Cloudflare network-trust profile
+## 13. Release-state rule
 
-For a single-user ChatGPT Connector, configure `auth.mode = "none"` with `network_trust.mode = "cloudflare-chatgpt"` and a non-empty exact `allowed_hosts` list. Cloudflare WAF must enforce the current OpenAI Connector egress IP List before Tunnel ingress; the Bridge never trusts forwarded client-IP headers. This network allowlist is not authentication or user identity, and `doctor` reports `identity_level = network-only`.
+Cloudflare Profile A Phase A-H live acceptance is complete and the current connector is usable for controlled operation.
 
-For a packaged Windows EXE, the EXE installation directory is the default runtime home. Normal installed commands therefore do not need `--home`:
-
-~~~powershell
-.\codemcp-remote.exe doctor
-.\codemcp-remote.exe start
-~~~
-
-`--home` remains an explicit override, and `CODEMCP_HOME` overrides the packaged EXE-directory default when set.
-
-Do not expose `/healthz` as a public application endpoint. Keep the Bridge
-origin at `127.0.0.1:46200`. Profile B remains available with
-`auth.mode = "oauth-resource-server"` when subject/client/scope identity is
-required.
-
-SQLite state is stored at `.local/bridge.sqlite3` and is ignored by Git. A
-normal shutdown closes active sessions. After an unclean restart, active
-sessions become `blocked`; operations that were not dispatched become
-`failed`, while mutations that may have crossed the backend boundary become
-`unknown` and require explicit `operation_reconcile` before the project can be
-mutated again.
-
-Mutation tools require a caller-provided `client_request_id` and SHA-256
-`request_hash`. Repeating the same key and hash replays the persisted result;
-changing the hash is rejected. Commands configured with `approval =
-"required"` return a short-lived one-time token. The plaintext token is never
-stored in SQLite; use `approval_confirm` or `operation_cancel` while the
-operation is awaiting approval.
-
-Use `operation_status` to inspect the state and audit events of an operation.
-Do not manually edit the SQLite file while the Bridge is running.
-
-Before a mutation, the Bridge records a clean Git baseline and creates a
-Bridge-owned checkpoint ref. The mutation result contains the before/after
-branch and HEAD, changed files, and a bounded diff hash. The ref and metadata
-are persisted in `.local/bridge.sqlite3` and linked to the operation audit
-trail.
-
-`checkpoint_create` requires explicit approval and a clean worktree. To
-restore, first call `git_status`, then pass its current `head` as
-`expected_head` to `checkpoint_restore`; the restore requires a second explicit
-approval. A branch change, HEAD change, dirty worktree, missing checkpoint ref,
-or ref mismatch rejects the operation without running `git reset --hard`.
-The reset is issued only for a database-registered checkpoint and only when
-the registered project is the Git worktree root. Use `git_diff` with
-`checkpoint_id` to inspect a bounded, sensitive-path-filtered comparison.
-
-Secure MCP Tunnel local setup is implemented in Phase 5. Account-backed
-ChatGPT workspace association and remote tool-call acceptance remain an
-operator test documented in `tests/e2e/test_tunnel_contract.md`.
-
-## Local state
-
-Development state is kept under .local and is ignored by Git. Runtime secrets
-must not be stored in the repository or example configuration files.
+Stable `v0.1.0` is still blocked until the repository-wide Phase 6/7, supply-chain, strict clean-machine packaging and hosted CI gates pass.

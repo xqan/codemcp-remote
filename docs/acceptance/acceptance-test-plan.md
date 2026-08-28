@@ -1,120 +1,139 @@
-# Phase 7 Acceptance Test Plan — v0.1.0 Release Gate
+# Phase 7 Acceptance Test Plan — v0.1.0 Final Release Gate
 
-> Status: DRAFT / EXECUTION PENDING
-> Date: 2026-08-26
+> Status: **IN PROGRESS / FINAL RELEASE CANDIDATE PENDING**  
+> Updated: 2026-08-28  
 > Target: first stable `v0.1.0`
 
 ## 1. Purpose
 
-This plan is the final functional, security, reliability, documentation, and packaging gate for the first stable codemcp-remote release.
+This is the final functional, security, reliability, documentation, supply-chain and packaging gate for stable `v0.1.0`.
 
-A test listed here is not PASS merely because an implementation or lower-phase automated test exists. Stable release requires the applicable automated suites to pass from the release candidate commit and the real-host cases to have recorded evidence.
+A feature is not PASS merely because:
 
-## 2. Release candidate identity
+- code exists;
+- a lower-phase test exists;
+- the current private Connector works;
+- a historical release-candidate build succeeded.
 
-The final execution record MUST capture:
+Final approval requires evidence bound to the final release-candidate commit.
 
-- Git branch;
-- release candidate commit SHA;
-- working-tree status;
-- Python version;
-- `uv` version;
-- Git version;
-- PowerShell version;
-- Windows version;
-- WSL distribution/version;
-- pinned codemcp release/commit;
-- MCP SDK/package lock state;
-- Tunnel client version;
-- Bridge configuration path;
-- project-registry configuration path;
-- validation date.
+## 2. Mandatory release profile
 
-No secret values may be copied into the acceptance record.
-
-## 3. Preconditions
-
-Before Phase 7 execution:
-
-1. Stage 0 baseline checks are complete.
-2. Phase 6 validation is PASS.
-3. the release candidate worktree is clean.
-4. local runtime secrets are injected outside Git.
-5. `config/projects.toml` contains only test/acceptance projects appropriate for the run.
-6. at least:
-   - one real Java Git project; and
-   - one project with a front-end build/test command
-   are available as dedicated acceptance projects.
-7. destructive/recovery tests use disposable branches or fixture repositories.
-8. the threat model has no untracked P0 threat.
-
-### Phase 5.5.7 profile selection
-
-The recommended personal acceptance profile is **5.5.7A**:
+The default `v0.1.0` acceptance profile is Profile A:
 
 ```text
-ChatGPT Connector (Authentication = No authentication)
-  -> OpenAI Connector egress network
-  -> Cloudflare WAF IP List/rule
-  -> Cloudflare Tunnel
-  -> 127.0.0.1:46200
-  -> network-trust Bridge + existing project/security policies
+Windows 11
+  + packaged codemcp-remote.exe
+  + Git for Windows
+  + Native Windows local worker
+  + Cloudflare Tunnel
+  + ChatGPT Connector: Authentication = No authentication
+  + Cloudflare WAF / Connector egress allowlist
+  + Bridge network trust
 ```
 
-Profile A requires `auth.mode = "none"`, `network_trust.mode =
-"cloudflare-chatgpt"`, and non-empty exact `allowed_hosts`; it does not require
-`CODEMCP_RS_VERIFICATION_SECRET`. The Cloudflare allowlist is a network trust
-boundary, not authentication or user identity, and cannot identify a ChatGPT
-user, Workspace, account, or conversation. Profile B remains the optional
-advanced OAuth Resource Server profile with `mcp-rs-verification-v1`.
+Profile A security meaning:
 
-The local Phase A–G implementation and regression gates do not replace the live
-Phase H checks. The release record must separately prove Cloudflare WAF
-`BLOCK` for an ordinary public source, Connector `ALLOW`, stopped-tunnel
-behavior, the selected Connector contract, and cleanup.
+```text
+identity_level = network-only
+```
 
-## 4. Automated suite gate
+Cloudflare network trust is not user authentication and cannot identify a ChatGPT user, account, Workspace or conversation.
 
-Run the repository's complete registered test workflow from the release candidate.
+Optional compatibility paths are tested only to the extent they remain advertised:
 
-Current registered suite:
+- WSL2 source-mode worker fallback;
+- OpenAI Secure MCP Tunnel;
+- OAuth Resource Server Profile B.
+
+They do not redefine the mandatory installed-product baseline.
+
+## 3. Release-candidate identity
+
+The final acceptance record must capture:
+
+- Git branch;
+- exact release-candidate commit SHA;
+- clean worktree state;
+- `bridge/uv.lock` identity;
+- `codemcp==0.3.0` identity;
+- Python/uv/pwsh versions used for source/build CI;
+- Windows version used for installed acceptance;
+- Git for Windows version/path;
+- packaged worker mode;
+- Cloudflare client version/identity;
+- Bridge configuration identity;
+- project-registry configuration identity without exposing project roots publicly;
+- auth/network-trust profile;
+- installer SHA-256;
+- release ZIP SHA-256;
+- validation date.
+
+If WSL2 is separately tested, record its distribution/version as compatibility evidence only.
+
+No secret values may be copied into the release record.
+
+## 4. Preconditions
+
+Before final Phase 7 execution:
+
+1. Phase 6 mandatory Windows operations gate is PASS.
+2. Release-candidate worktree is clean.
+3. The candidate is built from the exact commit being accepted.
+4. Runtime secrets are injected/stored outside Git according to the documented protected path.
+5. Profile A Cloudflare WAF/network trust is configured.
+6. The final release artifact is available for clean-machine validation.
+7. At least one dedicated real Java Git project is available for acceptance.
+8. At least one project with a front-end build/test workflow is available for acceptance.
+9. Destructive/recovery tests use disposable branches or fixture repositories.
+10. Threat model has no untracked P0 threat.
+11. Current normative documents agree on the default architecture.
+
+## 5. Automated release-candidate gate
+
+Run the complete registered repository workflow from the release-candidate commit.
+
+Current full test scope:
 
 ```text
 pytest -q bridge/tests tests/integration
 ```
 
-Also run the configured formatting/lint/build checks required by the release workflow and:
+Also run the release-required:
+
+- Ruff lint;
+- Ruff format check;
+- package/build checks;
+- configuration checks;
+- compile/import checks used by CI;
+- `git diff --check` equivalent;
+- worktree cleanliness verification.
+
+### Latest local development evidence
+
+On 2026-08-28, after the open-source readiness/document alignment and transport-diagnostic fixes and before final release freeze, the registered test workflow reported:
 
 ```text
-git diff --check
+331 passed, 7 skipped
 ```
 
-Required result:
+The skips are explicit environment/profile gates: unavailable symlink permissions, compatibility-only WSL coverage, opt-in real installer acceptance, and the Windows Phase 6 live-host smoke when no loopback Bridge is visible from the registered test process. A skip is not release PASS evidence; final RC acceptance must either exercise the mandatory case or document why it is outside the release profile.
 
-- all tests PASS;
-- no unexpected skips for a P0 security case;
-- formatting/lint/build checks PASS;
-- `git diff --check` PASS;
-- worktree remains clean after read-only checks.
+This is useful development evidence only.
 
-### Current status
+The final RC must re-run the complete gate and justify every remaining skip.
 
-**LOCAL REGRESSION PASS (2026-08-26):** `312 passed, 6 skipped` from
-`bridge/tests` and `tests/integration`, with the project virtual environment
-available on PATH for tests that intentionally invoke a `python` command.
-The skipped cases are environment/profile-specific (symlink permission,
-non-applicable WSL host, or opt-in real installer acceptance). This local PASS
-does not close the live Phase H or final release gate.
+### Required result
 
-The full repository Ruff check and format validation pass after mechanical
-cleanup of the existing findings. This is a lint result only and does not
-prove the Phase H live Cloudflare or ChatGPT Connector boundary.
+- all mandatory tests PASS;
+- no unexplained P0 security skip;
+- lint/format/build PASS;
+- worktree remains clean;
+- test execution does not mutate release source state.
 
-## 5. MCP contract gate
+## 6. MCP contract gate
 
-The exposed tool set for the current release candidate must match the intentional public contract.
-
-Expected tools:
+The expected public surface is exactly 22 tools:
 
 1. `project_open`
 2. `project_status`
@@ -143,249 +162,370 @@ Required checks:
 
 - no arbitrary shell tool;
 - no caller-controlled executable path;
-- no generic runtime argv surface for registered commands;
-- no arbitrary absolute host path input that bypasses project registration;
-- mutation tools expose `client_request_id` / request-hash semantics;
-- high-risk operations preserve explicit approval where designed;
-- schema changes from the previous validated baseline are reviewed, not silently accepted.
+- no generic caller-controlled argv;
+- no arbitrary host path bypass;
+- no MCP project add/remove/reload/reconfigure;
+- mutation tools require canonical request identity/hash semantics;
+- approval remains explicit where designed;
+- schema differences from the accepted baseline are reviewed.
 
-Existing automated evidence includes the local MCP contract test in `bridge/tests/test_phase2_server.py`.
+Status: **PENDING FINAL-RC RE-RUN.**
 
-Status: **PENDING RELEASE-CANDIDATE RE-RUN.**
+## 7. Functional acceptance
 
-## 6. Functional acceptance
-
-Use the real acceptance projects and verify the normal workflow from ChatGPT through the supported Tunnel path.
+Use the real acceptance projects through the supported Profile A remote path.
 
 | ID | Flow | Required result | Status |
 |---|---|---|---|
-| F-01 | open registered project | correct project/session, branch/HEAD metadata | PENDING |
-| F-02 | project status | readiness and Git state are accurate | PENDING |
-| F-03 | list/read text files | content/metadata correct and bounded | PENDING |
-| F-04 | search code | relevant results returned; sensitive paths omitted | PENDING |
-| F-05 | create file | tracked change created once; replay is idempotent | PENDING |
-| F-06 | exact edit | only intended target change is committed | PENDING |
-| F-07 | whole-file write with SHA | matching baseline succeeds; stale baseline rejects | PENDING |
-| F-08 | move tracked file | source/destination semantics correct; no clobber | PENDING |
-| F-09 | delete tracked file | intended tracked file removed; untracked/sensitive targets reject | PENDING |
-| F-10 | create directory | Git-trackable marker behavior correct | PENDING |
-| F-11 | registered test/format/build | only configured command ID executes; output bounded | PENDING |
-| F-12 | git status/diff | changed paths and bounded diff correspond to actual Git state | PENDING |
-| F-13 | manual checkpoint | approval required and registered checkpoint created | PENDING |
-| F-14 | restore checkpoint | second approval + CAS restore succeeds only at expected HEAD | PENDING |
-| F-15 | operation status/audit | lifecycle and audit events reconstruct the operation | PENDING |
-| F-16 | cancel pending operation | cancellation applies only to eligible owned operation | PENDING |
-| F-17 | reconcile unknown | evidence-backed reconcile releases or preserves project block correctly | PENDING |
+| F-01 | open registered project | correct project/session/branch/HEAD metadata | PENDING |
+| F-02 | project status | readiness and Git state accurate | PENDING |
+| F-03 | list/read text | bounded correct content/metadata | PENDING |
+| F-04 | code search | relevant results; sensitive paths omitted | PENDING |
+| F-05 | create file | one intended committed change; replay idempotent | PENDING |
+| F-06 | exact edit | only intended target change | PENDING |
+| F-07 | whole-file write | matching SHA succeeds; stale SHA rejects | PENDING |
+| F-08 | move tracked file | no clobber; correct tracked semantics | PENDING |
+| F-09 | delete tracked file | intended tracked file only | PENDING |
+| F-10 | create directory | intended `.gitkeep`/Git-trackable behavior | PENDING |
+| F-11 | registered command | only configured command ID runs | PENDING |
+| F-12 | format/test wrappers | only registered expected-kind command runs | PENDING |
+| F-13 | git status/diff | bounded state corresponds to repository | PENDING |
+| F-14 | manual checkpoint | explicit approval + registered ref | PENDING |
+| F-15 | checkpoint restore | second approval + expected-HEAD CAS restore | PENDING |
+| F-16 | operation status/audit | lifecycle reconstructable | PENDING |
+| F-17 | cancel operation | only eligible owned operation cancelled | PENDING |
+| F-18 | reconcile unknown | evidence-backed transition preserves safety | PENDING |
+| F-19 | project add hot reload | local CLI add observed without Bridge/Tunnel/Connector restart | PENDING |
+| F-20 | project remove revocation | local CLI removal blocks new access and affected active sessions | PENDING |
 
-## 7. Security negative acceptance
+Project administration F-19/F-20 is executed locally, not through MCP.
 
-Every case below must fail closed or produce the explicitly designed `unknown`/reconcile state.
+## 8. Security negative acceptance
 
-| ID | Attack / invalid state | Required behavior | Existing evidence | Release status |
-|---|---|---|---|---|
-| S-01 | unknown `project_id` | `PROJECT_NOT_ALLOWED` | Phase 2 policy/server tests | PENDING RE-RUN |
-| S-02 | absolute/arbitrary path | reject before filesystem access | path-policy tests | PENDING |
-| S-03 | `../` traversal | `PATH_ESCAPE` | Phase 2 policy/server tests | PENDING RE-RUN |
-| S-04 | symlink escape | `PATH_ESCAPE` | symlink policy test | PENDING RE-RUN |
-| S-05 | Windows junction/reparse escape | `PATH_ESCAPE` | implementation path check | PENDING REAL WINDOWS |
-| S-06 | `.env` / private key / token path | `SENSITIVE_PATH` | policy/server tests | PENDING RE-RUN |
-| S-07 | sensitive path through search | excluded before backend and after result | search regression test | PENDING RE-RUN |
-| S-08 | sensitive path through diff | reject/redact before return | policy Git diff test | PENDING RE-RUN |
-| S-09 | binary/oversized file | bounded rejection | server contract tests | PENDING RE-RUN |
-| S-10 | unregistered command | `COMMAND_NOT_ALLOWED` | server contract test | PENDING RE-RUN |
-| S-11 | command drift / injected runtime args | cannot execute outside configured argv | policy contract | PENDING |
-| S-12 | dirty workspace mutation | `WORKSPACE_DIRTY` unless both policy layers intentionally opt out | policy/server tests | PENDING RE-RUN |
-| S-13 | forged request hash | reject before operation side effect | canonical-hash test | PENDING RE-RUN |
-| S-14 | request ID reused with different hash | `IDEMPOTENCY_CONFLICT` | persistence test | PENDING RE-RUN |
-| S-15 | wrong approval token | reject | persistence test | PENDING RE-RUN |
-| S-16 | expired approval | reject | approval service/test coverage | PENDING |
-| S-17 | approval reuse | `APPROVAL_ALREADY_USED` | persistence test | PENDING RE-RUN |
-| S-18 | cross-session operation/approval | hide/reject foreign operation | server reconciliation tests | PENDING RE-RUN |
-| S-19 | cross-project operation/approval | hide/reject foreign project scope | scope tests + Phase 7 case | PENDING |
-| S-20 | external branch/HEAD change before rollback | CAS conflict; no reset | Phase 4 suite | PENDING RE-RUN |
-| S-21 | dirty worktree before rollback | reject; no reset | Phase 4 suite | PENDING RE-RUN |
-| S-22 | checkpoint ref tampering/missing ref | reject; no unregistered reset | Phase 4 suite | PENDING RE-RUN |
-| S-23 | repository prompt injection | cannot widen Bridge authorization | architectural boundary | PENDING RED-TEAM |
-| S-24 | non-loopback server configuration | invalid/fail closed according to config validation | server/settings checks | PENDING RE-RUN |
-| S-25 | runtime/model credential canary | absent/redacted from logs and evidence | Phase 6 matrix | PENDING |
-| S-26 | hidden model/provider egress | no Bridge/codemcp model provider traffic | dependency/source/runtime review | PENDING |
-| S-27 | wrong/missing Host or forwarded-host bypass | exact Host boundary rejects; forwarded headers cannot authorize | Phase C runtime matrix | PASS LOCAL / PENDING LIVE |
-| S-28 | invalid/present Origin | missing accepted; present non-exact origin rejected | Phase C runtime matrix | PASS LOCAL / PENDING LIVE |
-| S-29 | ordinary public source reaches Bridge | Cloudflare WAF blocks before Tunnel/Bridge with `403` | deployment runbook | PENDING PHASE H |
+Every case must fail closed or enter the explicitly designed `unknown` state.
 
-Any bypass of S-01 through S-29 that grants broader filesystem, command, approval, identity, secret, network, or destructive Git capability is a release blocker.
+| ID | Attack / invalid state | Required behavior | Status |
+|---|---|---|---|
+| S-01 | unknown `project_id` | `PROJECT_NOT_ALLOWED` | PENDING |
+| S-02 | arbitrary absolute path | reject before unauthorized filesystem access | PENDING |
+| S-03 | `../` traversal | `PATH_ESCAPE` | PENDING |
+| S-04 | symlink escape | fail closed | PENDING |
+| S-05 | Windows junction/reparse escape | fail closed | PENDING REAL WINDOWS |
+| S-06 | secret path | `SENSITIVE_PATH`/equivalent denial | PENDING |
+| S-07 | secret through search | excluded before/after backend | PENDING |
+| S-08 | sensitive content through diff | reject/redact | PENDING |
+| S-09 | binary/oversized file | bounded rejection | PENDING |
+| S-10 | unregistered command | `COMMAND_NOT_ALLOWED` | PENDING |
+| S-11 | runtime argv/executable injection | impossible through public schema | PENDING |
+| S-12 | dirty workspace mutation | fail according to policy | PENDING |
+| S-13 | forged canonical request hash | reject before side effect | PENDING |
+| S-14 | request ID reused with changed input/hash | idempotency conflict | PENDING |
+| S-15 | wrong approval token | reject | PENDING |
+| S-16 | expired approval | reject | PENDING |
+| S-17 | reused approval | reject | PENDING |
+| S-18 | cross-session operation/approval | hide/reject foreign scope | PENDING |
+| S-19 | cross-project operation/approval | hide/reject foreign scope | PENDING |
+| S-20 | external branch/HEAD change before restore | CAS conflict; no reset | PENDING |
+| S-21 | dirty worktree before restore | reject; no reset | PENDING |
+| S-22 | checkpoint ref tamper/missing | reject; no arbitrary reset | PENDING |
+| S-23 | repository prompt injection | cannot widen Bridge authorization | PENDING RED-TEAM |
+| S-24 | non-loopback Bridge config | invalid/fail closed | PENDING |
+| S-25 | secret/log canary | absent/redacted from logs/evidence | PENDING PHASE 6 |
+| S-26 | hidden model/provider egress | absent | PENDING |
+| S-27 | wrong/missing Host | exact host boundary rejects | PENDING LIVE RECHECK |
+| S-28 | invalid Origin when present | reject non-exact origin | PENDING LIVE RECHECK |
+| S-29 | ordinary public source | Cloudflare blocks before Bridge | PENDING FINAL LIVE RECHECK |
+| S-30 | forwarded-IP spoof | forwarded headers cannot authorize | PENDING |
+| S-31 | project registry invalid update | last-known-good retained; fail closed | PENDING |
+| S-32 | project root redirect | rejected; no silent authorization transfer | PENDING |
+| S-33 | MCP project-admin attempt | no public admin tool exists | PENDING CONTRACT |
 
-## 8. Reliability and recovery acceptance
+Any bypass that grants broader filesystem, command, approval, Git, identity, secret, network or project-administration capability is a release blocker.
+
+## 9. Reliability and recovery acceptance
 
 | ID | Fault | Required result | Status |
 |---|---|---|---|
-| R-01 | duplicate successful mutation request | persisted result replayed; no duplicate edit | PENDING |
-| R-02 | same request ID / changed hash | conflict, no second side effect | PENDING |
-| R-03 | Bridge restart before dispatch | operation classified failed; session recovery explicit | PENDING |
-| R-04 | Bridge restart after backend boundary | operation classified `unknown` when outcome uncertain | PENDING |
-| R-05 | approval pending during restart | approval cancelled; plaintext token absent | PENDING |
-| R-06 | Tunnel disconnect | no transparent mutation replay | PENDING REAL TUNNEL |
-| R-07 | worker crash | failure/unknown state preserves safe project block | PENDING REAL WORKER |
-| R-08 | registered command timeout | bounded timeout; owned process tree terminated or outcome marked uncertain | PENDING |
-| R-09 | external Git race | mutation/rollback detects changed state | PENDING |
-| R-10 | reconcile verified not-applied mutation | transition releases lock only with scoped evidence flow | PENDING |
-| R-11 | reconcile verified applied mutation after restart | successor-session recovery follows designed constraints | PENDING |
-| R-12 | 20 start/doctor/stop cycles | 20/20 with no owned process/listener residue | PENDING PHASE 6 |
+| R-01 | duplicate successful mutation | persisted result replay; no duplicate edit | PENDING |
+| R-02 | same request ID / changed hash | conflict; no second side effect | PENDING |
+| R-03 | Bridge restart before dispatch | operation fails safely | PENDING |
+| R-04 | Bridge restart after uncertain backend boundary | operation becomes `unknown` | PENDING |
+| R-05 | approval pending during restart | plaintext approval unavailable; fail closed | PENDING |
+| R-06 | Cloudflare Tunnel disconnect | no transparent mutation replay | PENDING REAL TUNNEL |
+| R-07 | Native Windows worker crash | failure/unknown preserves project safety block | PENDING REAL WORKER |
+| R-08 | registered command timeout | bounded timeout + owned process-tree cleanup/unknown | PENDING |
+| R-09 | external Git race | mutation/restore detects changed state | PENDING |
+| R-10 | reconcile verified not-applied | releases block only with scoped evidence | PENDING |
+| R-11 | reconcile verified applied | successor recovery follows designed constraints | PENDING |
+| R-12 | 20 packaged start/doctor/status/stop cycles | 20/20 with no owned residue | PENDING PHASE 6 |
+| R-13 | invalid project-registry generation | keep last-known-good | PENDING |
+| R-14 | remove/re-add project ID | old sessions do not regain authorization | PENDING |
 
-The implementation must prefer an explicit unavailable/blocked/unknown result over guessing that a mutation did or did not occur.
+Prefer explicit unavailable/blocked/unknown results over guessing.
 
-## 9. Real-project acceptance
+## 10. Real-project acceptance
 
 Run at least ten complete remote modification tasks, not ten isolated tool calls.
 
 Minimum distribution:
 
-- five tasks against the Java acceptance project;
-- three tasks against the project containing a front-end workflow;
+- five tasks against a real Java acceptance project;
+- three tasks against a project with front-end workflow;
 - two tasks exercising recovery/checkpoint/reconcile behavior.
 
 For each task record:
 
-- task ID and project ID;
+- task ID/project ID;
 - starting branch/HEAD;
 - session ID;
 - relevant operation IDs;
-- requested change summary;
-- commands executed by registered ID;
+- change summary;
+- command IDs executed;
 - ending branch/HEAD;
 - changed-file list;
 - diff review result;
-- whether approval was used;
-- whether any `unknown` state occurred;
-- final test result.
+- approval usage;
+- unknown/reconcile status;
+- final project test/build result.
 
-Do not copy proprietary source contents into the public acceptance record.
+Do not copy proprietary source content into the public acceptance report.
 
-Required result:
+Required:
 
-- 10/10 tasks have explainable operation/audit/Git lineage;
-- no unexplained side effect;
-- no unexpected file outside the intended scope;
-- all project-specific verification commands pass.
+```text
+10/10 tasks
+```
 
-Status: **PENDING.**
-
-## 10. ChatGPT-only reasoning boundary
-
-Verify from the release candidate:
-
-- Bridge source/dependencies contain no configured model provider or hidden agent loop;
-- runtime Bridge configuration denies model calls/model egress as designed;
-- codemcp remains an execution backend rather than a second reasoning agent;
-- one user task is reconstructable as explicit ChatGPT MCP calls and Bridge operations;
-- repository prompt text cannot authorize a privileged Bridge action by itself.
-
-Network observation should distinguish expected Tunnel control-plane traffic from prohibited model/provider traffic.
+with explainable operation/audit/Git lineage and no unexplained side effect.
 
 Status: **PENDING.**
 
-## 11. Documentation acceptance
+## 11. ChatGPT-only reasoning boundary
 
-Required public documents:
+Verify from final RC:
 
-- [x] `LICENSE` — GNU AGPL v3, project SPDX `AGPL-3.0-only`
+- Bridge has no configured model provider;
+- Bridge has no hidden agent loop;
+- codemcp remains an execution backend;
+- repository content cannot authorize a privileged action;
+- each multi-step user task is reconstructable from explicit ChatGPT MCP calls;
+- network observation shows no prohibited model/provider egress from Bridge/codemcp.
+
+Expected Tunnel/control-plane traffic is not model egress.
+
+Status: **PENDING.**
+
+## 12. Network-trust live boundary
+
+Profile A Phase A-H already has successful live evidence, including:
+
+- real ChatGPT Connector access;
+- 22-tool discovery;
+- project access;
+- mutation;
+- identical replay;
+- explicit approval;
+- checkpoint/CAS restore;
+- exact baseline recovery;
+- ordinary-source Cloudflare Block;
+- ChatGPT-source Allow.
+
+Final release acceptance must recheck that the current final RC has not invalidated:
+
+- exact Host boundary;
+- if-present Origin boundary;
+- network-only principal semantics;
+- ordinary public source Block;
+- ChatGPT Connector access.
+
+Do not reinterpret this as user authentication.
+
+## 13. Documentation acceptance
+
+Current public/normative documents:
+
+- [x] `LICENSE` / `AGPL-3.0-only`
 - [x] `SECURITY.md`
 - [x] `docs/architecture/security-model.md`
 - [x] `docs/architecture/threat-model.md`
+- [x] `docs/architecture/architecture.md`
+- [x] `docs/implementation-plan.md`
 - [x] `docs/acceptance/phase-6-validation.md`
 - [x] `docs/acceptance/acceptance-test-plan.md`
-- [x] public-user README and Cloudflare network-trust runbook restructured
-- [ ] public-user documentation clean-machine verified
-- [ ] `CONTRIBUTING.md`
-- [ ] `CODE_OF_CONDUCT.md`
-- [ ] `CHANGELOG.md`
-- [ ] final third-party license/notices decision
-- [ ] final known-limitations section matches implementation
-- [ ] release instructions + SHA-256 verification documented
+- [x] public README
+- [x] Windows build/install/use guide
+- [x] operations runbook
+- [x] codemcp pinned-baseline guide
+- [x] Cloudflare network-trust guide
+- [x] `CONTRIBUTING.md`
+- [x] `CODE_OF_CONDUCT.md`
+- [x] `CHANGELOG.md`
+- [x] `.github` CI / issue / PR / Dependabot configuration
+- [ ] final third-party notices decision
+- [ ] clean-machine README execution PASS
+- [ ] final known-limitations cross-check
+- [ ] final release notes/checksum verification against final RC
 
-Documentation commands must be copied and executed on a clean supported machine before PASS.
+Documentation must not claim:
 
-## 12. Secrets and supply-chain acceptance
+- WSL2 is required for normal installed mutation;
+- Native Windows mutation is unsupported;
+- Secure MCP Tunnel is the mandatory default remote path;
+- Profile A provides human user identity.
 
-Before the release tag:
+## 14. Secrets and supply-chain acceptance
 
-- scan tracked working tree for credentials;
-- scan complete Git history for credentials;
-- scan `.github/`, scripts, configs, docs, examples, tests, fixtures;
-- inspect release artifact after packaging;
-- audit locked dependencies for known vulnerabilities;
-- review third-party license compatibility/notices;
-- confirm no local `config/projects.toml`, Tunnel profile, `.local/`, logs, SQLite database, or runtime key is packaged;
-- verify `codemcp==0.3.0` baseline provenance remains intentional.
+Before tag:
 
-Status: **PENDING STAGE 6.**
+- [ ] scan tracked working tree;
+- [ ] scan complete Git history;
+- [ ] scan `.github/`, scripts, configs, docs, tests and fixtures;
+- [ ] scan final release artifact;
+- [ ] audit locked dependencies for known vulnerabilities;
+- [ ] review dependency license compatibility/notices;
+- [ ] confirm local project registry/runtime logs/SQLite/secret data are not packaged;
+- [ ] verify `codemcp==0.3.0` provenance remains intentional.
 
-## 13. Packaging and integrity acceptance
+If a real secret is discovered:
 
-The release workflow must produce:
+1. revoke/rotate;
+2. clean history;
+3. rescan;
+4. rebuild candidate;
+5. rerun affected gates.
 
-- source/release artifact appropriate to the published installation path;
-- deterministic or documented build procedure;
-- SHA-256 checksum file;
+Status: **PENDING.**
+
+## 15. Packaging and clean-machine acceptance
+
+The final release workflow must produce from the exact accepted commit:
+
+- Windows EXE payload;
+- `codemcp-remote-setup.exe`;
+- release ZIP;
+- SHA-256 checksum/manifest;
 - release notes;
 - known limitations;
-- exact Git tag/commit identity.
+- exact Git identity.
 
-From the produced artifact on a clean Windows 11 + WSL2 environment:
+On a clean Windows 11 host:
 
-1. follow README only;
-2. install/sync dependencies;
-3. create local project configuration from example;
-4. initialize local Tunnel profile without storing its runtime key;
-5. run doctor;
-6. start services;
-7. discover the intended MCP tools;
-8. complete a safe read and one controlled mutation;
-9. stop services;
-10. verify checksum and no unexpected runtime residue.
+1. verify installer SHA-256;
+2. install;
+3. isolate product runtime PATH;
+4. verify Python/uv/pwsh are not required/visible;
+5. verify Git prerequisite;
+6. verify `worker_mode=local`;
+7. initialize Profile A;
+8. verify DPAPI-backed transport secret;
+9. create/register disposable `phase5-clean` project;
+10. start Bridge + Cloudflare Tunnel;
+11. connect real ChatGPT Connector;
+12. read acceptance file;
+13. perform deterministic mutation;
+14. verify identical replay;
+15. restore via approval/checkpoint CAS;
+16. prove exact original baseline and clean worktree;
+17. stop;
+18. cleanup/uninstall;
+19. verify expected preserved user data contract;
+20. scan artifact/evidence for secrets.
 
-Status: **PENDING STAGE 7.**
+The previous live Phase H use of a temporary file in the real `codemcp-remote` repository does not replace this strict disposable-project clean-machine gate.
 
-## 14. Final Release Gate
+Status: **PENDING STRICT PASS.**
 
-Stable `v0.1.0` is allowed only when:
+## 16. GitHub hosted acceptance
+
+Repository-side governance is already implemented.
+
+Before stable release:
+
+- [ ] first hosted CI run passes on Ubuntu and Windows;
+- [ ] pull requests automatically receive required checks;
+- [ ] Dependabot recognizes uv and GitHub Actions;
+- [ ] branch/ruleset protects the release branch using required checks;
+- [ ] issue forms render;
+- [ ] PR template renders;
+- [ ] workflow permissions remain least-privilege.
+
+Local workflow files alone do not establish hosted PASS.
+
+## 17. Signing decision
+
+Current historical candidate evidence records Authenticode as:
+
+```text
+NotSigned
+```
+
+Before final release, explicitly choose and document one:
+
+- sign the installer/release executable with an appropriate code-signing certificate; or
+- publish unsigned artifacts with the limitation and expected Windows/SmartScreen trust impact clearly disclosed.
+
+Do not imply signed provenance when the artifact is unsigned.
+
+## 18. Final Release Gate
+
+Stable `v0.1.0` requires:
 
 | Gate | Required state |
 |---|---|
-| Automated suite | PASS |
-| MCP contract | PASS |
-| Functional | PASS |
+| Release identity | VERIFIED |
+| Phase 6 Windows operations | PASS |
+| Automated suite/lint/format/build | PASS |
+| 22-tool MCP contract | PASS |
+| Functional matrix | PASS |
 | Security negative matrix | PASS |
-| Reliability / recovery | PASS |
-| Phase 6 operations | PASS |
+| Reliability/recovery matrix | PASS |
 | 10 real remote tasks | PASS |
 | ChatGPT-only boundary | PASS |
+| Profile A live boundary | PASS |
 | Documentation | PASS |
-| Secrets / supply chain | PASS |
-| Packaging / clean machine | PASS |
+| Secrets | PASS |
+| Dependency/license supply chain | PASS |
+| Strict clean-machine packaging | PASS |
+| Hosted GitHub CI/ruleset | PASS |
 | SHA-256 integrity | PASS |
-| Working tree / release commit | CLEAN / VERIFIED |
+| Signing decision | RECORDED |
+| Worktree/tag identity | CLEAN / VERIFIED |
 
-Any P0 blocker, unexplained skip, unresolved secret exposure, unsafe mutation ambiguity, or mismatch between documentation and executable behavior blocks the stable tag.
+Any P0 blocker, unexplained skip, unresolved secret exposure, unsafe mutation ambiguity, documentation/implementation mismatch or artifact identity mismatch keeps the decision:
 
-## 15. Sign-off record
+```text
+BLOCKED
+```
 
-Fill this only from the final release candidate:
+## 19. Final sign-off record
+
+Fill only from the final release candidate:
 
 ```text
 release_candidate_commit:
+release_candidate_branch:
 phase_6_status:
 automated_suite:
+mcp_contract:
+functional_matrix:
 security_matrix:
 reliability_matrix:
 real_task_count:
+chatgpt_only_boundary:
+network_trust_live:
+documentation:
 secret_scan:
 dependency_audit:
+license_review:
 clean_machine_install:
-artifact_sha256:
+cleanup_uninstall:
+hosted_ci:
+artifact_installer_sha256:
+artifact_zip_sha256:
+authenticode:
 known_blockers:
 release_decision: BLOCKED | APPROVED
 validated_at:
 ```
 
-The default decision is `BLOCKED` until every mandatory field is backed by evidence.
+Default decision is `BLOCKED` until every mandatory field is backed by evidence.

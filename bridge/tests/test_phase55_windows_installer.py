@@ -38,6 +38,13 @@ def test_provider_neutral_packaging_stages_both_remote_transports() -> None:
     assert "prepare-cloudflared.ps1" in script
     assert "prepare-tunnel-client.ps1" in script
     assert 'recommended_provider = "cloudflare"' in script
+    assert 'codemcpVersion = "0.3.0"' in script
+    assert "a56123f6e1544aed55dbfd1b4946fc2583222b4104a82d8a2171d8c1621cd32a" in script
+    assert "a28161aa86176cebd1861e7c134ac98ab1762849d75b46915e0a9fc4ef6efae7" in script
+    assert "Distribution metadata License field: MIT" in script
+    assert "Bundled License-File: Apache License 2.0" in script
+    assert "THIRD_PARTY\\codemcp\\LICENSE.txt" in script
+    assert 'Join-Path $codemcpThirdPartyDir "NOTICE.txt"' in script
     assert "THIRD_PARTY\\cloudflared\\LICENSE" in script
     assert "THIRD_PARTY\\tunnel-client\\LICENSE" in script
     assert "THIRD_PARTY_NOTICES.txt" in script
@@ -53,6 +60,8 @@ def test_installer_build_rejects_secrets_and_smokes_upgrade_preservation() -> No
     assert 'Join-Path $installedLocation "cloudflared.exe"' in script
     assert 'Join-Path $installedLocation "codemcp-start.cmd"' in script
     assert 'Join-Path $installedLocation "codemcp-stop.cmd"' in script
+    assert 'Join-Path $installedLocation "THIRD_PARTY\\codemcp\\LICENSE.txt"' in script
+    assert 'Join-Path $installedLocation "THIRD_PARTY\\codemcp\\NOTICE.txt"' in script
     assert "installed cloudflared checksum differs from the verified staging payload" in script
     assert "silent installer upgrade smoke failed" in script
     assert "installer upgrade removed user runtime data" in script

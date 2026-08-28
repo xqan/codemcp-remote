@@ -41,7 +41,7 @@ The local operator account, trusted Bridge installation, trusted local configura
 | Destructive rollback | Caller tries to overwrite newer work | checkpoint scope/ref verification, expected HEAD, clean worktree, second approval, safety checkpoint | Local manual Git actions remain outside Bridge control | branch/HEAD mismatch + dirty-worktree rollback tests |
 | Log/audit leakage | errors/results contain token or source secret | token hashes persisted; diagnostics must redact runtime key; bounded summaries | Unknown command output may contain sensitive material | log corpus scan and explicit credential canaries |
 | Model/provider egress | Bridge/dependency attempts model call | project policy denies model calls; no provider is part of intended Bridge design | A malicious/compromised dependency can make arbitrary network calls unless host network policy blocks it | dependency/source review + runtime network observation |
-| Tunnel credential theft | local profile/log/history exposes control-plane key | key passed by environment reference; example docs prohibit storing it in repo/profile/logs | Compromised process/local user can read environment/process memory | secret scan + diagnostic output tests |
+| Transport credential theft | local state/log/history exposes Cloudflare `TUNNEL_TOKEN`, optional OAuth verification secret, or Secure MCP control-plane key | Profile A supports DPAPI-backed tunnel secret storage; optional compatibility credentials remain outside repo/profile/logs; diagnostics redact token forms | Compromised process/local user can still read accessible process memory or protected local state under the same OS account | secret scan + diagnostic output tests |
 | Dependency/supply-chain compromise | PyPI/upstream package or local interpreter is compromised | pin `codemcp==0.3.0`; lock file; planned dependency audit/CI | Version pinning does not prove package integrity or prevent compromise | dependency audit, lock review, release build provenance checks |
 | Compromised ChatGPT workspace | attacker can send otherwise valid calls through connected workspace | Bridge still enforces local project/path/command/approval/Git policy | Policy-valid operations may still be harmful; v0.1.0 has no independent user identity/RBAC | document limitation; test that Tunnel identity does not bypass Bridge |
 | Cloudflare allowlist mistaken for user authentication | operator assumes an allowed Connector egress IP identifies a person or conversation | Cloudflare WAF is documented and enforced as a network trust boundary; Profile A reports `identity_level = network-only`; Profile B is required for subject/client/scope identity | Any caller inside an allowed egress range shares the same network trust profile | deployment runbook and live Security Events must distinguish network admission from identity |
@@ -70,7 +70,7 @@ The table below maps each release-blocking threat to current evidence. A mapping
 
 | P0 threat | Current automated evidence | Remaining release validation |
 |---|---|---|
-| Project-root escape | `test_phase2_policy.py::test_registry_rejects_unregistered_escape_and_sensitive_paths`; `test_phase2_server.py::test_local_mcp_contract_and_policy_rejections` | Windows junction and WSL symlink escape matrix |
+| Project-root escape | `test_phase2_policy.py::test_registry_rejects_unregistered_escape_and_sensitive_paths`; `test_phase2_server.py::test_local_mcp_contract_and_policy_rejections` | Native Windows junction/reparse and available symlink escape matrix; WSL symlink coverage is compatibility-only when that worker mode is advertised |
 | Arbitrary command / argument injection | `test_phase2_policy.py::test_policy_rejects_dirty_workspace_and_command_drift`; unregistered-command rejection in `test_local_mcp_contract_and_policy_rejections` | Explicit public MCP schema check proving no runtime argv/shell surface |
 | Secret read/search/diff | sensitive path + sensitive diff checks in `test_phase2_policy.py`; `test_phase2_server.py::test_code_search_excludes_sensitive_paths_before_and_after_grep` | Phase 7 secret corpus including non-obvious filenames and command-output canaries |
 | Approval bypass / cross-scope replay | `test_phase3_persistence.py::test_approval_is_one_time_and_token_is_not_persisted`; approval lifecycle in `test_phase3_idempotency_approval_and_operation_status`; foreign-session operation rejection in `test_phase3_reconcile_unknown_mutation_releases_project_lock` | Explicit cross-project approval negative case |
@@ -94,7 +94,7 @@ Availability failures are acceptable when the safe alternative is to guess about
 
 ## Validation ownership
 
-`docs/acceptance/acceptance-test-plan.md` will become the executable release matrix. Until that file is completed and all P0 paths pass, this threat model is a design record rather than proof of release security.
+`docs/acceptance/acceptance-test-plan.md` is the executable release matrix. Until every mandatory P0 path in that plan has final release-candidate evidence, this threat model remains a design record rather than proof of release security.
 
 Every new high-privilege MCP tool must add:
 

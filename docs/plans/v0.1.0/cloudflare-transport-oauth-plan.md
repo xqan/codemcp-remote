@@ -8,7 +8,7 @@ Repository: `codemcp-remote`
 
 External dependency: a separately developed, general-purpose `mcp-auth-server` project.
 
-Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side OAuth Resource Server integration through Phase 5.5.6 is complete. That implementation is retained as the optional advanced OAuth profile. The earlier Phase 5.5.7 RFC 9728 metadata/challenge and managed reinstall fixes remain historical acceptance evidence; they are not invalidated by the new personal-deployment profile. The live OAuth staging issuer is `https://auth-staging.quickclip.cc`; the Cloudflare-published MCP resource is `https://codemcp.quickclip.cc/mcp`.
+Dependency status: `mcp-auth-server` Phase 4.1 has FROZEN Resource Server Verification Contract v1 (`mcp-rs-verification-v1`), and repository-side OAuth Resource Server integration through Phase 5.5.6 is complete. That implementation is retained as the optional advanced OAuth profile. The earlier Phase 5.5.7 RFC 9728 metadata/challenge and managed reinstall fixes remain historical acceptance evidence; they are not invalidated by the new personal-deployment profile. The live OAuth staging issuer and Cloudflare-published MCP resource were validated against operator-owned staging endpoints; exact historical endpoint values remain only in historical acceptance evidence.
 
 The sections below retain historical Phase 5.5 implementation evidence. The Phase A contract in the next section is authoritative for the remaining work: Cloudflare network trust is the recommended single-user path, while OAuth Resource Server interoperability remains an optional advanced/enterprise path.
 
@@ -33,7 +33,7 @@ This section supersedes earlier “not started” statements retained in the his
 ChatGPT Connector (Authentication = No authentication)
   -> OpenAI/ChatGPT Connector egress network
   -> Cloudflare Edge/WAF IP List + whole-host block rule
-  -> https://codemcp.quickclip.cc/mcp
+  -> https://mcp.example.com/mcp
   -> Cloudflare Tunnel
   -> 127.0.0.1:46200
   -> codemcp-remote network-trusted Bridge
@@ -48,7 +48,7 @@ mode = "none"
 
 [network_trust]
 mode = "cloudflare-chatgpt"
-allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_hosts = ["mcp.example.com"]
 allowed_origins = ["https://chatgpt.com"] # optional, if-present validation
 ```
 
@@ -153,7 +153,7 @@ mode = "none"
 
 [network_trust]
 mode = "cloudflare-chatgpt"
-allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_hosts = ["mcp.example.com"]
 allowed_origins = ["https://chatgpt.com"] # optional if-present validation
 ```
 
@@ -163,7 +163,7 @@ The existing OAuth fields remain in `[auth]` for `oauth-resource-server`. Unknow
 
 The current transport manager exposes a generic authenticator hook but has no network-trust middleware. The Bridge does not currently perform exact, case-insensitive Host canonicalization or optional Origin validation. It must not trust `X-Forwarded-Host`, `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*` as runtime authorization evidence.
 
-The required Host policy is exact hostname matching after canonicalization: `codemcp.quickclip.cc` and `codemcp.quickclip.cc:443` are accepted; localhost, loopback, other hosts, subdomains, suffix attacks, wildcard entries, and `X-Forwarded-Host` overrides are rejected. Origin is an if-present check: missing Origin is accepted, exact `https://chatgpt.com` and `https://chatgpt.com:443` are accepted, and HTTP, subdomain, suffix-attack, `null`, or malformed origins are rejected.
+The required Host policy is exact hostname matching after canonicalization: `mcp.example.com` and `mcp.example.com:443` are accepted; localhost, loopback, other hosts, subdomains, suffix attacks, wildcard entries, and `X-Forwarded-Host` overrides are rejected. Origin is an if-present check: missing Origin is accepted, exact `https://chatgpt.com` and `https://chatgpt.com:443` are accepted, and HTTP, subdomain, suffix-attack, `null`, or malformed origins are rejected.
 
 #### P0 — Replay and session identity need a common auth-context design
 
@@ -196,7 +196,7 @@ The exact serialization must follow existing delimiter/identifier constraints. O
 The repository contains no OpenAI Connector IP ranges, which is correct, but it also has no authoritative runbook for the Cloudflare IP List and WAF rule requested by Profile A. Phase F must document:
 
 1. a Cloudflare IP List named `chatgpt_connectors` populated from the official OpenAI Connector egress manifest;
-2. a whole-host block rule equivalent to `(http.host eq "codemcp.quickclip.cc" and not ip.src in $chatgpt_connectors)`;
+2. a whole-host block rule equivalent to `(http.host eq "mcp.example.com" and not ip.src in $chatgpt_connectors)`;
 3. the fact that this is a network restriction, not user authentication;
 4. manual provisioning first if the official manifest contract is not stable enough for a parser;
 5. optional future sync tooling with strict schema/CIDR validation, non-empty/diff/dry-run checks, environment-only scoped API credentials, and no runtime dependency on Cloudflare credentials.
@@ -271,7 +271,7 @@ mode = "none"
 
 [network_trust]
 mode = "cloudflare-chatgpt"
-allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_hosts = ["mcp.example.com"]
 allowed_origins = ["https://chatgpt.com"]
 ```
 

@@ -188,7 +188,7 @@ Initial state:
 Local operator runs:
 
 ```powershell
-.\codemcp-remote.exe project add alex-runtime "D:\Documents\CodexProject\alex-runtime"
+.\codemcp-remote.exe project add my-project "D:\workspace\my-project"
 ```
 
 Expected behavior:
@@ -198,7 +198,7 @@ Expected behavior:
 3. Running Bridge sees the changed fingerprint on the next project-authorized request.
 4. Candidate configuration is fully validated.
 5. Registry snapshot is atomically replaced.
-6. `project_open("alex-runtime")` succeeds immediately.
+6. `project_open("my-project")` succeeds immediately.
 7. Tunnel and ChatGPT Connector remain connected.
 
 Desired CLI response fields:
@@ -206,8 +206,8 @@ Desired CLI response fields:
 ```json
 {
   "status": "ok",
-  "project_id": "alex-runtime",
-  "root": "D:\\Documents\\CodexProject\\alex-runtime",
+  "project_id": "my-project",
+  "root": "D:\\workspace\\my-project",
   "reload": "automatic",
   "restart_required": false
 }
@@ -220,12 +220,12 @@ The CLI must not call a privileged Bridge reload API to achieve this.
 Local operator runs:
 
 ```powershell
-.\codemcp-remote.exe project remove alex-runtime --expected-root "D:\Documents\CodexProject\alex-runtime"
+.\codemcp-remote.exe project remove my-project --expected-root "D:\workspace\my-project"
 ```
 
 Expected behavior after the next refresh:
 
-- new `project_open("alex-runtime")` -> `PROJECT_NOT_ALLOWED`;
+- new `project_open("my-project")` -> `PROJECT_NOT_ALLOWED`;
 - new operations for that project -> rejected;
 - existing sessions for that removed project MUST NOT preserve authorization.
 
@@ -622,30 +622,30 @@ At minimum:
 The feature is complete only when the following user flow works:
 
 ```powershell
-.\codemcp-remote.exe project add alex-runtime "D:\Documents\CodexProject\alex-runtime"
+.\codemcp-remote.exe project add my-project "D:\workspace\my-project"
 ```
 
 with no restart, followed immediately by ChatGPT:
 
 ```text
-project_open("alex-runtime")
+project_open("my-project")
 -> success
 ```
 
 Then:
 
 ```powershell
-.\codemcp-remote.exe project remove alex-runtime --expected-root "D:\Documents\CodexProject\alex-runtime"
+.\codemcp-remote.exe project remove my-project --expected-root "D:\workspace\my-project"
 ```
 
 with no restart, followed by ChatGPT:
 
 ```text
-project_open("alex-runtime")
+project_open("my-project")
 -> PROJECT_NOT_ALLOWED
 ```
 
-and any old session for `alex-runtime` is also denied further project access.
+and any old session for `my-project` is also denied further project access.
 
 At all times:
 

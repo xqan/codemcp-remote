@@ -53,12 +53,12 @@ For Profile A, the Cloudflare egress allowlist does not identify the ChatGPT use
 The Cloudflare IP List and whole-host WAF rule are the IP enforcement boundary. They must be configured at Cloudflare Edge before Tunnel ingress, for example:
 
 ```text
-(http.host eq "codemcp.quickclip.cc" and not ip.src in $chatgpt_connectors)
+(http.host eq "mcp.example.com" and not ip.src in $chatgpt_connectors)
 ```
 
 The current OpenAI Connector ranges are deployment state and are intentionally not hardcoded in this repository. The Bridge does not authorize from `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*`. A WAF `ALLOW` therefore means only network admission; it is not authentication.
 
-### Secure MCP Tunnel and tunnel-client
+### Remote transport boundaries
 
 The Tunnel is a transport boundary. The recommended Cloudflare profile forwards to the Bridge's loopback MCP endpoint through a WAF-restricted hostname. The optional OpenAI Secure MCP profile uses outbound connectivity to the OpenAI control plane.
 
@@ -92,7 +92,7 @@ The default example configuration binds to `127.0.0.1:46200`, denies arbitrary p
 
 The worker is not a second reasoning agent. The Bridge must not assume that a backend error proves no local side effect occurred. Where completion cannot be determined, the operation must become `unknown` and require reconciliation.
 
-The upstream dependency remains separately licensed under Apache-2.0.
+The upstream `codemcp 0.3.0` distribution has inconsistent license metadata: its package `METADATA` says `MIT`, while the `LICENSE.txt` shipped in the same distribution is Apache-2.0. The release preserves the bundled license text and records the discrepancy in third-party notices; final license review remains a release gate.
 
 ### Registered project and repository content
 
@@ -124,7 +124,7 @@ Direct `projects.toml` editing is trusted local maintenance, not a remote admini
 
 ### Local operating-system account
 
-The local OS user is a root trust assumption for the current version. An attacker who can arbitrarily modify the Bridge executable, its Python environment, local configuration, SQLite database, trusted scripts, Git executable, WSL environment, or runtime process memory is outside the protection boundary.
+The local OS user is a root trust assumption for the current version. An attacker who can arbitrarily modify the packaged Bridge executable/runtime home, local configuration, SQLite database, trusted scripts, Git executable, optional source-development Python/WSL environments, or runtime process memory is outside the protection boundary.
 
 codemcp-remote is not a sandbox against a compromised local administrator/user account.
 

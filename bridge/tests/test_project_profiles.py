@@ -67,7 +67,7 @@ def test_generic_profile_has_no_implicit_execution_capability() -> None:
 def test_codemcp_remote_profile_has_native_source_commands() -> None:
     profile = get_builtin_profile("codemcp-remote")
     assert profile is not None
-    assert set(profile.commands) == {"format", "test"}
+    assert set(profile.commands) == {"format", "test", "security-audit"}
     assert profile.commands["format"].argv == (
         "uv",
         "run",

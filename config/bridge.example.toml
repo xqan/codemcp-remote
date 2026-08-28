@@ -21,7 +21,7 @@ approval_ttl_seconds = 300
 
 [network]
 model_egress = "deny"
-remote_transport = "secure-mcp-tunnel-only"
+remote_transport = "provider-selected"
 
 [codemcp]
 release = "0.3.0"

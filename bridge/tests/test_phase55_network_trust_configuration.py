@@ -61,7 +61,7 @@ def _oauth_auth() -> str:
 def _network_trust(
     *,
     mode: str = NETWORK_TRUST_MODE,
-    allowed_hosts: str = '["codemcp.quickclip.cc"]',
+    allowed_hosts: str = '["mcp.example.com"]',
     allowed_origins: str = '["https://chatgpt.com"]',
 ) -> str:
     return (
@@ -91,7 +91,7 @@ def test_none_with_valid_cloudflare_network_trust_passes(tmp_path: Path) -> None
     assert settings.auth_mode == lifecycle.AUTH_MODE_NONE
     assert settings.resource_auth is None
     assert settings.network_trust is not None
-    assert settings.network_trust.allowed_hosts == ("codemcp.quickclip.cc",)
+    assert settings.network_trust.allowed_hosts == ("mcp.example.com",)
     assert settings.network_trust.allowed_origins == ("https://chatgpt.com",)
 
 
@@ -138,13 +138,13 @@ def test_unknown_auth_mode_fails_closed(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "value",
     [
-        "https://codemcp.quickclip.cc",
-        "codemcp.quickclip.cc/mcp",
-        "*.quickclip.cc",
-        "codemcp.quickclip.cc:443",
-        "user@codemcp.quickclip.cc",
-        "codemcp.quickclip.cc?query=1",
-        "codemcp.quickclip.cc#fragment",
+        "https://mcp.example.com",
+        "mcp.example.com/mcp",
+        "*.example.com",
+        "mcp.example.com:443",
+        "user@mcp.example.com",
+        "mcp.example.com?query=1",
+        "mcp.example.com#fragment",
         "",
     ],
 )
@@ -156,16 +156,16 @@ def test_allowed_hosts_accepts_only_hostname(value: str) -> None:
 def test_allowed_hosts_canonicalizes_uppercase_hostname() -> None:
     config = NetworkTrustConfig(
         mode=NETWORK_TRUST_MODE,
-        allowed_hosts=["CODEMCP.QUICKCLIP.CC"],
+        allowed_hosts=["MCP.EXAMPLE.COM"],
     )
 
-    assert config.allowed_hosts == ("codemcp.quickclip.cc",)
+    assert config.allowed_hosts == ("mcp.example.com",)
 
 
 def test_valid_https_origin_passes() -> None:
     config = NetworkTrustConfig(
         mode=NETWORK_TRUST_MODE,
-        allowed_hosts=["codemcp.quickclip.cc"],
+        allowed_hosts=["mcp.example.com"],
         allowed_origins=["https://chatgpt.com"],
     )
 
@@ -175,7 +175,7 @@ def test_valid_https_origin_passes() -> None:
 def test_https_origin_default_port_is_canonicalized() -> None:
     config = NetworkTrustConfig(
         mode=NETWORK_TRUST_MODE,
-        allowed_hosts=["codemcp.quickclip.cc"],
+        allowed_hosts=["mcp.example.com"],
         allowed_origins=["https://CHATGPT.COM:443"],
     )
 
@@ -200,7 +200,7 @@ def test_allowed_origins_accepts_only_https_origins(value: str) -> None:
     with pytest.raises(NetworkTrustConfigError):
         NetworkTrustConfig(
             mode=NETWORK_TRUST_MODE,
-            allowed_hosts=["codemcp.quickclip.cc"],
+            allowed_hosts=["mcp.example.com"],
             allowed_origins=[value],
         )
 
@@ -208,7 +208,7 @@ def test_allowed_origins_accepts_only_https_origins(value: str) -> None:
 def test_empty_allowed_origins_is_valid() -> None:
     config = NetworkTrustConfig(
         mode=NETWORK_TRUST_MODE,
-        allowed_hosts=["codemcp.quickclip.cc"],
+        allowed_hosts=["mcp.example.com"],
         allowed_origins=[],
     )
 
@@ -220,7 +220,7 @@ def test_network_trust_config_rejects_unknown_fields() -> None:
         NetworkTrustConfig.from_mapping(
             {
                 "mode": NETWORK_TRUST_MODE,
-                "allowed_hosts": ["codemcp.quickclip.cc"],
+                "allowed_hosts": ["mcp.example.com"],
                 "unexpected": True,
             }
         )
@@ -233,7 +233,7 @@ def test_configure_network_trust_preserves_existing_oauth_config(tmp_path: Path)
     result = lifecycle.configure_network_trust(
         paths,
         mode=NETWORK_TRUST_MODE,
-        allowed_hosts=["CODEMCP.QUICKCLIP.CC"],
+        allowed_hosts=["MCP.EXAMPLE.COM"],
         allowed_origins=["https://chatgpt.com:443"],
     )
     settings = lifecycle.load_remote_security_settings(paths)
@@ -242,7 +242,7 @@ def test_configure_network_trust_preserves_existing_oauth_config(tmp_path: Path)
     assert settings.auth_mode == lifecycle.RESOURCE_AUTH_MODE
     assert settings.resource_auth is not None
     assert settings.network_trust is not None
-    assert settings.network_trust.allowed_hosts == ("codemcp.quickclip.cc",)
+    assert settings.network_trust.allowed_hosts == ("mcp.example.com",)
     assert settings.network_trust.allowed_origins == ("https://chatgpt.com",)
 
 
@@ -261,7 +261,7 @@ def test_config_round_trip_writes_explicit_none_and_canonical_values(tmp_path: P
     lifecycle.configure_network_trust(
         paths,
         mode=NETWORK_TRUST_MODE,
-        allowed_hosts=["CODEMCP.QUICKCLIP.CC"],
+        allowed_hosts=["MCP.EXAMPLE.COM"],
         allowed_origins=["https://chatgpt.com:443"],
     )
     lifecycle.configure_resource_auth(paths, mode="none")
@@ -272,7 +272,7 @@ def test_config_round_trip_writes_explicit_none_and_canonical_values(tmp_path: P
     assert parsed["auth"]["mode"] == "none"
     assert parsed["network_trust"] == {
         "mode": NETWORK_TRUST_MODE,
-        "allowed_hosts": ["codemcp.quickclip.cc"],
+        "allowed_hosts": ["mcp.example.com"],
         "allowed_origins": ["https://chatgpt.com"],
     }
     assert settings.auth_mode == lifecycle.AUTH_MODE_NONE

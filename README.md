@@ -7,7 +7,7 @@ ChatGPT
   -> ChatGPT Connector (Authentication = No authentication)
   -> OpenAI / ChatGPT Connector egress network
   -> Cloudflare Edge/WAF IP allowlist
-  -> https://codemcp.quickclip.cc/mcp
+  -> https://mcp.example.com/mcp
   -> Cloudflare Tunnel
   -> 127.0.0.1:46200
   -> codemcp-remote network-trusted Bridge
@@ -92,14 +92,14 @@ mode = "none"
 
 [network_trust]
 mode = "cloudflare-chatgpt"
-allowed_hosts = ["codemcp.quickclip.cc"]
+allowed_hosts = ["mcp.example.com"]
 allowed_origins = ["https://chatgpt.com"] # optional, if-present validation
 ```
 
 The Cloudflare Edge/WAF rule must protect the dedicated hostname before Tunnel ingress. A typical rule is:
 
 ```text
-(http.host eq "codemcp.quickclip.cc" and not ip.src in $chatgpt_connectors)
+(http.host eq "mcp.example.com" and not ip.src in $chatgpt_connectors)
 ```
 
 `$chatgpt_connectors` is an operator-managed Cloudflare IP List sourced from the official OpenAI Connector manifest; current ranges are deliberately not hardcoded in this repository. Do not implement the allowlist with `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, or `Cf-Access-*` in Python. Keep the Bridge on `127.0.0.1:46200`.
@@ -114,10 +114,10 @@ $env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
 
 & $exe init `
   --transport cloudflare `
-  --public-url "https://codemcp.quickclip.cc/mcp" `
+  --public-url "https://mcp.example.com/mcp" `
   --auth-mode none `
   --network-trust cloudflare-chatgpt `
-  --allowed-host codemcp.quickclip.cc `
+  --allowed-host mcp.example.com `
   --allowed-origin "https://chatgpt.com" `
   --store-transport-secret
 $env:TUNNEL_TOKEN = $null
@@ -201,43 +201,51 @@ Use direct `projects.toml` editing only for trusted offline maintenance or recov
 
 Only register repositories you intend ChatGPT to access.
 
-### 4. Prepare the Tunnel profile input
+### 4. Prepare the recommended Cloudflare source profile
+
+Ensure `cloudflared` is available beside the source runtime or on `PATH`. The repository helper can prepare the pinned client when needed:
 
 ```powershell
-Copy-Item config/tunnel-profile.example.env config/tunnel-profile.local.env
+pwsh -File .\scripts\prepare-cloudflared.ps1
 ```
 
-Put the Tunnel ID and other non-secret profile settings in the local file as documented in [`docs/guides/tunnel-setup.md`](docs/guides/tunnel-setup.md).
+Use an explicit source runtime home and keep the tunnel token only in the current process during initialization:
 
-Inject `CONTROL_PLANE_API_KEY` into the process from a secret manager or another non-persistent mechanism. The wrapper rejects storing that key in `config/tunnel-profile.local.env`.
+```powershell
+$home = Join-Path $PWD ".local\source-runtime"
+$env:TUNNEL_TOKEN = "<load locally from a secret manager>"
+
+uv run --project bridge codemcp-bridge-server init --home $home `
+  --transport cloudflare `
+  --public-url "https://<your-mcp-host>/mcp" `
+  --auth-mode none `
+  --network-trust cloudflare-chatgpt `
+  --allowed-host <your-mcp-host> `
+  --allowed-origin "https://chatgpt.com" `
+  --store-transport-secret
+
+$env:TUNNEL_TOKEN = $null
+```
+
+For the optional OpenAI Secure MCP compatibility transport, follow [`docs/guides/tunnel-setup.md`](docs/guides/tunnel-setup.md) instead. It is not the default `v0.1.0` source or installed deployment path.
 
 ### 5. Start and diagnose
 
-First local Tunnel profile initialization:
+Use the same managed lifecycle from source mode:
 
 ```powershell
-pwsh -File .\scripts\start-all.ps1 -Initialize
-pwsh -File .\scripts\doctor.ps1
+uv run --project bridge codemcp-bridge-server doctor --home $home
+uv run --project bridge codemcp-bridge-server start --home $home
+uv run --project bridge codemcp-bridge-server status --home $home
 ```
 
-Normal later startup:
+Stop the source-mode managed lifecycle with:
 
 ```powershell
-pwsh -File .\scripts\start-all.ps1
-pwsh -File .\scripts\doctor.ps1
+uv run --project bridge codemcp-bridge-server stop --home $home
 ```
 
-Stop project-owned Bridge, Tunnel, and worker process trees:
-
-```powershell
-pwsh -File .\scripts\stop-all.ps1
-```
-
-Preview what the stop script would target:
-
-```powershell
-pwsh -File .\scripts\stop-all.ps1 -WhatIf
-```
+The PowerShell `start-all.ps1` / `doctor.ps1` / `stop-all.ps1` helpers remain available for development and compatibility testing, but they are not the installed-product runtime contract.
 
 ## Connect from ChatGPT
 
@@ -301,24 +309,27 @@ See [`docs/architecture/git-policy.md`](docs/architecture/git-policy.md) and [`d
 
 ## Doctor and operations
 
-The main operator commands are:
+For an installed release, the main operator commands are:
 
 ```powershell
-pwsh -File .\scripts\doctor.ps1
-pwsh -File .\scripts\doctor.ps1 -SkipTunnel
-pwsh -File .\scripts\start-all.ps1
-pwsh -File .\scripts\stop-all.ps1
+& $exe doctor
+& $exe start
+& $exe status
+& $exe stop
 ```
 
 The detailed operator guide is [`docs/guides/operations-runbook.md`](docs/guides/operations-runbook.md).
 
-For release validation, the repository also contains a 20-cycle lifecycle runner:
+Source-development helpers remain available:
 
 ```powershell
+pwsh -File .\scripts\doctor.ps1
+pwsh -File .\scripts\start-all.ps1
+pwsh -File .\scripts\stop-all.ps1
 pwsh -File .\scripts\validate-lifecycle.ps1 -Iterations 20
 ```
 
-This is only one release gate. It does not replace the crash, secret-canary, path/encoding, Tunnel-disconnect, and security tests in [`docs/acceptance/phase-6-validation.md`](docs/acceptance/phase-6-validation.md).
+Those PowerShell scripts are supporting source/compatibility tooling. Stable release requires the packaged 20-cycle lifecycle, crash, secret-canary, Windows path/encoding, transport-disconnect, and security matrix in [`docs/acceptance/phase-6-validation.md`](docs/acceptance/phase-6-validation.md).
 
 ## Security model
 

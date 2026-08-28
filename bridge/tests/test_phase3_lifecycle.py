@@ -115,6 +115,28 @@ def test_initialize_runtime_moves_writable_state_out_of_distribution(tmp_path: P
     assert paths.projects_config.read_text(encoding="utf-8") == "# Managed by codemcp-remote\n"
 
 
+def test_initialize_runtime_keeps_openai_transport_and_bridge_endpoint_aligned(
+    tmp_path: Path,
+) -> None:
+    _, paths = _runtime(tmp_path)
+
+    initialize_runtime(
+        paths,
+        tunnel_id="tunnel_12345678",
+        bridge_url="http://127.0.0.1:47200/mcp",
+    )
+
+    bridge = tomllib.loads(paths.bridge_config.read_text(encoding="utf-8"))
+    tunnel = load_tunnel_settings(paths)
+    assert bridge["server"] == {
+        "host": "127.0.0.1",
+        "port": 47200,
+        "path": "/mcp",
+        "transport": "streamable-http",
+    }
+    assert tunnel.bridge_url == "http://127.0.0.1:47200/mcp"
+
+
 def test_tunnel_env_rejects_plaintext_secret_and_resolves_relative_profile_dir(
     tmp_path: Path,
 ) -> None:
