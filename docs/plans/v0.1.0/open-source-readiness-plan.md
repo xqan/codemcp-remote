@@ -459,7 +459,7 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 ## Stage 6 — Secrets、隐私与供应链审查
 
 **优先级：P0**  
-**状态：REPOSITORY IMPLEMENTATION REGRESSION-CLEAN / RC REBUILD + EXECUTION EVIDENCE PENDING — RELEASE BLOCKER**
+**状态：LOCAL AUTOMATED SECURITY GATES PASS / MANUAL LICENSE REVIEW + HOSTED CI + CLEAN-MACHINE PRODUCTION INSTALLER PENDING — RELEASE BLOCKER**
 
 验证记录：
 
@@ -481,22 +481,30 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 - [x] 一键 `build-windows-release.ps1` 已实现 installer smoke → staging payload audit → RC 构建 → final RC audit，并分别保存审计证据；
 - [x] 仓库侧回归：`77 files already formatted`；`342 passed, 7 skipped, 0 failed`。
 
-### 仍需真实执行
+### 本地自动化证据
 
-- [ ] 扫描当前 tracked working tree；
-- [ ] 扫描整个 Git history；
-- [ ] 扫描 `.github/`、scripts、configs、docs、tests、fixtures；
-- [ ] 扫描 final release artifact；
-- [ ] 确认未打包：
+- [x] 扫描当前 tracked working tree：PASS；
+- [x] 扫描整个 Git history：PASS，无 Gitleaks findings；
+- [x] 扫描 `.github/`、scripts、configs、docs、tests、fixtures：PASS；
+- [x] 扫描 final release artifact：PASS；
+- [x] final artifact 未检测到：
   - 本地 `projects.toml`；
   - Tunnel profile；
-  - `.local/`；
+  - `.local/` runtime state；
   - logs；
   - SQLite；
   - DPAPI/runtime secret material；
-  -真实用户路径/账号数据。
-- [ ] dependency vulnerability audit；
-- [ ] dependency license audit；
+  - operator-specific deployment/path data。
+- [x] dependency vulnerability audit：47 packages，0 known vulnerabilities，0 adverse statuses；
+- [x] dependency license evidence inventory：47/47 accounted for，`missing_license_evidence=[]`；
+- [x] exact installer SHA-256：`902e15205aee3d585fafa0248c89419171f5a14d6bb249655820318d4fd8e7c6`；
+- [x] exact RC ZIP SHA-256：`0ce11c91e5735808ffa1260755ba4030adbed220f5d2f9fe5ca9818b3a39fed1`。
+
+### 仍需真实执行
+
+- [ ] 对 exact RC 的 dependency/license compatibility 做人工 signoff；
+- [ ] hosted CI security job PASS；
+- [ ] production AppId installer clean-machine validation PASS；
 
 ### Secret 发现规则
 

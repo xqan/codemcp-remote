@@ -1,7 +1,7 @@
 # Stage 6 Open-Source Security Validation
 
 > Date: 2026-08-28
-> Status: **REPOSITORY IMPLEMENTATION REGRESSION-CLEAN / RC REBUILD + LIVE SECURITY SCANS PENDING / RELEASE BLOCKER**
+> Status: **LOCAL AUTOMATED SECURITY GATES PASS / MANUAL LICENSE REVIEW + HOSTED CI + CLEAN-MACHINE PRODUCTION INSTALLER PENDING / RELEASE BLOCKER**
 
 ## Scope
 
@@ -139,37 +139,48 @@ Before the Stage 6 security-workflow additions, the privacy/supply-chain remedia
 - tests: `335 passed, 7 skipped, 0 failed`.
 
 After adding the fixed security workflow, all-ref history scan, fixed artifact gate, dependency-license
-inventory, immutable CI action pins, verified PyInstaller build-tool closure, build provenance, and release
-license-evidence contracts:
+inventory, immutable CI action pins, verified PyInstaller build-tool closure, build provenance, release
+license-evidence contracts, and the pytest security-baseline upgrade:
 
 - format: **`77 files already formatted`**;
 - full regression: **`342 passed, 7 skipped, 0 failed`**;
-- warnings: `966`, dominated by existing Python 3.16 asyncio deprecations and pytest cache warnings;
-- the registered test checkpoint showed no Git content change.
+- warnings: **`2`** non-blocking warnings;
+- `uv audit`: **PASS** — `47 packages`, `0 known vulnerabilities`, `0 adverse project statuses`;
+- current tracked-tree Gitleaks: **PASS** — no findings;
+- full Git-history Gitleaks: **PASS** — no findings;
+- final RC artifact Gitleaks: **PASS** — no findings;
+- dependency-license inventory: **47/47 installed locked packages accounted for**, `missing_license_evidence=[]`;
+- exact installer SHA-256: `902e15205aee3d585fafa0248c89419171f5a14d6bb249655820318d4fd8e7c6`;
+- exact RC ZIP SHA-256: `0ce11c91e5735808ffa1260755ba4030adbed220f5d2f9fe5ca9818b3a39fed1`;
+- staging payload audit: **PASS**;
+- final RC audit: **PASS**.
 
-This proves the repository-side implementation is regression-clean. It also proves that the installed locked
-test environment can produce dependency-license evidence without missing-license failures. It does not
-substitute for actually running Gitleaks/`uv audit` on an updated Bridge, hosted CI, or the newly rebuilt final
-RC artifact.
+This proves the repository-side implementation and local automated Stage 6 release-security gates are
+regression-clean for the exact RC above. The dependency-license inventory still explicitly reports
+`manual_compatibility_review_required=true`; automated evidence collection is not a legal compatibility
+signoff.
 
 ## Remaining mandatory evidence
 
-Stage 6 remains a release blocker until all of the following are recorded:
+Stage 6 remains a release blocker until the remaining non-local-automation gates are recorded:
 
 - [x] updated full regression PASS after the Stage 6 workflow changes (`342 passed, 7 skipped`);
-- [ ] local `security-audit` dependency audit PASS or explicit accepted-risk record;
-- [ ] local current tracked-tree Gitleaks scan PASS;
-- [ ] local full Git-history Gitleaks scan PASS;
+- [x] local dependency vulnerability audit PASS;
+- [x] local current tracked-tree Gitleaks scan PASS;
+- [x] local full Git-history Gitleaks scan PASS;
+- [x] final release staging payload audit PASS;
+- [x] final RC ZIP audit PASS;
+- [x] final artifact contains no detected runtime/operator secret material;
+- [x] no historical credential finding requiring revoke/rotate/history remediation was detected;
+- [ ] manual dependency/license compatibility review is signed off against the exact RC lockfile and payload;
 - [ ] first hosted CI security job PASS;
-- [ ] final release staging directory or ZIP scanned with `-RequireArtifact`;
-- [ ] final artifact contains no runtime/operator secret material;
-- [ ] any discovered historical credential is revoked/rotated before history remediation;
-- [ ] final dependency/license review is rechecked against the exact RC lockfile and payload.
+- [ ] production installer clean-machine validation PASS.
 
 ## Execution boundary
 
-The currently running pre-update Bridge exposes only its previously built fixed command catalog. Adding
-`security-audit` to source does not hot-reload executable code into that running process.
+The local one-click release workflow has now executed the dependency, tracked-tree, full-history, staging
+payload, and final RC scans successfully and preserved evidence under `.local/release-evidence/`.
 
-Therefore this record intentionally does **not** claim a local history/dependency scan result yet.
-The new fixed command must be executed through a rebuilt/updated Bridge or through the hosted CI gate.
+The developer-machine installer smoke used `isolated-existing-production-install`, so it validates the
+payload/install/upgrade/uninstall mechanics without modifying the existing production installation. It does
+**not** replace the final clean-machine validation of the production AppId installer.
