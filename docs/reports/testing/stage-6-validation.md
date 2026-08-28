@@ -1,7 +1,7 @@
 # Stage 6 Open-Source Security Validation
 
 > Date: 2026-08-28
-> Status: **REPOSITORY GATES IMPLEMENTED / LIVE SECURITY SCANS PENDING / RELEASE BLOCKER**
+> Status: **REPOSITORY IMPLEMENTATION REGRESSION-CLEAN / RC REBUILD + LIVE SECURITY SCANS PENDING / RELEASE BLOCKER**
 
 ## Scope
 
@@ -31,16 +31,23 @@ guides, architecture, and plans must remain reusable and operator-neutral.
 
 1. `uv audit --project bridge --frozen`;
 2. export `HEAD` with `git archive`;
-3. Gitleaks scan of the exported current tracked tree;
-4. Gitleaks full Git-history scan;
+3. Gitleaks scan of the exported current tracked tree plus operator-specific deployment/path checks;
+4. Gitleaks Git-history scan across all refs with `--log-opts=--all`;
 5. optional directory/ZIP artifact scan;
 6. explicit rejection of runtime/secret artifact names such as `projects.toml`, `remote.toml`,
-   `*.dpapi`, `*.sqlite3*`, and `*.log`.
+   `*.dpapi`, `*.sqlite3*`, and `*.log`;
+7. explicit rejection of operator-specific deployment/path data from final artifacts.
 
 Reports are written only under ignored `.local/security-audit/`.
 
-The `codemcp-remote` built-in project profile contains a fixed `security-audit` command using this script.
-It does not accept arbitrary shell, executable paths, or runtime argv.
+The `codemcp-remote` built-in project profile contains two fixed commands using this script:
+
+- `security-audit`: source/dependency/current-tree/history gate;
+- `artifact-audit`: the same gate plus mandatory scan of the standard
+  `.local/release-candidate/codemcp-remote-v0.1.0-windows-x64.zip`.
+
+Both commands are mirrored in root `codemcp.toml`. They do not accept arbitrary shell, executable paths,
+or runtime argv through the Bridge.
 
 ### Gitleaks pin
 
@@ -89,16 +96,40 @@ The `0.3.0` distribution contains inconsistent license metadata:
 The release therefore does not collapse this into an unsupported single-license claim. Packaging keeps
 the bundled license text and records the metadata discrepancy in third-party notices.
 
+### Windows build-tool provenance
+
+The Windows EXE build no longer resolves PyInstaller from a floating transitive dependency graph.
+`scripts/build-windows-exe.ps1` and `scripts/prepare-pypi-wheel.ps1` pin and SHA-256 verify the complete
+PyInstaller build-tool wheel closure used by the `v0.1.0` Windows x64 path:
+
+- `pyinstaller==6.22.2`;
+- `pyinstaller-hooks-contrib==2026.6`;
+- `altgraph==0.17.5`;
+- `pefile==2024.8.26`;
+- `pywin32-ctypes==0.2.3`;
+- `packaging==26.3`;
+- `setuptools==84.0.0`.
+
+The helper verifies both the repository-pinned digest and the digest published in PyPI JSON before a
+wheel can be consumed. Cached/downloaded bytes are then verified again.
+
+The build extracts the verified PyInstaller wheel's upstream `COPYING.txt`, requires the bootloader
+exception to be present, preserves it at `THIRD_PARTY/pyinstaller/COPYING.txt`, and writes a matching
+`NOTICE.txt`. `BUILD_PROVENANCE.json` records the exact build-tool filenames, versions, and SHA-256
+digests. The remote-transport staging step and installer smoke both fail closed if this evidence is missing.
+
 ### Bundled transport components
 
 The Windows packaging path already preserves third-party provenance/license evidence for:
 
 - `cloudflared`: pinned version and SHA-256, Apache-2.0 license;
 - OpenAI `tunnel-client`: upstream checksum manifest, SPDX sidecar, license, archive/binary hashes;
-- `codemcp`: pinned PyPI artifact hashes plus bundled license and discrepancy notice.
+- `codemcp`: pinned PyPI artifact hashes plus bundled license and discrepancy notice;
+- PyInstaller bootloader/build output: verified wheel provenance plus upstream `COPYING.txt` and explicit
+  `GPL-2.0-or-later WITH Bootloader-exception` notice.
 
-The release-package contract uses generated `THIRD_PARTY_NOTICES.txt` plus component license files.
-A separate root `THIRD_PARTY_NOTICES.md` is not required for `v0.1.0`.
+The release-package contract uses generated `THIRD_PARTY_NOTICES.txt`, `BUILD_PROVENANCE.json`, and
+component license files. A separate root `THIRD_PARTY_NOTICES.md` is not required for `v0.1.0`.
 
 ## Validation evidence
 
@@ -107,18 +138,25 @@ Before the Stage 6 security-workflow additions, the privacy/supply-chain remedia
 - format: `76 files already formatted`;
 - tests: `335 passed, 7 skipped, 0 failed`.
 
-After adding the fixed security workflow and hosted security job:
+After adding the fixed security workflow, all-ref history scan, fixed artifact gate, dependency-license
+inventory, immutable CI action pins, verified PyInstaller build-tool closure, build provenance, and release
+license-evidence contracts:
 
-- format: `77 files already formatted`;
-- full test result: **pending in this record until the active registered run completes**.
+- format: **`77 files already formatted`**;
+- full regression: **`342 passed, 7 skipped, 0 failed`**;
+- warnings: `966`, dominated by existing Python 3.16 asyncio deprecations and pytest cache warnings;
+- the registered test checkpoint showed no Git content change.
 
-Do not replace the pending line with PASS unless the registered test operation is actually successful.
+This proves the repository-side implementation is regression-clean. It also proves that the installed locked
+test environment can produce dependency-license evidence without missing-license failures. It does not
+substitute for actually running Gitleaks/`uv audit` on an updated Bridge, hosted CI, or the newly rebuilt final
+RC artifact.
 
 ## Remaining mandatory evidence
 
 Stage 6 remains a release blocker until all of the following are recorded:
 
-- [ ] updated full regression PASS after the Stage 6 workflow changes;
+- [x] updated full regression PASS after the Stage 6 workflow changes (`342 passed, 7 skipped`);
 - [ ] local `security-audit` dependency audit PASS or explicit accepted-risk record;
 - [ ] local current tracked-tree Gitleaks scan PASS;
 - [ ] local full Git-history Gitleaks scan PASS;

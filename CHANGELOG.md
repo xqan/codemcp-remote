@@ -18,6 +18,9 @@ The project is currently pre-release. Version `v0.1.0` must not be published unt
 - End-to-end Windows build/install/use guide.
 - One-click `codemcp-start.cmd` and `codemcp-stop.cmd` lifecycle launchers in the packaged Windows payload.
 - Safe project-registry hot reload with last-known-good snapshots, removal revocation, root-redirect protection, and sanitized live observability.
+- Fixed open-source security gates for locked dependency vulnerability review, dependency-license evidence inventory, current tracked-tree privacy/secret scanning, all-ref Git-history scanning, and final RC artifact scanning.
+- Reproducible Windows build-tool provenance with SHA-256-verified PyInstaller dependency wheels, preserved PyInstaller bootloader license evidence, and `BUILD_PROVENANCE.json`.
+- One-click `build-windows-release.ps1` orchestration that requires installer smoke, audits the unpacked staging payload, builds the RC ZIP, audits the final RC, and preserves separate security evidence for both artifact layers.
 
 ### Changed
 

@@ -7,14 +7,26 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+#ifndef InstallerAppId
+  #define InstallerAppId "{{A26B4BA3-1D96-4F1A-95C4-9984C941A1E1}"
+#endif
+#ifndef InstallerAppName
+  #define InstallerAppName "codemcp-remote"
+#endif
+#ifndef InstallerGroupName
+  #define InstallerGroupName "codemcp-remote"
+#endif
+#ifndef ProductRegistryKey
+  #define ProductRegistryKey "Software\codemcp-remote"
+#endif
 
 [Setup]
-AppId={{A26B4BA3-1D96-4F1A-95C4-9984C941A1E1}
-AppName=codemcp-remote
+AppId={#InstallerAppId}
+AppName={#InstallerAppName}
 AppVersion={#AppVersion}
 AppPublisher=codemcp-remote contributors
 DefaultDirName={localappdata}\Programs\codemcp-remote
-DefaultGroupName=codemcp-remote
+DefaultGroupName={#InstallerGroupName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -53,7 +65,7 @@ Filename: "{app}\codemcp-remote.exe"; Parameters: "stop"; Flags: runhidden waitu
 
 [Code]
 const
-  ProductRegistryKey = 'Software\codemcp-remote';
+  ProductRegistryKey = '{#ProductRegistryKey}';
 
 function NormalizePath(Value: string): string;
 begin

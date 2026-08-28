@@ -118,10 +118,25 @@ Note: upstream codemcp 0.3.0 distribution metadata and its bundled License-File 
 "@
 $codemcpNotice | Set-Content -LiteralPath (Join-Path $codemcpThirdPartyDir "NOTICE.txt") -Encoding utf8
 
+$pyInstallerNoticePath = Join-Path $DestinationDir "THIRD_PARTY\pyinstaller\NOTICE.txt"
+$pyInstallerCopyingPath = Join-Path $DestinationDir "THIRD_PARTY\pyinstaller\COPYING.txt"
+$buildProvenancePath = Join-Path $DestinationDir "BUILD_PROVENANCE.json"
+foreach ($requiredBuildEvidence in @($pyInstallerNoticePath, $pyInstallerCopyingPath, $buildProvenancePath)) {
+    if (-not (Test-Path -LiteralPath $requiredBuildEvidence -PathType Leaf)) {
+        throw "packaged build-tool provenance/license evidence is missing: $requiredBuildEvidence"
+    }
+}
+$pyInstallerNotice = Get-Content -LiteralPath $pyInstallerNoticePath -Raw -Encoding UTF8
+if ($pyInstallerNotice -notmatch 'GPL-2\.0-or-later WITH Bootloader-exception') {
+    throw "packaged PyInstaller notice does not describe the audited bootloader exception"
+}
+
 $notice = @"
 Third-party software bundled with codemcp-remote
 
 $codemcpNotice
+
+$pyInstallerNotice
 
 Cloudflare Tunnel client (cloudflared)
 Version: $($cloudflare.version)
@@ -137,7 +152,7 @@ License: Apache License 2.0
 Installed license text: THIRD_PARTY\tunnel-client\LICENSE
 Installed tunnel-client.exe SHA-256: $($openAI.executable_sha256)
 
-codemcp-remote is not affiliated with or endorsed by codemcp, Cloudflare, or OpenAI.
+codemcp-remote is not affiliated with or endorsed by codemcp, PyInstaller, Cloudflare, or OpenAI.
 "@
 $notice | Set-Content -LiteralPath (Join-Path $DestinationDir "THIRD_PARTY_NOTICES.txt") -Encoding utf8
 

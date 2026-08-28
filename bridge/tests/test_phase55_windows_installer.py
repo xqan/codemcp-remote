@@ -32,6 +32,50 @@ def test_cloudflared_packaging_pin_matches_runtime_provider() -> None:
     assert "Apache License 2.0" in script
 
 
+def test_windows_exe_build_uses_sha256_verified_pyinstaller_dependency_closure() -> None:
+    build = _script("build-windows-exe.ps1")
+    helper = _script("prepare-pypi-wheel.ps1")
+
+    expected_artifacts = {
+        "pyinstaller-6.22.2-py3-none-win_amd64.whl": (
+            "9b990fa6bbe143572f06644a984ad0d7aa2e2ccc6929d4916031343a5888e9a7"
+        ),
+        "pyinstaller_hooks_contrib-2026.6-py3-none-any.whl": (
+            "fd13b8ac126b35361175edacd41a0d97080b75dd5f4b594ecefefff969509dd3"
+        ),
+        "altgraph-0.17.5-py2.py3-none-any.whl": (
+            "f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597"
+        ),
+        "pefile-2024.8.26-py3-none-any.whl": (
+            "76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f"
+        ),
+        "pywin32_ctypes-0.2.3-py3-none-any.whl": (
+            "8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8"
+        ),
+        "packaging-26.3-py3-none-any.whl": (
+            "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+        ),
+        "setuptools-84.0.0-py3-none-any.whl": (
+            "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
+        ),
+    }
+    for filename, sha256 in expected_artifacts.items():
+        assert filename in build
+        assert sha256 in build
+
+    assert "prepare-pypi-wheel.ps1" in build
+    assert '"--with", $pyInstallerWheel' in build
+    assert '"--with", $setuptoolsWheel' in build
+    assert "pypi.org/pypi/{0}/{1}/json" in helper
+    assert "PyPI published SHA-256 does not match the repository pin" in helper
+    assert "cached PyPI wheel checksum mismatch" in helper
+    assert "downloaded PyPI wheel checksum mismatch" in helper
+    assert 'Join-Path $appDir "THIRD_PARTY\\pyinstaller"' in build
+    assert "GPL-2.0-or-later WITH Bootloader-exception" in build
+    assert 'Join-Path $appDir "BUILD_PROVENANCE.json"' in build
+    assert 'schema = "codemcp-remote-build-provenance-v1"' in build
+
+
 def test_provider_neutral_packaging_stages_both_remote_transports() -> None:
     script = _script("prepare-remote-transport.ps1")
 
@@ -47,6 +91,10 @@ def test_provider_neutral_packaging_stages_both_remote_transports() -> None:
     assert 'Join-Path $codemcpThirdPartyDir "NOTICE.txt"' in script
     assert "THIRD_PARTY\\cloudflared\\LICENSE" in script
     assert "THIRD_PARTY\\tunnel-client\\LICENSE" in script
+    assert "THIRD_PARTY\\pyinstaller\\NOTICE.txt" in script
+    assert "THIRD_PARTY\\pyinstaller\\COPYING.txt" in script
+    assert "BUILD_PROVENANCE.json" in script
+    assert "GPL-2\\.0-or-later WITH Bootloader-exception" in script
     assert "THIRD_PARTY_NOTICES.txt" in script
 
 
@@ -60,12 +108,53 @@ def test_installer_build_rejects_secrets_and_smokes_upgrade_preservation() -> No
     assert 'Join-Path $installedLocation "cloudflared.exe"' in script
     assert 'Join-Path $installedLocation "codemcp-start.cmd"' in script
     assert 'Join-Path $installedLocation "codemcp-stop.cmd"' in script
+    assert 'Join-Path $installedLocation "BUILD_PROVENANCE.json"' in script
+    assert 'Join-Path $installedLocation "THIRD_PARTY\\pyinstaller\\COPYING.txt"' in script
+    assert 'Join-Path $installedLocation "THIRD_PARTY\\pyinstaller\\NOTICE.txt"' in script
     assert 'Join-Path $installedLocation "THIRD_PARTY\\codemcp\\LICENSE.txt"' in script
     assert 'Join-Path $installedLocation "THIRD_PARTY\\codemcp\\NOTICE.txt"' in script
     assert "installed cloudflared checksum differs from the verified staging payload" in script
     assert "silent installer upgrade smoke failed" in script
     assert "installer upgrade removed user runtime data" in script
     assert "silent uninstall removed user runtime data" in script
+    assert "staging_payload = $appDir" in script
+
+
+def test_installer_smoke_can_isolate_from_existing_production_install() -> None:
+    script = _script("build-windows-installer.ps1")
+    installer = _script("codemcp-remote.iss")
+
+    assert "#ifndef InstallerAppId" in installer
+    assert "AppId={#InstallerAppId}" in installer
+    assert "#ifndef ProductRegistryKey" in installer
+    assert "ProductRegistryKey = '{#ProductRegistryKey}';" in installer
+    assert '$smokeMode = "isolated-existing-production-install"' in script
+    assert '"/DInstallerAppName=codemcp-remote Installer Smoke"' in script
+    assert '"/DInstallerGroupName=codemcp-remote Installer Smoke"' in script
+    assert '("/DProductRegistryKey={0}" -f $smokeProductRegistryKey)' in script
+    assert "-FilePath $smokeInstallerPath" in script
+    assert "isolated installer smoke removed the production uninstall registration" in script
+    assert "isolated installer smoke changed the production InstallLocation" in script
+    assert "smoke_mode = $smokeMode" in script
+
+
+def test_one_click_release_orchestrator_audits_payload_and_final_rc() -> None:
+    script = _script("build-windows-release.ps1")
+
+    assert "build-windows-installer.ps1" in script
+    assert '"Staging payload security audit"' in script
+    assert 'Save-SecurityEvidence -Name "staging-payload"' in script
+    assert "prepare-windows-release-candidate.ps1" in script
+    assert '"Final RC security audit"' in script
+    assert '"-ArtifactPath", $candidateZip, "-RequireArtifact"' in script
+    assert 'Save-SecurityEvidence -Name "final-rc"' in script
+    assert "installer_smoke_mode = $installerSmokeMode" in script
+    assert '"pending-clean-machine"' in script
+    assert 'next_gate = "clean-machine-validation"' in script
+    assert "Invoke-ReleaseScript" in script
+    assert "ConvertFrom-Json" not in script
+    assert 'Copy-Item -Path (Join-Path $source "*")' in script
+    assert "-SkipSmoke" not in script
 
 
 def test_release_manifest_is_cloudflare_first_and_external_auth_is_not_bundled() -> None:

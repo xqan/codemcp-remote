@@ -52,6 +52,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "dependency vulnerability audit failed; see $dependencyReport"
 }
 
+$licenseReport = Join-Path $auditRoot "dependency-licenses.json"
+$licenseScript = Join-Path $repositoryRoot "scripts\dependency_license_audit.py"
+$licenseOutput = (& $uv.Source run --project (Join-Path $repositoryRoot "bridge") --frozen python `
+    $licenseScript --lock (Join-Path $repositoryRoot "bridge\uv.lock") --output $licenseReport 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "dependency license evidence audit failed: $licenseOutput"
+}
+
 Remove-Item -LiteralPath $currentTreeRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $currentTreeRoot | Out-Null
 $currentTreeArchive = Join-Path $auditRoot "current-tree.zip"
@@ -195,12 +203,15 @@ if (-not [string]::IsNullOrWhiteSpace($ArtifactPath)) {
 [ordered]@{
     status = "ok"
     dependency_audit = "passed"
+    dependency_license_evidence = "passed"
+    dependency_license_compatibility_review = "manual-required"
     current_tree_secret_scan = "passed"
     git_history_secret_scan = "passed"
     artifact_scan = $artifactStatus
     gitleaks_version = [string]$gitleaksInfo.version
     reports = [ordered]@{
         dependency = $dependencyReport
+        dependency_licenses = $licenseReport
         current_tree = $currentTreeReport
         history = $historyReport
         artifact = $artifactReport

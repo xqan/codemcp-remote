@@ -60,7 +60,7 @@ def test_codemcp_remote_repository_resolves_native_development_profile(tmp_path:
 
     assert spec.profile == "codemcp-remote"
     assert spec.profile_source == "detected"
-    assert set(spec.commands) == {"format", "test"}
+    assert set(spec.commands) == {"format", "test", "security-audit", "artifact-audit"}
     assert spec.commands["test"].argv == (
         "uv",
         "run",
@@ -73,7 +73,7 @@ def test_codemcp_remote_repository_resolves_native_development_profile(tmp_path:
     )
     readiness = inspect_development_readiness(spec)
     assert readiness.development_ready is True
-    assert readiness.matched_commands == ("format", "test")
+    assert readiness.matched_commands == ("artifact-audit", "format", "security-audit", "test")
     assert readiness.issues == ()
 
 

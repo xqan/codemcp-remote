@@ -24,6 +24,11 @@ $appWorkDir = Join-Path $installerWorkDir "pyinstaller"
 $appDir = Join-Path $appDistDir "codemcp-remote"
 $mainExe = Join-Path $appDir "codemcp-remote.exe"
 $installerScript = Join-Path $repositoryRoot "scripts\codemcp-remote.iss"
+$productionUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A26B4BA3-1D96-4F1A-95C4-9984C941A1E1}_is1"
+$smokeAppId = "{67A907D8-6E0E-4F58-85D1-443C5AA41A42}"
+$smokeUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($smokeAppId)_is1"
+$smokeProductRegistryKey = "Software\codemcp-remote-installer-smoke"
+$smokeProductRegistryPath = "HKCU:\$smokeProductRegistryKey"
 
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $repositoryRoot ".local\installer-dist"
@@ -176,11 +181,48 @@ function Invoke-GuiProcessAndWait {
 }
 
 $smokeStatus = "skipped"
+$smokeMode = "skipped"
+$smokeInstallerPath = $null
+$productionInstallLocationBefore = $null
 if (-not $SkipSmoke) {
-    $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A26B4BA3-1D96-4F1A-95C4-9984C941A1E1}_is1"
     $smokeRoot = Join-Path $repositoryRoot ".local\installer-smoke"
     $installDir = Join-Path $smokeRoot "installed"
     $runtimeDir = Join-Path $smokeRoot "runtime"
+    $uninstallKey = $productionUninstallKey
+    $smokeInstallerPath = $setupPath
+
+    if (Test-Path -LiteralPath $productionUninstallKey) {
+        $smokeMode = "isolated-existing-production-install"
+        $productionInstallLocationBefore = [string](
+            Get-ItemProperty -LiteralPath $productionUninstallKey -ErrorAction Stop
+        ).InstallLocation
+        $uninstallKey = $smokeUninstallKey
+        $smokeCompilerOutputDir = Join-Path $installerWorkDir "smoke-installer"
+        Remove-Item -LiteralPath $smokeCompilerOutputDir -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path $smokeCompilerOutputDir | Out-Null
+        $smokeIsccArgs = @(
+            "/Qp",
+            ("/DSourceDir={0}" -f $appDir),
+            ("/DOutputDir={0}" -f $smokeCompilerOutputDir),
+            ("/DAppVersion={0}" -f $AppVersion),
+            ("/DInstallerAppId={0}" -f ("{" + $smokeAppId)),
+            "/DInstallerAppName=codemcp-remote Installer Smoke",
+            "/DInstallerGroupName=codemcp-remote Installer Smoke",
+            ("/DProductRegistryKey={0}" -f $smokeProductRegistryKey),
+            $installerScript
+        )
+        & $iscc @smokeIsccArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "isolated Inno Setup smoke compiler failed with exit code $LASTEXITCODE"
+        }
+        $smokeInstallerPath = Join-Path $smokeCompilerOutputDir "codemcp-remote-setup.exe"
+        if (-not (Test-Path -LiteralPath $smokeInstallerPath -PathType Leaf)) {
+            throw "isolated installer smoke executable was not created: $smokeInstallerPath"
+        }
+        Remove-Item -LiteralPath $smokeProductRegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        $smokeMode = "production-clean-host"
+    }
 
     if (Test-Path -LiteralPath $uninstallKey) {
         $existingInstall = (Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction Stop).InstallLocation
@@ -191,7 +233,7 @@ if (-not $SkipSmoke) {
         }
         $smokePrefix = [System.IO.Path]::GetFullPath($smokeRoot).TrimEnd("\") + "\"
         if (-not $existingFullPath.StartsWith($smokePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "installer smoke requires no existing installed codemcp-remote copy; use a clean host or -SkipSmoke"
+            throw "installer smoke registration points outside the isolated smoke root: $existingFullPath"
         }
         Write-Host "Removing stale isolated installer smoke state: $existingFullPath"
         Remove-Item -LiteralPath $uninstallKey -Recurse -Force
@@ -209,7 +251,7 @@ if (-not $SkipSmoke) {
 
     try {
         $setupExit = Invoke-GuiProcessAndWait `
-            -FilePath $setupPath `
+            -FilePath $smokeInstallerPath `
             -ArgumentList @(
                 "/VERYSILENT",
                 "/SUPPRESSMSGBOXES",
@@ -259,7 +301,10 @@ if (-not $SkipSmoke) {
             (Join-Path $installedLocation "codemcp-start.cmd"),
             (Join-Path $installedLocation "codemcp-stop.cmd"),
             (Join-Path $installedLocation "LICENSE"),
+            (Join-Path $installedLocation "BUILD_PROVENANCE.json"),
             (Join-Path $installedLocation "THIRD_PARTY_NOTICES.txt"),
+            (Join-Path $installedLocation "THIRD_PARTY\pyinstaller\COPYING.txt"),
+            (Join-Path $installedLocation "THIRD_PARTY\pyinstaller\NOTICE.txt"),
             (Join-Path $installedLocation "THIRD_PARTY\codemcp\LICENSE.txt"),
             (Join-Path $installedLocation "THIRD_PARTY\codemcp\NOTICE.txt"),
             (Join-Path $installedLocation "THIRD_PARTY\cloudflared\LICENSE"),
@@ -303,7 +348,7 @@ if (-not $SkipSmoke) {
         }
 
         $upgradeExit = Invoke-GuiProcessAndWait `
-            -FilePath $setupPath `
+            -FilePath $smokeInstallerPath `
             -ArgumentList @(
                 "/VERYSILENT",
                 "/SUPPRESSMSGBOXES",
@@ -342,8 +387,25 @@ if (-not $SkipSmoke) {
         if (-not (Test-Path -LiteralPath $runtimeSentinel -PathType Leaf)) {
             throw "silent uninstall removed user runtime data"
         }
+        if (Test-Path -LiteralPath $uninstallKey) {
+            throw "silent uninstall left the smoke uninstall registration behind: $uninstallKey"
+        }
+        if ($smokeMode -eq "isolated-existing-production-install") {
+            if (-not (Test-Path -LiteralPath $productionUninstallKey)) {
+                throw "isolated installer smoke removed the production uninstall registration"
+            }
+            $productionInstallLocationAfter = [string](
+                Get-ItemProperty -LiteralPath $productionUninstallKey -ErrorAction Stop
+            ).InstallLocation
+            if ($productionInstallLocationAfter -ne $productionInstallLocationBefore) {
+                throw "isolated installer smoke changed the production InstallLocation"
+            }
+        }
         $smokeStatus = "passed"
     } finally {
+        if ($smokeMode -eq "isolated-existing-production-install") {
+            Remove-Item -LiteralPath $smokeProductRegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
         if ($smokeStatus -eq "passed") {
             Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
         } else {
@@ -359,6 +421,7 @@ if (-not $SkipSmoke) {
     installer_builder = "Inno Setup 7"
     iscc = $iscc
     installer = $setupPath
+    staging_payload = $appDir
     sha256 = $setupSha256
     sha256_file = $checksumPath
     authenticode_status = $signatureStatus
@@ -370,4 +433,5 @@ if (-not $SkipSmoke) {
     tunnel_client_sha256 = [string]$transportInfo.openai_tunnel.executable_sha256
     tunnel_client_license = [string]$transportInfo.openai_tunnel.license
     smoke = $smokeStatus
+    smoke_mode = $smokeMode
 } | ConvertTo-Json -Depth 4

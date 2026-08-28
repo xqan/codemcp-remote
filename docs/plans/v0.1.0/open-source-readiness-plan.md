@@ -459,9 +459,29 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 ## Stage 6 — Secrets、隐私与供应链审查
 
 **优先级：P0**  
-**状态：PENDING — RELEASE BLOCKER**
+**状态：REPOSITORY IMPLEMENTATION REGRESSION-CLEAN / RC REBUILD + EXECUTION EVIDENCE PENDING — RELEASE BLOCKER**
 
-### 必做
+验证记录：
+
+`docs/reports/testing/stage-6-validation.md`
+
+### 仓库侧已实现
+
+- [x] current non-historical tracked tree privacy regression；
+- [x] 固定 `security-audit`：locked dependency audit、tracked-tree scan、all-ref Git-history scan；
+- [x] 固定 `artifact-audit`：强制标准 `v0.1.0` RC ZIP，并拒绝 runtime/secret material 与 operator-specific data；
+- [x] Gitleaks `8.30.0` Windows/Linux 资产固定版本与 SHA-256；
+- [x] hosted CI security job 已落库，使用 full-history checkout 与 `--log-opts=--all`；
+- [x] built-in command catalog 与根 `codemcp.toml` 已同步；
+- [x] `codemcp==0.3.0` provenance / license metadata discrepancy 已复核并记录；
+- [x] dependency license inventory 已进入本地 security workflow 与 hosted CI，并有实际执行回归；
+- [x] Windows PyInstaller 构建工具完整 wheel 闭包已固定版本 + PyPI SHA-256，禁止 transitive drift；
+- [x] PyInstaller upstream `COPYING.txt` / bootloader exception 与 `BUILD_PROVENANCE.json` 已进入 release contract；
+- [x] third-party notice 策略已确定：生成 `THIRD_PARTY_NOTICES.txt` + `BUILD_PROVENANCE.json` + component license files；
+- [x] 一键 `build-windows-release.ps1` 已实现 installer smoke → staging payload audit → RC 构建 → final RC audit，并分别保存审计证据；
+- [x] 仓库侧回归：`77 files already formatted`；`342 passed, 7 skipped, 0 failed`。
+
+### 仍需真实执行
 
 - [ ] 扫描当前 tracked working tree；
 - [ ] 扫描整个 Git history；
@@ -477,8 +497,6 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
   -真实用户路径/账号数据。
 - [ ] dependency vulnerability audit；
 - [ ] dependency license audit；
-- [ ] `codemcp==0.3.0` provenance / license 复核；
-- [ ] 决定 `THIRD_PARTY_NOTICES.md`。
 
 ### Secret 发现规则
 
