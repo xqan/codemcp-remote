@@ -459,7 +459,7 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 ## Stage 6 — Secrets、隐私与供应链审查
 
 **优先级：P0**  
-**状态：FOURTH RC LOCAL SECURITY + PRODUCTION CLEAN-MACHINE + MANUAL LICENSE SIGNOFF PASS / HOSTED CI PENDING — RELEASE BLOCKER**
+**状态：STAGE 6 PASS WITH EXPLICIT HOSTED-CI WAIVER / FOURTH RC LOCAL SECURITY + PRODUCTION CLEAN-MACHINE + MANUAL LICENSE SIGNOFF PASS**
 
 验证记录：
 
@@ -517,13 +517,13 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 - [x] graceful `bridge_shutdown` successor observe/reconcile 源码修复 + 精确回归：PASS；
 - [x] 第四版 fresh clean-machine `Prepare → Start → project_open → read → create/delete → Cleanup`：PASS；branch=`develop`，最终 Git `dirty=false`。
 
-### 仍需真实执行
+### Stage 6 收口
 
 - [x] 从当前修复 HEAD 重新构建第四版 installer + RC ZIP；
 - [x] 对第四版 RC 重跑 dependency / tracked-tree / full-history / staging / final artifact audits；
 - [x] 对第四版 RC 完成 production AppId clean-machine `Prepare → Start → remote contract → Cleanup`；
 - [x] 对第四版 exact RC 的 dependency/license compatibility 做人工 signoff：**PASS WITH DOCUMENTED DISCREPANCY**；
-- [ ] hosted CI security job PASS；
+- [x] hosted CI security job —— **WAIVED / ACCEPTED RISK**：已尝试执行，但 GitHub 因账户 billing/spending-limit 状态在 runner/job 启动前阻塞全部 job；不记为 CI PASS，也不记为代码或 security gate FAIL；
 
 ### Secret 发现规则
 
@@ -622,7 +622,7 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 
 ## P1 — `v0.1.0` 前必须收口
 
-1. GitHub hosted CI 首次 PASS；
+1. GitHub hosted CI：**WAIVED / ACCEPTED RISK**（Billing 阻塞，未记为 PASS）；
 2. required checks / branch ruleset；
 3. Dependabot hosted activation；
 4. clean-machine README onboarding；
@@ -661,7 +661,7 @@ Native Windows mutation **不再是 P2**，因为它已经是当前默认实现�
 5. **10 个 real-project remote tasks**；
 6. **Stage 6 secrets / dependency / license / supply-chain audit**；
 7. **strict clean-machine packaging acceptance**；
-8. **GitHub hosted CI / Dependabot / ruleset activation**；
+8. **Dependabot / ruleset activation**；hosted CI 本次发布按已记录 waiver 跳过；
 9. 从最终 release commit **重新构建** installer + ZIP；
 10. 重新生成 SHA-256、artifact scan、CHANGELOG、release notes；
 11. Final Release Gate sign-off；
@@ -693,7 +693,7 @@ Stable `v0.1.0` 只有在下表全部满足后才可批准：
 | Secrets | working tree + Git history + artifact scan PASS |
 | Supply chain | dependency vulnerability/license review PASS |
 | Docs | README / architecture / guides / limitations 与实现一致 |
-| GitHub CI | hosted required checks PASS |
+| GitHub CI | **WAIVED / ACCEPTED RISK**：Billing 阻塞，未执行 runner/job，不记为 PASS |
 | Packaging | final clean-machine installer/ZIP PASS |
 | Cleanup | uninstall/cleanup contract PASS |
 | Integrity | SHA-256 对 final artifacts VERIFIED |
@@ -722,7 +722,7 @@ release_decision = BLOCKED
 8. secrets / Git history / artifact scan PASS；
 9. dependency vulnerability/license review PASS；
 10. README 在 clean Windows 上独立可执行；
-11. GitHub hosted CI/ruleset 已激活并 PASS；
+11. GitHub hosted CI waiver 已记录；ruleset/仓库治理状态按发布记录明确；
 12. final installer/ZIP 可从同一个已验收 commit 重复构建；
 13. final artifact clean-machine acceptance PASS；
 14. SHA-256 与 release artifact 一致；

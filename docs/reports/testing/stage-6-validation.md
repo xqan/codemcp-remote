@@ -1,7 +1,7 @@
 # Stage 6 Open-Source Security Validation
 
 > Date: 2026-08-28
-> Status: **FOURTH RC LOCAL SECURITY + PRODUCTION CLEAN-MACHINE REMOTE CONTRACT PASS / MANUAL LICENSE SIGNOFF + HOSTED CI PENDING — RELEASE BLOCKER**
+> Status: **STAGE 6 PASS WITH EXPLICIT HOSTED-CI WAIVER / FOURTH RC LOCAL SECURITY + PRODUCTION CLEAN-MACHINE REMOTE CONTRACT + MANUAL LICENSE SIGNOFF PASS**
 
 ## Scope
 
@@ -252,9 +252,9 @@ guard, but the exact fourth-RC engineering compatibility review has now been com
 `docs/reports/testing/v0.1.0-dependency-license-compatibility-signoff.md` as **PASS WITH DOCUMENTED DISCREPANCY**.
 The signoff preserves the `codemcp 0.3.0` MIT/Apache metadata discrepancy and does not represent legal advice.
 
-## Remaining mandatory evidence
+## Stage 6 closure
 
-The fourth RC has passed the production clean-machine remote mutation contract. Remaining release gates are:
+The fourth RC has passed the production clean-machine remote mutation contract. All mandatory local, artifact, clean-machine, and license-review gates are complete; hosted CI is explicitly waived as an accepted release risk because GitHub blocked every job before runner start for billing/spending-limit reasons.
 
 - [x] reproduce the clean-machine remote mutation failure with auditable `UNKNOWN_SIDE_EFFECT` evidence;
 - [x] fix the same-session create/delete empty-amend bug without weakening branch/worktree/CAS checks;
@@ -268,7 +268,7 @@ The fourth RC has passed the production clean-machine remote mutation contract. 
 - [x] rerun the production clean-machine remote contract through `project_open`, read, create/delete mutation, and final clean Git status;
 - [x] clean-machine `Cleanup` after the passing fourth-RC remote contract: **PASS**, Bridge/Tunnel stopped and installer removed while preserving runtime evidence;
 - [x] manual dependency/license compatibility review against the exact fourth-RC lockfile and payload: **PASS WITH DOCUMENTED DISCREPANCY**;
-- [ ] first hosted CI security job PASS.
+- [x] hosted CI security job — **WAIVED / ACCEPTED RISK**: attempted, but GitHub blocked every job before runner start because of account billing/spending-limit state. This is not recorded as CI PASS and is not treated as a code/security-gate failure.
 
 ## Execution boundary
 
@@ -276,6 +276,6 @@ The previous RC remains useful historical evidence because its local automated s
 clean-machine run discovered the release-blocking remote mutation defect. It is superseded by the source fix
 and must not be published as the final `v0.1.0` artifact.
 
-The developer-machine installer smoke remains `isolated-existing-production-install`; the fixed production
-installer still requires a fresh clean-machine run through `Prepare` → `Start` → remote connector contract →
-`Cleanup`.
+The fourth RC has completed the required clean-machine `Prepare` → `Start` → remote connector contract →
+`Cleanup` sequence. No further clean-machine execution is required for Stage 6 unless the release artifact
+changes.
