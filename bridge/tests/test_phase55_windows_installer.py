@@ -169,6 +169,8 @@ def test_release_manifest_is_cloudflare_first_and_external_auth_is_not_bundled()
         in script
     )
     assert "local or bundled mcp-auth-server runtime" in script
+    assert "docs\\guides\\clean-machine-validation.md" in script
+    assert "docs\\releases\\v0.1.0\\packaging-phase-5-clean-machine-validation.md" not in script
 
 
 def test_packaged_windows_payload_includes_one_click_lifecycle_scripts() -> None:

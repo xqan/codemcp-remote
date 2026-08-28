@@ -25,7 +25,7 @@ $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $installer = Join-Path $InstallerDir "codemcp-remote-setup.exe"
 $phase4Checksums = Join-Path $InstallerDir "SHA256SUMS.txt"
 $validationScript = Join-Path $repositoryRoot "scripts\validate-clean-windows-release.ps1"
-$validationDoc = Join-Path $repositoryRoot "docs\releases\v0.1.0\packaging-phase-5-clean-machine-validation.md"
+$validationDoc = Join-Path $repositoryRoot "docs\guides\clean-machine-validation.md"
 $license = Join-Path $repositoryRoot "LICENSE"
 
 foreach ($required in @($installer, $phase4Checksums, $validationScript, $validationDoc, $license)) {
