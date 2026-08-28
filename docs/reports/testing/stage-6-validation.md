@@ -1,7 +1,7 @@
 # Stage 6 Open-Source Security Validation
 
 > Date: 2026-08-28
-> Status: **LOCAL AUTOMATED SECURITY GATES PASS / MANUAL LICENSE REVIEW + HOSTED CI + CLEAN-MACHINE PRODUCTION INSTALLER PENDING / RELEASE BLOCKER**
+> Status: **FOURTH RC LOCAL SECURITY + PRODUCTION CLEAN-MACHINE REMOTE CONTRACT PASS / MANUAL LICENSE SIGNOFF + HOSTED CI PENDING — RELEASE BLOCKER**
 
 ## Scope
 
@@ -138,9 +138,7 @@ Before the Stage 6 security-workflow additions, the privacy/supply-chain remedia
 - format: `76 files already formatted`;
 - tests: `335 passed, 7 skipped, 0 failed`.
 
-After adding the fixed security workflow, all-ref history scan, fixed artifact gate, dependency-license
-inventory, immutable CI action pins, verified PyInstaller build-tool closure, build provenance, release
-license-evidence contracts, and the pytest security-baseline upgrade:
+The first audited RC completed the local release-security workflow successfully:
 
 - format: **`77 files already formatted`**;
 - full regression: **`342 passed, 7 skipped, 0 failed`**;
@@ -150,37 +148,134 @@ license-evidence contracts, and the pytest security-baseline upgrade:
 - full Git-history Gitleaks: **PASS** — no findings;
 - final RC artifact Gitleaks: **PASS** — no findings;
 - dependency-license inventory: **47/47 installed locked packages accounted for**, `missing_license_evidence=[]`;
-- exact installer SHA-256: `902e15205aee3d585fafa0248c89419171f5a14d6bb249655820318d4fd8e7c6`;
-- exact RC ZIP SHA-256: `0ce11c91e5735808ffa1260755ba4030adbed220f5d2f9fe5ca9818b3a39fed1`;
+- installer SHA-256: `902e15205aee3d585fafa0248c89419171f5a14d6bb249655820318d4fd8e7c6`;
+- RC ZIP SHA-256: `0ce11c91e5735808ffa1260755ba4030adbed220f5d2f9fe5ca9818b3a39fed1`;
 - staging payload audit: **PASS**;
 - final RC audit: **PASS**.
 
-This proves the repository-side implementation and local automated Stage 6 release-security gates are
-regression-clean for the exact RC above. The dependency-license inventory still explicitly reports
-`manual_compatibility_review_required=true`; automated evidence collection is not a legal compatibility
-signoff.
+That RC then reached the clean-machine remote contract. `Prepare` and `Start` passed, the Bridge and Tunnel
+were healthy, `phase5-clean` opened through the remote connector, read-only operations passed, and a remote
+`file_create` mutation committed successfully. The immediately following same-session `file_delete` exposed
+a deterministic Git finalization bug: the Bridge selected `AMEND_SESSION_WIP`, the create-then-delete net
+effect was empty, and `git commit --amend --no-edit --only -- <path>` rejected the empty amend. The Bridge
+correctly surfaced `UNKNOWN_SIDE_EFFECT` and left the disposable worktree blocked instead of reporting false
+success.
+
+The source fix adds `--allow-empty` only to the already-proven `AMEND_SESSION_WIP` commit mode. This preserves
+the one-WIP-commit-per-session model while allowing a same-session create/delete sequence to converge to an
+empty but valid session-owned WIP commit. A regression test reproducing the exact remote sequence now passes:
+
+- format after the fix: **`77 files already formatted`**;
+- full regression after the fix: **`343 passed, 7 skipped, 0 failed`**;
+- warnings: **`2`** non-blocking warnings.
+
+The source fix was carried into a second audited RC:
+
+- installer SHA-256: `7416b0d78bb07213015153bff892205d65db36d2c0a48dbdde06c520eefd0cc6`;
+- RC ZIP SHA-256: `d55b429c52b63ceb6b52c5bafcd7b2d00c48a6855957af5f70875aea8baa1c2e`;
+- staging payload audit: **PASS**;
+- final RC audit: **PASS**;
+- managed clean-machine upgrade from the first RC: **PASS**;
+- upgraded `Prepare` and `Start`: **PASS**, with Bridge and Tunnel healthy.
+
+The upgraded remote contract then exposed a second, narrower harness-policy mismatch before mutation testing:
+`phase5-clean` was still created with `git init --initial-branch=main`, while the current production default
+branch policy permits `develop`, `develop/*`, `codex/*`, and `feature/*`. Remote `project_open` therefore
+correctly failed closed with `BRANCH_NOT_ALLOWED`. The production branch policy was not weakened. Instead,
+the disposable clean-machine acceptance repository now initializes on `develop`, and a regression locks out
+a return to `main`.
+
+After the harness branch fix:
+
+- format: **`77 files already formatted`**;
+- full regression: **`343 passed, 7 skipped, 0 failed`**;
+- warnings: **`2`** non-blocking warnings.
+
+The branch fix was carried into a third audited RC:
+
+- installer SHA-256: `ad995d6a9042635f601d90dc72cf36c3b56ec357d3bbcd7e5206e70df74f82a0`;
+- RC ZIP SHA-256: `14a80753823a5d717aec544435ca975932528406b133c79689f026b633118505`;
+- staging payload audit: **PASS**;
+- final RC audit: **PASS**;
+- managed clean-machine upgrade from the second RC: **PASS**;
+- upgraded `Prepare` and `Start`: **PASS**;
+- remote `project_open`: **PASS** on `develop`, with the exact recorded clean baseline.
+
+Before the first new mutation, the Bridge correctly returned `OPERATION_BLOCKED` because the first RC's
+persisted `unknown` mutation still owned the project lock. That exposed a third recovery defect: graceful
+Bridge shutdown closes the origin session with reason `bridge_shutdown`, while successor reconciliation had
+only accepted origins blocked by `bridge_restart`. The unknown mutation therefore survived the upgrade but
+could not be inspected or reconciled by a new same-security-context session.
+
+The recovery fix keeps the ownership boundary intact and permits successor access only for `unknown`
+operations in the same project, with the same owner and matching persisted authentication context, when the
+origin was either `blocked/bridge_restart` or `closed/bridge_shutdown`. `operation_status` now uses the same
+authorization boundary so an authorized successor can inspect checkpoint/audit evidence before reconciling.
+The exact graceful-shutdown recovery regression now passes:
+
+- format: **`77 files already formatted`**;
+- full regression: **`344 passed, 7 skipped, 0 failed`**;
+- warnings: **`2`** non-blocking warnings.
+
+The recovery fix was carried into the fourth audited RC:
+
+- installer SHA-256: `3491844237e28cc6b1532b5b85dbf2a5920badddb81a9ff7fb3dfb4d8ac93b50`;
+- RC ZIP SHA-256: `498e11aade3da2cfd47c2b28d2086dd657ee8bd325f199ad59037813aeb07d2c`;
+- staging payload audit: **PASS**;
+- final RC audit: **PASS**;
+- managed upgrade from the third RC: **PASS**;
+- successor `operation_status` for the historical `unknown`: **PASS**, proving the new same-auth-context recovery visibility;
+- historical successful reconciliation could not be completed because an earlier acceptance `Prepare` had already
+  deleted and recreated the disposable Git repository, removing the old checkpoint ref; the Bridge correctly
+  rejected the attempt with `CHECKPOINT_INVALID` rather than weakening checkpoint verification.
+
+After `Cleanup` + `Reset`, the same fourth RC was installed again as a truly fresh clean-machine baseline and
+completed the full remote mutation contract:
+
+- fresh `Prepare`: **PASS**, `previous_installer_sha256=null`;
+- fresh `Start`: **PASS**, Bridge/Tunnel health both `ok`;
+- `project_open`: **PASS** on `develop`, exact baseline
+  `f442d3f56ffd9ec485c8e34de495c8974be5e18c`, clean worktree;
+- baseline file discovery/read: **PASS**, `PHASE5_ACCEPTANCE.txt=phase5-clean-machine`;
+- same-session `file_create`: **PASS**, operation `c7ed4d822942483c8f14031db595aa7e`;
+- created marker read-back: **PASS**;
+- same-session `file_delete`: **PASS**, operation `385715677e094f2d9ccbeff5f0237c29`;
+- deleted marker re-read: correctly failed `FILE_NOT_FOUND`;
+- final Git status: **PASS**, `develop`, head
+  `21082d46a529332e0e663bce639df8b8317276bf`, `dirty=false`, no changed files;
+- create/delete audit context remained `network-trusted`, `network-only`,
+  issuer `network-trust://cloudflare-chatgpt`, principal/resource
+  `network-chatgpt-v1` / `https://codemcp2.quickclip.cc/mcp`.
+
+The dependency-license inventory still reports `manual_compatibility_review_required=true` as an automated
+guard, but the exact fourth-RC engineering compatibility review has now been completed and recorded in
+`docs/reports/testing/v0.1.0-dependency-license-compatibility-signoff.md` as **PASS WITH DOCUMENTED DISCREPANCY**.
+The signoff preserves the `codemcp 0.3.0` MIT/Apache metadata discrepancy and does not represent legal advice.
 
 ## Remaining mandatory evidence
 
-Stage 6 remains a release blocker until the remaining non-local-automation gates are recorded:
+The fourth RC has passed the production clean-machine remote mutation contract. Remaining release gates are:
 
-- [x] updated full regression PASS after the Stage 6 workflow changes (`342 passed, 7 skipped`);
-- [x] local dependency vulnerability audit PASS;
-- [x] local current tracked-tree Gitleaks scan PASS;
-- [x] local full Git-history Gitleaks scan PASS;
-- [x] final release staging payload audit PASS;
-- [x] final RC ZIP audit PASS;
-- [x] final artifact contains no detected runtime/operator secret material;
-- [x] no historical credential finding requiring revoke/rotate/history remediation was detected;
-- [ ] manual dependency/license compatibility review is signed off against the exact RC lockfile and payload;
-- [ ] first hosted CI security job PASS;
-- [ ] production installer clean-machine validation PASS.
+- [x] reproduce the clean-machine remote mutation failure with auditable `UNKNOWN_SIDE_EFFECT` evidence;
+- [x] fix the same-session create/delete empty-amend bug without weakening branch/worktree/CAS checks;
+- [x] reproduce the clean-machine `BRANCH_NOT_ALLOWED` harness mismatch after the rebuilt RC upgrade;
+- [x] align the disposable acceptance repository with the default allowed `develop` branch;
+- [x] reproduce the graceful-shutdown successor recovery lock for a persisted `unknown` mutation;
+- [x] allow only same-project/same-owner/same-auth-context successor inspection and reconcile after `bridge_shutdown`;
+- [x] full regression PASS after all fixes (`344 passed, 7 skipped`);
+- [x] rebuild the installer and RC ZIP from the latest source;
+- [x] rerun dependency, tracked-tree, full-history, staging-payload, and final-RC audits against the fourth RC;
+- [x] rerun the production clean-machine remote contract through `project_open`, read, create/delete mutation, and final clean Git status;
+- [x] clean-machine `Cleanup` after the passing fourth-RC remote contract: **PASS**, Bridge/Tunnel stopped and installer removed while preserving runtime evidence;
+- [x] manual dependency/license compatibility review against the exact fourth-RC lockfile and payload: **PASS WITH DOCUMENTED DISCREPANCY**;
+- [ ] first hosted CI security job PASS.
 
 ## Execution boundary
 
-The local one-click release workflow has now executed the dependency, tracked-tree, full-history, staging
-payload, and final RC scans successfully and preserved evidence under `.local/release-evidence/`.
+The previous RC remains useful historical evidence because its local automated security gates passed and its
+clean-machine run discovered the release-blocking remote mutation defect. It is superseded by the source fix
+and must not be published as the final `v0.1.0` artifact.
 
-The developer-machine installer smoke used `isolated-existing-production-install`, so it validates the
-payload/install/upgrade/uninstall mechanics without modifying the existing production installation. It does
-**not** replace the final clean-machine validation of the production AppId installer.
+The developer-machine installer smoke remains `isolated-existing-production-install`; the fixed production
+installer still requires a fresh clean-machine run through `Prepare` → `Start` → remote connector contract →
+`Cleanup`.

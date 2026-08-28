@@ -459,7 +459,7 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 ## Stage 6 — Secrets、隐私与供应链审查
 
 **优先级：P0**  
-**状态：LOCAL AUTOMATED SECURITY GATES PASS / MANUAL LICENSE REVIEW + HOSTED CI + CLEAN-MACHINE PRODUCTION INSTALLER PENDING — RELEASE BLOCKER**
+**状态：FOURTH RC LOCAL SECURITY + PRODUCTION CLEAN-MACHINE + MANUAL LICENSE SIGNOFF PASS / HOSTED CI PENDING — RELEASE BLOCKER**
 
 验证记录：
 
@@ -479,32 +479,51 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 - [x] PyInstaller upstream `COPYING.txt` / bootloader exception 与 `BUILD_PROVENANCE.json` 已进入 release contract；
 - [x] third-party notice 策略已确定：生成 `THIRD_PARTY_NOTICES.txt` + `BUILD_PROVENANCE.json` + component license files；
 - [x] 一键 `build-windows-release.ps1` 已实现 installer smoke → staging payload audit → RC 构建 → final RC audit，并分别保存审计证据；
-- [x] 仓库侧回归：`77 files already formatted`；`342 passed, 7 skipped, 0 failed`。
+- [x] clean-machine 真实远程验收发现并复现 same-session create → delete 空 amend 缺陷；
+- [x] `AMEND_SESSION_WIP` 仅增加 `--allow-empty`，未放宽 branch/worktree/CAS 检查；
+- [x] 第二版 RC 完成受控 clean-machine 升级，`Prepare` / `Start` 均 PASS；
+- [x] 第二版 RC 远程 `project_open` 发现 disposable repo `main` 与新默认分支策略不一致；
+- [x] acceptance repo 改为 `develop`，不把 `main` 加回生产默认允许分支；
+- [x] 第三版 RC managed upgrade / `Prepare` / `Start` / remote `project_open` 均 PASS，branch=`develop`；
+- [x] 第三版 RC 在首个新 mutation 前被旧 `unknown` operation 正确阻塞，暴露 graceful `bridge_shutdown` 后 successor 无法恢复的缺陷；
+- [x] successor recovery 仅扩展到 same-project / same-owner / same-auth-context 的 `unknown` operation，并支持先 `operation_status` 再 reconcile；
+- [x] 三项修复后仓库侧回归：`77 files already formatted`；`344 passed, 7 skipped, 0 failed`。
 
-### 本地自动化证据
+### 已完成但已 supersede 的 RC 证据
 
-- [x] 扫描当前 tracked working tree：PASS；
-- [x] 扫描整个 Git history：PASS，无 Gitleaks findings；
-- [x] 扫描 `.github/`、scripts、configs、docs、tests、fixtures：PASS；
-- [x] 扫描 final release artifact：PASS；
-- [x] final artifact 未检测到：
-  - 本地 `projects.toml`；
-  - Tunnel profile；
-  - `.local/` runtime state；
-  - logs；
-  - SQLite；
-  - DPAPI/runtime secret material；
-  - operator-specific deployment/path data。
-- [x] dependency vulnerability audit：47 packages，0 known vulnerabilities，0 adverse statuses；
-- [x] dependency license evidence inventory：47/47 accounted for，`missing_license_evidence=[]`；
-- [x] exact installer SHA-256：`902e15205aee3d585fafa0248c89419171f5a14d6bb249655820318d4fd8e7c6`；
-- [x] exact RC ZIP SHA-256：`0ce11c91e5735808ffa1260755ba4030adbed220f5d2f9fe5ca9818b3a39fed1`。
+三版 RC 的本地自动化安全证据均 PASS，但都因 clean-machine 真实验收发现 release blocker 而被 supersede，禁止作为最终 `v0.1.0` 发布物：
+
+- 第一版 installer SHA-256：`902e15205aee3d585fafa0248c89419171f5a14d6bb249655820318d4fd8e7c6`；
+- 第一版 RC ZIP SHA-256：`0ce11c91e5735808ffa1260755ba4030adbed220f5d2f9fe5ca9818b3a39fed1`；
+- 第二版 installer SHA-256：`7416b0d78bb07213015153bff892205d65db36d2c0a48dbdde06c520eefd0cc6`；
+- 第二版 RC ZIP SHA-256：`d55b429c52b63ceb6b52c5bafcd7b2d00c48a6855957af5f70875aea8baa1c2e`；
+- 第三版 installer SHA-256：`ad995d6a9042635f601d90dc72cf36c3b56ec357d3bbcd7e5206e70df74f82a0`；
+- 第三版 RC ZIP SHA-256：`14a80753823a5d717aec544435ca975932528406b133c79689f026b633118505`；
+- 三版 dependency audit、tracked-tree Gitleaks、full-history Gitleaks、staging payload audit、final RC audit：PASS。
+
+### Clean-machine 真实验收
+
+- [x] 第一版 `Prepare` / `Start`：PASS；
+- [x] 第一版远程 project discovery / read-only / `file_create`：PASS；
+- [x] 第一版远程 `file_delete`：确定性触发 `UNKNOWN_SIDE_EFFECT`，根因为净零变化时 Git 拒绝空 amend；
+- [x] 空 amend 源码修复 + 精确回归：PASS；
+- [x] 第二版 managed upgrade：PASS，previous/current installer identity 可审计；
+- [x] 第二版 `Prepare` / `Start`：PASS，Bridge/Tunnel health 均为 `ok`；
+- [x] 第二版远程 `project_open`：正确 fail-closed 为 `BRANCH_NOT_ALLOWED`，暴露 harness 仍固定 `main`；
+- [x] harness 改为默认允许的 `develop` + 防回退回归：PASS；
+- [x] 第三版 managed upgrade / `Prepare` / `Start`：PASS；
+- [x] 第三版远程 `project_open`：PASS，branch=`develop`，HEAD 与 recorded baseline 一致；
+- [x] 第三版首个新 mutation：被旧 persisted `unknown` operation 正确 fail-closed 阻塞，暴露 graceful shutdown successor recovery 缺陷；
+- [x] graceful `bridge_shutdown` successor observe/reconcile 源码修复 + 精确回归：PASS；
+- [x] 第四版 fresh clean-machine `Prepare → Start → project_open → read → create/delete → Cleanup`：PASS；branch=`develop`，最终 Git `dirty=false`。
 
 ### 仍需真实执行
 
-- [ ] 对 exact RC 的 dependency/license compatibility 做人工 signoff；
+- [x] 从当前修复 HEAD 重新构建第四版 installer + RC ZIP；
+- [x] 对第四版 RC 重跑 dependency / tracked-tree / full-history / staging / final artifact audits；
+- [x] 对第四版 RC 完成 production AppId clean-machine `Prepare → Start → remote contract → Cleanup`；
+- [x] 对第四版 exact RC 的 dependency/license compatibility 做人工 signoff：**PASS WITH DOCUMENTED DISCREPANCY**；
 - [ ] hosted CI security job PASS；
-- [ ] production AppId installer clean-machine validation PASS；
 
 ### Secret 发现规则
 

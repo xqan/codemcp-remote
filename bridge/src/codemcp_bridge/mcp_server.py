@@ -508,8 +508,8 @@ class BridgeService:
             origin is None
             or origin.project_id != record.project_id
             or origin.owner_id != successor.owner_id
-            or origin.status != "blocked"
-            or origin.reason != "bridge_restart"
+            or (origin.status, origin.reason)
+            not in {("blocked", "bridge_restart"), ("closed", "bridge_shutdown")}
             or not self.sessions.auth_contexts_match(origin.session_id, successor.session_id)
         ):
             raise BridgeError(
@@ -1955,7 +1955,7 @@ class BridgeService:
         await self.start()
         request_id = self._request_id(ctx)
         try:
-            record = self.require_operation_for_session(operation_id, session_id)
+            record = self.require_operation_for_reconcile(operation_id, session_id)
             return success_payload(
                 request_id=request_id,
                 session_id=session_id,

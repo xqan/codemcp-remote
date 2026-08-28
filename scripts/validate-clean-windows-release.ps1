@@ -529,7 +529,7 @@ function Prepare-AcceptanceProject {
     }
     New-Item -ItemType Directory -Force -Path $Root | Out-Null
 
-    & $GitPath -C $Root init -q --initial-branch=main
+    & $GitPath -C $Root init -q --initial-branch=develop
     if ($LASTEXITCODE -ne 0) { throw "git init failed" }
     & $GitPath -C $Root config user.name "codemcp-remote Phase 5"
     if ($LASTEXITCODE -ne 0) { throw "git user.name configuration failed" }

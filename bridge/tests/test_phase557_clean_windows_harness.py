@@ -144,6 +144,8 @@ def test_phase557_prepare_rebuilds_project_and_records_fresh_baseline() -> None:
     assert registration_index < baseline_index < project_add_index < state_index
     assert "Remove-Phase5AcceptanceTree -Path $projectRootPath" in script
     assert "baseline_head = $baselineHead" in script
+    assert "--initial-branch=develop" in script
+    assert "--initial-branch=main" not in script
 
 
 def test_phase557_secrets_are_environment_only_and_rechecked_from_dpapi() -> None:

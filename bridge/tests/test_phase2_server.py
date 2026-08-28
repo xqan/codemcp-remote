@@ -1122,6 +1122,75 @@ async def test_file_delete_is_idempotent_tracked_only_and_safe(git_project: Path
 
 
 @pytest.mark.asyncio
+async def test_session_wip_create_then_delete_can_amend_to_empty_commit(
+    git_project: Path,
+) -> None:
+    service = create_app(_settings(git_project), adapter=WriteAdapter())[1]
+    await service.start()
+    session = service.sessions.create("demo")
+    baseline_head = _git(git_project, "rev-parse", "HEAD")
+    baseline_count = int(_git(git_project, "rev-list", "--count", "main"))
+
+    content = "temporary session file\n"
+    create_description = "create temporary session file"
+    created = await service.file_create(
+        None,
+        "demo",
+        session.session_id,
+        "src/session-temporary.txt",
+        content,
+        create_description,
+        "session-temporary-create-1",
+        request_hash(
+            _file_create_input(
+                "src/session-temporary.txt",
+                content,
+                create_description,
+            )
+        ),
+    )
+    assert created["status"] == "succeeded"
+    created_head = created["data"]["checkpoint"]["after"]["head"]
+    assert int(_git(git_project, "rev-list", "--count", "main")) == baseline_count + 1
+
+    delete_description = "delete temporary session file"
+    deleted = await service.file_delete(
+        None,
+        "demo",
+        session.session_id,
+        "src/session-temporary.txt",
+        delete_description,
+        "session-temporary-delete-1",
+        request_hash(
+            _file_delete_input(
+                "src/session-temporary.txt",
+                delete_description,
+            )
+        ),
+    )
+
+    assert deleted["status"] == "succeeded"
+    deleted_head = deleted["data"]["checkpoint"]["after"]["head"]
+    assert deleted_head != created_head
+    assert deleted["changed_files"] == ["src/session-temporary.txt"]
+    assert deleted["data"]["checkpoint"]["after"]["changed_files"] == ["src/session-temporary.txt"]
+    assert not (git_project / "src" / "session-temporary.txt").exists()
+    assert _git(git_project, "status", "--porcelain") == ""
+    assert int(_git(git_project, "rev-list", "--count", "main")) == baseline_count + 1
+    assert _git(git_project, "rev-parse", f"{deleted_head}^") == baseline_head
+    assert _git(git_project, "diff", "--name-only", baseline_head, deleted_head) == ""
+    assert (
+        await service.git.read_session_footer(
+            git_project,
+            head=deleted_head,
+        )
+        == session.session_id
+    )
+
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_directory_create_is_git_trackable_idempotent_and_safe(
     git_project: Path,
 ) -> None:
@@ -1673,6 +1742,96 @@ async def test_cancelled_mutation_is_persisted_as_unknown(
     assert persisted.state == "unknown"
     assert persisted.error_data["code"] == "UNKNOWN_SIDE_EFFECT"
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_successor_can_inspect_and_reconcile_unknown_mutation(
+    git_project: Path,
+) -> None:
+    settings = _settings(git_project)
+    service = create_app(settings, adapter=FakeAdapter())[1]
+    await service.start()
+    origin = service.sessions.create("demo")
+    input_data = {"path": "src/hello.txt", "new_string_digest": "digest"}
+    started = service.operations.start(
+        operation_id="graceful-shutdown-unknown-operation",
+        project_id="demo",
+        session_id=origin.session_id,
+        kind="file_edit",
+        mutation=True,
+        client_request_id="graceful-shutdown-unknown-edit-1",
+        supplied_request_hash=request_hash(input_data),
+        input_data=input_data,
+    )
+    service.operations.dispatch(started.record.operation_id)
+    unknown = error_payload(
+        request_id="graceful-shutdown-unknown-request",
+        session_id=origin.session_id,
+        project_id="demo",
+        operation_id=started.record.operation_id,
+        error=BridgeError(
+            "UNKNOWN_SIDE_EFFECT",
+            "mutation outcome is unknown before graceful shutdown",
+            status="unknown",
+        ),
+    )
+    service.operations.finish(started.record.operation_id, state="unknown", payload=unknown)
+    await service.close()
+
+    restarted = create_app(settings, adapter=FakeAdapter())[1]
+    await restarted.start()
+    successor = restarted.sessions.create("demo")
+
+    observed = await restarted.operation_status(
+        None,
+        started.record.operation_id,
+        successor.session_id,
+    )
+    assert observed["status"] == "succeeded"
+    assert observed["data"]["state"] == "unknown"
+
+    evidence = (
+        "graceful restart preserved the unknown operation and no mutation is accepted as successful"
+    )
+    reconciled = await restarted.operation_reconcile(
+        None,
+        started.record.operation_id,
+        successor.session_id,
+        "failed",
+        evidence,
+        "graceful-shutdown-reconcile-1",
+        request_hash(
+            {
+                "operation_id": started.record.operation_id,
+                "decision": "failed",
+                "evidence_digest": request_hash(evidence),
+            }
+        ),
+    )
+    assert reconciled["status"] == "failed"
+    assert restarted.operations.operation(started.record.operation_id).state == "failed"
+
+    edit_description = "mutation after graceful shutdown reconcile"
+    edited = await restarted.file_edit(
+        None,
+        "demo",
+        successor.session_id,
+        "src/hello.txt",
+        "hello",
+        "changed",
+        edit_description,
+        "post-graceful-reconcile-edit-1",
+        request_hash(
+            _file_edit_input(
+                "src/hello.txt",
+                "hello",
+                "changed",
+                edit_description,
+            )
+        ),
+    )
+    assert edited["status"] == "succeeded"
+    await restarted.close()
 
 
 @pytest.mark.asyncio

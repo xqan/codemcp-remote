@@ -455,7 +455,7 @@ class GitGuard:
                 ]
             )
         elif commit_mode == CommitMode.AMEND_SESSION_WIP:
-            arguments.extend(["--amend", "--no-edit"])
+            arguments.extend(["--amend", "--no-edit", "--allow-empty"])
         else:
             raise BridgeError("INVALID_REQUEST", "commit_mode is not a supported Bridge mode")
         arguments.extend(["--only", "--", *commit_paths])
