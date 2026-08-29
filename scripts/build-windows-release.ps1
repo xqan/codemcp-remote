@@ -86,6 +86,33 @@ if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
 }
 $installerSha256 = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
+$provenancePath = Join-Path $stagingPayload "BUILD_PROVENANCE.json"
+$sourceCommitPath = Join-Path $stagingPayload "SOURCE_COMMIT.txt"
+if (-not (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+    throw "staging payload is missing BUILD_PROVENANCE.json"
+}
+if (-not (Test-Path -LiteralPath $sourceCommitPath -PathType Leaf)) {
+    throw "staging payload is missing SOURCE_COMMIT.txt"
+}
+$stagingSourceCommit = (Get-Content -LiteralPath $sourceCommitPath -Raw -Encoding ASCII).Trim()
+if ($stagingSourceCommit -notmatch "^[0-9a-f]{40,64}$") {
+    throw "staging SOURCE_COMMIT.txt is invalid"
+}
+$git = Get-Command git.exe -ErrorAction SilentlyContinue
+if ($null -eq $git) {
+    $git = Get-Command git -ErrorAction SilentlyContinue
+}
+if ($null -eq $git) {
+    throw "Git is required to verify release source provenance"
+}
+$sourceCommit = (& $git.Source -C $repositoryRoot rev-parse HEAD | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch "^[0-9a-f]{40,64}$") {
+    throw "release source commit could not be resolved"
+}
+if ($stagingSourceCommit -ne $sourceCommit) {
+    throw "staging payload source commit does not match the current release commit"
+}
+
 Invoke-ReleaseScript `
     -Label "Staging payload security audit" `
     -ScriptPath $securityScript `
@@ -112,6 +139,7 @@ $rcEvidence = Save-SecurityEvidence -Name "final-rc"
 [ordered]@{
     status = "ok"
     version = $Version
+    source_git_commit = $sourceCommit
     installer = $installerPath
     installer_sha256 = $installerSha256
     installer_smoke = "passed"

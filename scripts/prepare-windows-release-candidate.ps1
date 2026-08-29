@@ -25,10 +25,11 @@ $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $installer = Join-Path $InstallerDir "codemcp-remote-setup.exe"
 $phase4Checksums = Join-Path $InstallerDir "SHA256SUMS.txt"
 $validationScript = Join-Path $repositoryRoot "scripts\validate-clean-windows-release.ps1"
+$phase6ValidationScript = Join-Path $repositoryRoot "scripts\validate-phase6-windows.ps1"
 $validationDoc = Join-Path $repositoryRoot "docs\guides\clean-machine-validation.md"
 $license = Join-Path $repositoryRoot "LICENSE"
 
-foreach ($required in @($installer, $phase4Checksums, $validationScript, $validationDoc, $license)) {
+foreach ($required in @($installer, $phase4Checksums, $validationScript, $phase6ValidationScript, $validationDoc, $license)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "required release-candidate input is missing: $required"
     }
@@ -38,11 +39,13 @@ $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\
 if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
     throw "Windows PowerShell 5.1 was not found for clean-machine script compatibility validation"
 }
-$escapedValidationScript = $validationScript.Replace("'", "''")
-$parseCommand = "[void][scriptblock]::Create([IO.File]::ReadAllText('$escapedValidationScript'))"
-& $windowsPowerShell -NoLogo -NoProfile -NonInteractive -Command $parseCommand
-if ($LASTEXITCODE -ne 0) {
-    throw "clean-machine validation script is not compatible with the Windows PowerShell parser"
+foreach ($scriptPath in @($validationScript, $phase6ValidationScript)) {
+    $escapedScriptPath = $scriptPath.Replace("'", "''")
+    $parseCommand = "[void][scriptblock]::Create([IO.File]::ReadAllText('$escapedScriptPath'))"
+    & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -Command $parseCommand
+    if ($LASTEXITCODE -ne 0) {
+        throw "release validation script is not compatible with the Windows PowerShell parser: $scriptPath"
+    }
 }
 
 $checksumLine = @(
@@ -64,6 +67,26 @@ if ($signatureStatus -notin @("Valid", "NotSigned")) {
     throw "installer Authenticode status is unsafe: $signatureStatus"
 }
 
+$git = Get-Command git.exe -ErrorAction SilentlyContinue
+if ($null -eq $git) {
+    $git = Get-Command git -ErrorAction SilentlyContinue
+}
+if ($null -eq $git) {
+    throw "Git is required to bind the release candidate to an exact source commit"
+}
+$sourceCommit = (& $git.Source -C $repositoryRoot rev-parse HEAD | Out-String).Trim()
+$sourceBranch = (& $git.Source -C $repositoryRoot rev-parse --abbrev-ref HEAD | Out-String).Trim()
+$sourceStatus = (& $git.Source -C $repositoryRoot status --porcelain | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch "^[0-9a-f]{40,64}$") {
+    throw "release candidate source commit could not be resolved"
+}
+if ([string]::IsNullOrWhiteSpace($sourceBranch)) {
+    throw "release candidate source branch could not be resolved"
+}
+if (-not [string]::IsNullOrWhiteSpace($sourceStatus)) {
+    throw "release candidate packaging requires a clean source worktree"
+}
+
 $candidateName = "codemcp-remote-v{0}-windows-x64" -f $Version
 $candidateDir = Join-Path $OutputRoot $candidateName
 $zipPath = Join-Path $OutputRoot ($candidateName + ".zip")
@@ -76,6 +99,7 @@ New-Item -ItemType Directory -Force -Path $candidateDir | Out-Null
 
 Copy-Item -LiteralPath $installer -Destination (Join-Path $candidateDir "codemcp-remote-setup.exe")
 Copy-Item -LiteralPath $validationScript -Destination (Join-Path $candidateDir "validate-clean-windows-release.ps1")
+Copy-Item -LiteralPath $phase6ValidationScript -Destination (Join-Path $candidateDir "validate-phase6-windows.ps1")
 Copy-Item -LiteralPath $validationDoc -Destination (Join-Path $candidateDir "CLEAN-MACHINE-VALIDATION.md")
 Copy-Item -LiteralPath $license -Destination (Join-Path $candidateDir "LICENSE")
 
@@ -83,7 +107,10 @@ $manifest = [ordered]@{
     product = "codemcp-remote"
     version = $Version
     platform = "windows-x64"
-    phase = "5.5.5"
+    phase = "5.5.7"
+    source_git_commit = $sourceCommit
+    source_git_branch = $sourceBranch
+    source_worktree_dirty = $false
     installer_sha256 = $actualInstallerSha256
     authenticode_status = $signatureStatus
     recommended_transport = "cloudflare"
@@ -123,7 +150,10 @@ $manifest = [ordered]@{
         "separately installed tunnel-client",
         "local or bundled mcp-auth-server runtime"
     )
-    validation = "Run validate-clean-windows-release.ps1 on a clean Windows host or VM."
+    validation = @(
+        "Run validate-clean-windows-release.ps1 on a clean Windows host or VM.",
+        "After Prepare, run validate-phase6-windows.ps1 before the remaining ChatGPT remote Phase 6 cases."
+    )
 }
 $manifestPath = Join-Path $candidateDir "release-manifest.json"
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -131,6 +161,7 @@ $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -En
 $checksumFiles = @(
     "codemcp-remote-setup.exe",
     "validate-clean-windows-release.ps1",
+    "validate-phase6-windows.ps1",
     "CLEAN-MACHINE-VALIDATION.md",
     "LICENSE",
     "release-manifest.json"

@@ -17,6 +17,29 @@ $bridgeProject = Join-Path $repositoryRoot "bridge"
 $bridgeSrc = Join-Path $bridgeProject "src"
 $entrypoint = Join-Path $repositoryRoot "scripts\windows_entrypoint.py"
 
+$git = Get-Command git.exe -ErrorAction SilentlyContinue
+if ($null -eq $git) {
+    $git = Get-Command git -ErrorAction SilentlyContinue
+}
+if ($null -eq $git) {
+    throw "Git is required to bind the Windows release artifact to an exact source commit"
+}
+$sourceCommit = (& $git.Source -C $repositoryRoot rev-parse HEAD | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch "^[0-9a-f]{40,64}$") {
+    throw "git rev-parse HEAD failed while preparing Windows build provenance"
+}
+$sourceBranch = (& $git.Source -C $repositoryRoot rev-parse --abbrev-ref HEAD | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sourceBranch)) {
+    throw "git rev-parse --abbrev-ref HEAD failed while preparing Windows build provenance"
+}
+$sourceStatus = (& $git.Source -C $repositoryRoot status --porcelain | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "git status --porcelain failed while preparing Windows build provenance"
+}
+if (-not [string]::IsNullOrWhiteSpace($sourceStatus)) {
+    throw "Windows release build requires a clean source worktree"
+}
+
 $pyInstallerVersion = "6.22.2"
 $pyInstallerFileName = "pyinstaller-6.22.2-py3-none-win_amd64.whl"
 $pyInstallerSha256 = "9b990fa6bbe143572f06644a984ad0d7aa2e2ccc6929d4916031343a5888e9a7"
@@ -235,8 +258,15 @@ $buildProvenancePath = Join-Path $appDir "BUILD_PROVENANCE.json"
 [ordered]@{
     schema = "codemcp-remote-build-provenance-v1"
     platform = "windows-x64"
+    source = [ordered]@{
+        git_commit = $sourceCommit
+        git_branch = $sourceBranch
+        worktree_dirty = $false
+    }
     build_tools = $buildInputs
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $buildProvenancePath -Encoding utf8
+$sourceCommitPath = Join-Path $appDir "SOURCE_COMMIT.txt"
+$sourceCommit | Set-Content -LiteralPath $sourceCommitPath -Encoding ascii -NoNewline
 
 $exeSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant()
 $sha256File = Join-Path $appDir "SHA256SUMS.txt"
