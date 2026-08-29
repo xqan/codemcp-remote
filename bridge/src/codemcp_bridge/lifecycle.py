@@ -1417,14 +1417,228 @@ def start_services(
             f"{provider.secret_env_name} is unavailable; set it in the environment or "
             "store it securely"
         )
+    bridge_health = _bridge_health_url(provider.bridge_url(tunnel))
+    tunnel_ready = provider.ready_url(tunnel)
     if paths.state_file.exists():
         existing = status_services(paths)
         if existing["status"] == "running":
             return existing
-        paths.state_file.unlink(missing_ok=True)
 
-    bridge_health = _bridge_health_url(provider.bridge_url(tunnel))
-    tunnel_ready = provider.ready_url(tunnel)
+        existing_bridge = existing.get("bridge")
+        existing_tunnel = existing.get("tunnel")
+        bridge_reusable = (
+            isinstance(existing_bridge, Mapping)
+            and existing_bridge.get("owned") is True
+            and isinstance(existing_bridge.get("health"), Mapping)
+            and existing_bridge["health"].get("status") == "ok"
+        )
+        if bridge_reusable:
+            if not isinstance(existing_tunnel, Mapping):
+                raise LifecycleError("degraded lifecycle state has no tunnel ownership metadata")
+            tunnel_owned = existing_tunnel.get("owned") is True
+            tunnel_health = existing_tunnel.get("health")
+            tunnel_healthy = (
+                isinstance(tunnel_health, Mapping) and tunnel_health.get("status") == "ok"
+            )
+            if not tunnel_owned and tunnel_healthy:
+                raise LifecycleError(
+                    "Tunnel health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                )
+            if tunnel_owned and tunnel_healthy:
+                raise LifecycleError(
+                    "Runtime services are owned and healthy but lifecycle status is degraded; "
+                    "refusing unsafe recovery"
+                )
+
+            state = json.loads(paths.state_file.read_text(encoding="utf-8"))
+            old_tunnel_pid = int(state.get("tunnel_pid", 0))
+            if tunnel_owned and old_tunnel_pid > 0:
+                _terminate_tree(old_tunnel_pid)
+            if _http_check(tunnel_ready)["status"] == "ok":
+                raise LifecycleError(
+                    "Tunnel health endpoint is already occupied; refusing unsafe takeover"
+                )
+
+            environment = os.environ.copy()
+            tunnel_process: subprocess.Popen[Any] | None = None
+            try:
+                tunnel_process = _popen_background(
+                    [
+                        *_self_command(),
+                        "_tunnel",
+                        "--env-file",
+                        str(tunnel.env_file),
+                        paths.home_option,
+                        str(paths.app_root),
+                    ],
+                    cwd=paths.app_root,
+                    log_path=paths.log_dir / "tunnel-supervisor.log",
+                    env=environment,
+                )
+                tunnel_wait = _wait_endpoint(
+                    tunnel_ready,
+                    tunnel_process,
+                    startup_timeout_seconds,
+                )
+                if tunnel_wait["status"] != "ok":
+                    raise LifecycleError(
+                        f"Tunnel startup failed: {json.dumps(tunnel_wait, ensure_ascii=False)}"
+                    )
+                state["transport"] = provider.provider_id
+                state["tunnel_pid"] = tunnel_process.pid
+                state["tunnel_process_marker"] = _process_marker(tunnel_process.pid)
+                state["tunnel_ready_url"] = tunnel_ready
+                _write_json_atomic(paths.state_file, state)
+                return {
+                    "status": "ok",
+                    "services": {
+                        "bridge": {
+                            "status": "reused",
+                            "pid": existing_bridge.get("pid"),
+                            "health": existing_bridge.get("health"),
+                        },
+                        "tunnel": {
+                            "status": "started",
+                            "pid": tunnel_process.pid,
+                            "health": tunnel_wait,
+                        },
+                    },
+                }
+            except Exception:
+                if tunnel_process is not None and tunnel_process.poll() is None:
+                    _terminate_tree(tunnel_process.pid)
+                raise
+
+        tunnel_reusable = (
+            isinstance(existing_tunnel, Mapping)
+            and existing_tunnel.get("owned") is True
+            and isinstance(existing_tunnel.get("health"), Mapping)
+            and existing_tunnel["health"].get("status") == "ok"
+        )
+        if tunnel_reusable:
+            if not isinstance(existing_bridge, Mapping):
+                raise LifecycleError("degraded lifecycle state has no bridge ownership metadata")
+            bridge_owned = existing_bridge.get("owned") is True
+            existing_bridge_health = existing_bridge.get("health")
+            bridge_healthy = (
+                isinstance(existing_bridge_health, Mapping)
+                and existing_bridge_health.get("status") == "ok"
+            )
+            if not bridge_owned and bridge_healthy:
+                raise LifecycleError(
+                    "Bridge health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                )
+
+            state = json.loads(paths.state_file.read_text(encoding="utf-8"))
+            old_bridge_pid = int(state.get("bridge_pid", 0))
+            if bridge_owned and old_bridge_pid > 0:
+                _terminate_tree(old_bridge_pid)
+
+            bridge_health_headers = _bridge_probe_headers(
+                security.network_trust.allowed_hosts
+                if security.auth_mode == AUTH_MODE_NONE and security.network_trust is not None
+                else None
+            )
+            bridge_occupied = (
+                _http_check(bridge_health)
+                if bridge_health_headers is None
+                else _http_check(bridge_health, headers=bridge_health_headers)
+            )
+            if bridge_occupied["status"] == "ok":
+                raise LifecycleError(
+                    "Bridge health endpoint is already occupied; refusing unsafe takeover"
+                )
+
+            environment = os.environ.copy()
+            bridge_process: subprocess.Popen[Any] | None = None
+            try:
+                bridge_process = _popen_background(
+                    [
+                        *_self_command(),
+                        "serve",
+                        "--bridge-config",
+                        str(bridge_path),
+                        "--projects-config",
+                        str(projects_path),
+                        paths.home_option,
+                        str(paths.app_root),
+                    ],
+                    cwd=paths.app_root,
+                    log_path=paths.log_dir / "bridge-supervisor.log",
+                    env=environment,
+                )
+                if bridge_health_headers is None:
+                    bridge_wait = _wait_endpoint(
+                        bridge_health,
+                        bridge_process,
+                        startup_timeout_seconds,
+                    )
+                else:
+                    bridge_wait = _wait_endpoint(
+                        bridge_health,
+                        bridge_process,
+                        startup_timeout_seconds,
+                        headers=bridge_health_headers,
+                    )
+                if bridge_wait["status"] != "ok":
+                    raise LifecycleError(
+                        f"Bridge startup failed: {json.dumps(bridge_wait, ensure_ascii=False)}"
+                    )
+                state["bridge_pid"] = bridge_process.pid
+                state["bridge_process_marker"] = _process_marker(bridge_process.pid)
+                state["bridge_health_url"] = bridge_health
+                _write_json_atomic(paths.state_file, state)
+                return {
+                    "status": "ok",
+                    "services": {
+                        "bridge": {
+                            "status": "started",
+                            "pid": bridge_process.pid,
+                            "health": bridge_wait,
+                        },
+                        "tunnel": {
+                            "status": "reused",
+                            "pid": existing_tunnel.get("pid"),
+                            "health": existing_tunnel.get("health"),
+                        },
+                    },
+                }
+            except Exception:
+                if bridge_process is not None and bridge_process.poll() is None:
+                    _terminate_tree(bridge_process.pid)
+                raise
+
+        state = json.loads(paths.state_file.read_text(encoding="utf-8"))
+        if isinstance(existing_bridge, Mapping):
+            bridge_owned = existing_bridge.get("owned") is True
+            existing_bridge_health = existing_bridge.get("health")
+            bridge_healthy = (
+                isinstance(existing_bridge_health, Mapping)
+                and existing_bridge_health.get("status") == "ok"
+            )
+            if not bridge_owned and bridge_healthy:
+                raise LifecycleError(
+                    "Bridge health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                )
+            old_bridge_pid = int(state.get("bridge_pid", 0))
+            if bridge_owned and old_bridge_pid > 0:
+                _terminate_tree(old_bridge_pid)
+        if isinstance(existing_tunnel, Mapping):
+            tunnel_owned = existing_tunnel.get("owned") is True
+            existing_tunnel_health = existing_tunnel.get("health")
+            tunnel_healthy = (
+                isinstance(existing_tunnel_health, Mapping)
+                and existing_tunnel_health.get("status") == "ok"
+            )
+            if not tunnel_owned and tunnel_healthy:
+                raise LifecycleError(
+                    "Tunnel health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                )
+            old_tunnel_pid = int(state.get("tunnel_pid", 0))
+            if tunnel_owned and old_tunnel_pid > 0:
+                _terminate_tree(old_tunnel_pid)
+
+        paths.state_file.unlink(missing_ok=True)
     bridge_health_headers = _bridge_probe_headers(
         security.network_trust.allowed_hosts
         if security.auth_mode == AUTH_MODE_NONE and security.network_trust is not None

@@ -172,15 +172,26 @@ def test_cloudflared_run_uses_environment_token_and_fixed_argv(
         lambda _context: "2026.8.0",
     )
 
+    fake_process = SimpleNamespace(
+        stdout=["TUNNEL_TOKEN=supersecret\n", "connected\n"],
+        wait=lambda: 0,
+    )
+
     def fake_popen(args, **kwargs):
         captured["args"] = args
         captured["env"] = kwargs["env"]
-        return SimpleNamespace(
-            stdout=["TUNNEL_TOKEN=supersecret\n", "connected\n"],
-            wait=lambda: 0,
-        )
+        return fake_process
+
+    def fake_attach(process):
+        captured["job_process"] = process
+        return 12345
+
+    def fake_close(handle):
+        captured["closed_job_handle"] = handle
 
     monkeypatch.setattr(cloudflare.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(cloudflare, "_attach_kill_on_close_job", fake_attach)
+    monkeypatch.setattr(cloudflare, "_close_windows_handle", fake_close)
     rotated: list[Path] = []
 
     result = CLOUDFLARE_TUNNEL_PROVIDER.run(
@@ -203,6 +214,8 @@ def test_cloudflared_run_uses_environment_token_and_fixed_argv(
     ]
     assert "supersecret" not in " ".join(captured["args"])
     assert captured["env"]["TUNNEL_TOKEN"] == "supersecret"
+    assert captured["job_process"] is fake_process
+    assert captured["closed_job_handle"] == 12345
     assert rotated == [context.log_dir / "cloudflared.log"]
     log_text = (context.log_dir / "cloudflared.log").read_text(encoding="utf-8")
     assert "supersecret" not in log_text

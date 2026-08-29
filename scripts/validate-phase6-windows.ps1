@@ -2,7 +2,7 @@
 param(
     [ValidateRange(1, 100)]
     [int]$Iterations = 20,
-    [string]$Home,
+    [string]$RuntimeHome,
     [string]$InstallDir,
     [ValidateRange(1, 65535)]
     [int]$BridgePort = 46200,
@@ -16,18 +16,18 @@ $ErrorActionPreference = "Stop"
 if ($env:OS -ne "Windows_NT") {
     throw "Phase 6 packaged-runtime validation must run on Windows"
 }
-if ([string]::IsNullOrWhiteSpace($Home)) {
-    $Home = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+if ([string]::IsNullOrWhiteSpace($RuntimeHome)) {
+    $RuntimeHome = Join-Path $env:LOCALAPPDATA "codemcp-remote"
 }
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\codemcp-remote"
 }
 
 $Executable = Join-Path $InstallDir "codemcp-remote.exe"
-$StateFile = Join-Path $Home "phase5-validation.json"
-$SecretFile = Join-Path $Home "secrets\cloudflare-tunnel-token.dpapi"
-$LogDir = Join-Path $Home "logs"
-$RuntimeArguments = @("--home", $Home)
+$StateFile = Join-Path $RuntimeHome "phase5-validation.json"
+$SecretFile = Join-Path $RuntimeHome "secrets\cloudflare-tunnel-token.dpapi"
+$LogDir = Join-Path $RuntimeHome "logs"
+$RuntimeArguments = @("--home", $RuntimeHome)
 
 if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
     throw "installed codemcp-remote.exe was not found: $Executable"
@@ -99,13 +99,13 @@ function Start-And-Verify {
 }
 
 function Assert-ProcessExited {
-    param([Parameter(Mandatory = $true)][int]$Pid,[Parameter(Mandatory = $true)][string]$Name)
+    param([Parameter(Mandatory = $true)][int]$ProcessId,[Parameter(Mandatory = $true)][string]$Name)
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
-        if ($null -eq (Get-Process -Id $Pid -ErrorAction SilentlyContinue)) { return }
+        if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
         Start-Sleep -Milliseconds 250
     }
-    throw "$Name process did not exit: pid=$Pid"
+    throw "$Name process did not exit: pid=$ProcessId"
 }
 
 function Assert-StartFailsWithListener {
@@ -173,7 +173,7 @@ for ($index = 1; $index -le $Iterations; $index++) {
 $bridgeStatus = Start-And-Verify
 $bridgePid = [int]$bridgeStatus.bridge.pid
 Stop-Process -Id $bridgePid -Force
-Assert-ProcessExited -Pid $bridgePid -Name "Bridge"
+Assert-ProcessExited -ProcessId $bridgePid -Name "Bridge"
 $bridgeDegraded = Invoke-JsonAttempt -Arguments (@("status") + $RuntimeArguments)
 if (
     $null -ne $bridgeDegraded.payload -and
@@ -189,10 +189,29 @@ Stop-AcceptanceRuntime
 $tunnelStatus = Start-And-Verify
 $tunnelPid = [int]$tunnelStatus.tunnel.pid
 Stop-Process -Id $tunnelPid -Force
-Assert-ProcessExited -Pid $tunnelPid -Name "Tunnel"
-$tunnelDegraded = Invoke-JsonAttempt -Arguments (@("status") + $RuntimeArguments)
-if ($null -ne $tunnelDegraded.payload -and $tunnelDegraded.payload.tunnel.health.status -eq "ok") {
-    throw "Tunnel crash was not reflected in lifecycle status"
+Assert-ProcessExited -ProcessId $tunnelPid -Name "Tunnel"
+$tunnelDegraded = $null
+$tunnelCrashDeadline = [DateTime]::UtcNow.AddSeconds(10)
+while ([DateTime]::UtcNow -lt $tunnelCrashDeadline) {
+    $tunnelDegraded = Invoke-JsonAttempt -Arguments (@("status") + $RuntimeArguments)
+    if (
+        $null -ne $tunnelDegraded.payload -and
+        $tunnelDegraded.payload.status -eq "degraded" -and
+        $tunnelDegraded.payload.tunnel.owned -eq $false -and
+        $tunnelDegraded.payload.tunnel.health.status -ne "ok"
+    ) {
+        break
+    }
+    Start-Sleep -Milliseconds 250
+}
+if (
+    $null -eq $tunnelDegraded -or
+    $null -eq $tunnelDegraded.payload -or
+    $tunnelDegraded.payload.status -ne "degraded" -or
+    $tunnelDegraded.payload.tunnel.owned -ne $false -or
+    $tunnelDegraded.payload.tunnel.health.status -eq "ok"
+) {
+    throw "Tunnel crash was not reflected in lifecycle status and child-process health"
 }
 Stop-AcceptanceRuntime
 $null = Start-And-Verify

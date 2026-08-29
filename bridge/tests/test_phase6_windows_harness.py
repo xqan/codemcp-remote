@@ -19,6 +19,14 @@ def test_phase6_harness_covers_packaged_lifecycle_and_failure_cases() -> None:
     script = HARNESS.read_text(encoding="utf-8")
 
     assert "[int]$Iterations = 20" in script
+    assert "[string]$RuntimeHome" in script
+    assert "[string]$Home" not in script
+    assert "[int]$Pid" not in script
+    assert "[int]$ProcessId" in script
+    assert "Assert-ProcessExited -Pid" not in script
+    assert "Assert-ProcessExited -ProcessId $bridgePid" in script
+    assert "Assert-ProcessExited -ProcessId $tunnelPid" in script
+    assert '$RuntimeArguments = @("--home", $RuntimeHome)' in script
     assert 'status = "phase6-local-host-gate-pass"' in script
     assert "requested_iterations = $Iterations" in script
     assert "failed_iterations = 0" in script

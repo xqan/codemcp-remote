@@ -684,6 +684,34 @@ function Invoke-Start {
     $env:TUNNEL_TOKEN = $null
     $env:CODEMCP_RS_VERIFICATION_SECRET = $null
     $runtimeArguments = Get-AcceptanceRuntimeArguments
+
+    # Start must reuse the acceptance identity frozen by Prepare. Command-line
+    # defaults are only defaults for Prepare and must not silently replace the
+    # managed state when Start is invoked without repeating all Prepare args.
+    $preparedState = Read-Phase5ValidationState
+    $preparedProfile = [string](Get-StateField -State $preparedState -Name "acceptance_profile")
+    if ([string]::IsNullOrWhiteSpace($preparedProfile)) {
+        # Preserve the legacy managed-state interpretation used elsewhere in
+        # this harness for state written before the explicit profile field.
+        $preparedProfile = "5.5.7B"
+    }
+    if ($preparedProfile -notin @("5.5.7A", "5.5.7B")) {
+        throw "managed acceptance state has an unsupported acceptance_profile"
+    }
+    $AcceptanceProfile = $preparedProfile
+
+    $preparedBridgeUrl = [string](Get-StateField -State $preparedState -Name "bridge_url")
+    if (-not [string]::IsNullOrWhiteSpace($preparedBridgeUrl)) {
+        $AcceptanceBridgeUrl = $preparedBridgeUrl
+    }
+    if ($AcceptanceProfile -eq "5.5.7A") {
+        $preparedAllowedHost = [string](Get-StateField -State $preparedState -Name "allowed_host")
+        if ([string]::IsNullOrWhiteSpace($preparedAllowedHost)) {
+            throw "managed 5.5.7A acceptance state is missing allowed_host"
+        }
+        $AllowedHost = $preparedAllowedHost
+    }
+
     $doctor = Invoke-JsonCommand -FilePath $release.exe -ArgumentList (@("doctor") + $runtimeArguments)
     Assert-DoctorContract `
         -Doctor $doctor `

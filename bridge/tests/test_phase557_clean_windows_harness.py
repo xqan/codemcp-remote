@@ -188,6 +188,23 @@ def test_phase557_profiles_use_explicit_runtime_home() -> None:
     assert "home = $AcceptanceHome" in script
 
 
+def test_phase557_start_reuses_prepare_acceptance_identity() -> None:
+    script = _script()
+    start_index = script.index("function Invoke-Start")
+    start_body = script[start_index : script.index("function Invoke-Cleanup", start_index)]
+
+    assert "$preparedState = Read-Phase5ValidationState" in start_body
+    assert 'Get-StateField -State $preparedState -Name "acceptance_profile"' in start_body
+    assert 'Get-StateField -State $preparedState -Name "allowed_host"' in start_body
+    assert 'Get-StateField -State $preparedState -Name "bridge_url"' in start_body
+    assert "$AcceptanceProfile = $preparedProfile" in start_body
+    assert "$AllowedHost = $preparedAllowedHost" in start_body
+    assert "$AcceptanceBridgeUrl = $preparedBridgeUrl" in start_body
+    assert "-ExpectedAcceptanceProfile $AcceptanceProfile" in start_body
+    assert "-ExpectedAllowedHost $AllowedHost" in start_body
+    assert "-ExpectedBridgeUrl $AcceptanceBridgeUrl" in start_body
+
+
 def test_phase557_local_contract_requires_cloudflared_loopback_and_external_auth() -> None:
     script = _script()
 

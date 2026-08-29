@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import os
 import re
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import time
 from collections.abc import Callable
+from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,103 @@ _REDACT_ASSIGNMENT = re.compile(
     r"ACCESS_TOKEN|REFRESH_TOKEN|TOKEN)\s*[:=]\s*)([^\s,;]+)"
 )
 _REDACT_BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+
+
+class _JobObjectBasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("per_process_user_time_limit", ctypes.c_longlong),
+        ("per_job_user_time_limit", ctypes.c_longlong),
+        ("limit_flags", wintypes.DWORD),
+        ("minimum_working_set_size", ctypes.c_size_t),
+        ("maximum_working_set_size", ctypes.c_size_t),
+        ("active_process_limit", wintypes.DWORD),
+        ("affinity", ctypes.c_size_t),
+        ("priority_class", wintypes.DWORD),
+        ("scheduling_class", wintypes.DWORD),
+    ]
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ("read_operation_count", ctypes.c_ulonglong),
+        ("write_operation_count", ctypes.c_ulonglong),
+        ("other_operation_count", ctypes.c_ulonglong),
+        ("read_transfer_count", ctypes.c_ulonglong),
+        ("write_transfer_count", ctypes.c_ulonglong),
+        ("other_transfer_count", ctypes.c_ulonglong),
+    ]
+
+
+class _JobObjectExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("basic_limit_information", _JobObjectBasicLimitInformation),
+        ("io_info", _IoCounters),
+        ("process_memory_limit", ctypes.c_size_t),
+        ("job_memory_limit", ctypes.c_size_t),
+        ("peak_process_memory_used", ctypes.c_size_t),
+        ("peak_job_memory_used", ctypes.c_size_t),
+    ]
+
+
+def _attach_kill_on_close_job(process: subprocess.Popen[Any]) -> int | None:
+    """Bind a Windows child tree to the supervisor lifetime."""
+
+    if os.name != "nt":
+        return None
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job_handle = kernel32.CreateJobObjectW(None, None)
+    if not job_handle:
+        raise LifecycleError(
+            f"failed to create Windows Job Object: winerror={ctypes.get_last_error()}"
+        )
+
+    information = _JobObjectExtendedLimitInformation()
+    information.basic_limit_information.limit_flags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(
+        job_handle,
+        _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+    ):
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(job_handle)
+        raise LifecycleError(f"failed to configure Windows Job Object: winerror={error}")
+
+    process_handle = getattr(process, "_handle", None)
+    if process_handle is None or not kernel32.AssignProcessToJobObject(job_handle, process_handle):
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(job_handle)
+        raise LifecycleError(
+            f"failed to bind cloudflared to the supervisor Job Object: winerror={error}"
+        )
+    return int(job_handle)
+
+
+def _close_windows_handle(handle: int | None) -> None:
+    if handle is None or os.name != "nt":
+        return
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle(handle)
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,13 +380,26 @@ class CloudflareTunnelProvider:
             errors="replace",
             bufsize=1,
         )
-        assert process.stdout is not None
-        with log_path.open("a", encoding="utf-8", newline="\n") as handle:
-            for line in process.stdout:
-                timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                handle.write(f"{timestamp} {self.redact(line.rstrip())}\n")
-                handle.flush()
-        return int(process.wait())
+        job_handle: int | None = None
+        try:
+            job_handle = _attach_kill_on_close_job(process)
+            assert process.stdout is not None
+            with log_path.open("a", encoding="utf-8", newline="\n") as handle:
+                for line in process.stdout:
+                    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    handle.write(f"{timestamp} {self.redact(line.rstrip())}\n")
+                    handle.flush()
+            return int(process.wait())
+        except BaseException:
+            if process.poll() is None:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            raise
+        finally:
+            _close_windows_handle(job_handle)
 
     def bridge_url(self, settings: CloudflareTunnelSettings) -> str:
         return settings.origin_url

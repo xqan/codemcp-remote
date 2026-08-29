@@ -1,10 +1,11 @@
 # codemcp-remote 开源整改计划（v0.1.0 Open Source Readiness）
 
-> 更新基线：2026-08-28  
+> 更新基线：2026-08-29  
 > 目标版本：`v0.1.0`  
 > 当前分支：`codex/open-source-readiness`  
-> 整改起始 HEAD：`7d39cf97594aa9425067d158722f8ddbba302486`；最终 release-candidate HEAD 只在 Final Release Gate sign-off 时冻结并记录  
-> 状态：**PRE-RELEASE / STABLE RELEASE BLOCKED**
+> 整改起始 HEAD：`7d39cf97594aa9425067d158722f8ddbba302486`；最终 release-candidate HEAD 只在 Final Release Gate sign-off 时冻结并记录
+> 当前已验收 runtime-code baseline：`0af97f4313eeaac80a682ffec212db778cea6a89`  
+> 状态：**PRE-RELEASE / FINAL RELEASE GATE IN PROGRESS / STABLE RELEASE BLOCKED**
 
 ## 1. 目的
 
@@ -148,15 +149,65 @@ local CLI project add/remove
 | Stage / Track | 当前状态 | 是否阻塞 stable `v0.1.0` | 说明 |
 |---|---|---:|---|
 | Stage 0 — Readiness baseline | **COMPLETE** | 否 | 初始开源整改基线已建立；最终 release freeze 仍在末尾执行 |
-| Stage 1 — License / Security / Threat Model | **COMPLETE（Third-Party Notices 决策待 Stage 6）** | 部分 | 核心法律/安全文档已完成 |
-| Stage 2 — Phase 6 Windows Operations | **IN PROGRESS** | **是** | 真实主机可靠性、故障、日志、路径矩阵仍缺最终证据 |
-| Stage 3 — Phase 7 Final Acceptance | **IN PROGRESS / BLOCKED BY PREREQUISITES** | **是** | 本地回归有 PASS，但最终功能/安全/可靠性/真实项目 Gate 未闭环 |
-| Stage 4 — README / Onboarding | **REPOSITORY IMPLEMENTATION COMPLETE** | 是 | 最终 clean-machine 文档执行验证和全仓文档一致性待完成 |
-| Stage 5 — GitHub Governance / CI | **REPOSITORY IMPLEMENTATION COMPLETE** | 是 | GitHub hosted 首次运行、Dependabot、ruleset/branch protection 待验证 |
-| Stage 6 — Secrets / Privacy / Supply Chain | **PENDING** | **是** | Git history、artifact、dependency/license audit 未形成最终 PASS |
-| Stage 7 — Release Packaging | **IMPLEMENTATION SUBSTANTIALLY COMPLETE** | **是** | Installer/ZIP/SHA 已有；strict clean-machine/final-RC packaging 仍未闭环 |
-| Network Trust Phase A–H | **COMPLETE** | 否 | 推荐 Profile A 的 live path 已完成，不能替代 Phase 6/7 |
+| Stage 1 — License / Security / Threat Model | **COMPLETE** | 否 | 核心法律/安全文档与 third-party notices 策略已完成 |
+| Stage 2 — Phase 6 Windows Operations | **PASS / COMPLETE** | 否 | final RC Windows 11 mandatory real-host/fault/path/log matrix 已完成 |
+| Stage 3 — Phase 7 Final Acceptance | **IN PROGRESS — FINAL RELEASE GATE** | **是** | Functional 与 Reliability 已收口；Security 仅剩 prompt-injection 收尾；10 real-project tasks 与 final automated/docs/rebuild/sign-off 仍待完成 |
+| Stage 4 — README / Onboarding | **REPOSITORY IMPLEMENTATION COMPLETE / FINAL VERIFICATION PENDING** | 是 | 当前规范文档已对齐；final artifact README-only clean-machine execution/known limitations 待最终复核 |
+| Stage 5 — GitHub Governance / CI | **REPOSITORY IMPLEMENTATION COMPLETE / HOSTED CI WAIVER RECORDED** | 是 | hosted CI 因 billing 在 runner 前阻塞并已记录 waiver；ruleset/Dependabot/最终治理记录仍待收口 |
+| Stage 6 — Secrets / Privacy / Supply Chain | **PASS WITH DOCUMENTED LICENSE DISCREPANCY / HOSTED-CI WAIVER** | 否 | working tree/history/artifact/dependency/license audit 已完成；`codemcp==0.3.0` metadata discrepancy 已记录 |
+| Stage 7 — Release Packaging | **CURRENT RC CLEAN-MACHINE VALIDATED / FINAL-COMMIT REBUILD PENDING** | **是** | 当前 RC installer/ZIP/SHA 与 clean-machine 路径已验证；最终 release-only commit 后必须重建、复核、cleanup/sign-off |
+| Network Trust Phase A–H | **COMPLETE** | 否 | 推荐 Profile A 的 live path 已完成，并在 final RC 上重查 Host/Origin/public-source/forwarded-header 边界 |
 | Optional OAuth Profile B | **IMPLEMENTED / OPTIONAL** | 否* | *仅在 `v0.1.0` 不把其 live OAuth 端到端能力作为默认发布承诺时不阻塞 |
+
+### 3.1 Live Acceptance Ledger（当前权威进度）
+
+> 本节是 `v0.1.0` Open Source Readiness 的实时状态账本。下方各 Stage 的 checklist 继续作为 release requirement 定义；若状态与本节不一致，以本节和对应 `docs/acceptance/` 权威验收记录为准。
+
+#### 已完成
+
+- [x] Stage 2 / Phase 6 Windows mandatory real-host matrix：**PASS / COMPLETE**；
+- [x] Phase 7 Functional acceptance：F-01 ~ F-20 **PASS**；
+- [x] Phase 7 Reliability / recovery：R-01 ~ R-14 **PASS**（live + deterministic final-RC evidence）；
+- [x] Security：S-01/S-02/S-03/S-05~S-22/S-24~S-33 已有 PASS 证据；
+- [x] S-04 symlink escape：deterministic final-RC test PASS；当前 clean-machine live symlink capability 因 Windows privilege **ENVIRONMENT BLOCKED**，不是产品 FAIL；S-05 Windows junction/reparse live PASS；
+- [x] S-16 expired approval：short-TTL clean-machine local MCP live test 返回 `APPROVAL_EXPIRED`，Git HEAD 不变且 `dirty=false`，正式 TTL 已恢复 `300`；
+- [x] S-19 cross-project operation/approval isolation：foreign project session 无法查看/取消原项目 pending operation；
+- [x] S-25 secret/log canary：final-RC regression + packaged Phase 6 canary evidence PASS；
+- [x] S-26 hidden model/provider egress：clean-machine 实测 Bridge + native worker 仅有 loopback TCP，无 non-loopback remote connection；
+- [x] S-27/S-28/S-29/S-30 network-trust live boundary：Host / Origin / ordinary public source / forwarded-header spoof 均 fail closed；
+- [x] Stage 6 working-tree / Git-history / artifact / dependency / license audit：**PASS WITH DOCUMENTED `codemcp==0.3.0` LICENSE METADATA DISCREPANCY**；
+- [x] 当前 final-RC registered regression：`353 passed, 7 skipped, 2 warnings`；
+- [x] 当前 same-HEAD format gate：`79 files already formatted`；
+- [x] 当前 public MCP surface：exact **22 tools**；
+- [x] 当前 RC installer / ZIP / SHA identity 已生成并完成 artifact/security audit；
+- [x] GitHub hosted CI billing/spending-limit blocker 已记录为 **WAIVED / ACCEPTED RISK**，不得表述为 hosted CI PASS。
+
+#### 正在执行
+
+- [ ] **S-23 repository prompt injection**：无害 repo instruction fixture 已创建；下一步必须证明读取该内容后仍无法扩大 Bridge authorization，并清理/恢复 fixture。
+
+#### Final Release Gate 剩余 blocker
+
+- [ ] 10/10 complete real-project remote tasks：至少 5 Java + 3 frontend + 2 recovery/checkpoint/reconcile；
+- [ ] final automated gate 补齐 standalone Ruff lint、final format/build/package、`git diff --check`、clean worktree 与 exact identity；
+- [ ] README-only clean-machine onboarding / known limitations / CHANGELOG / release notes 最终一致性；
+- [ ] signing decision：正式签名，或明确接受 `NotSigned` + Windows SmartScreen/user-trust limitation；
+- [ ] required checks / ruleset / Dependabot 最终治理状态记录；
+- [ ] final release-only commit；
+- [ ] 从该最终 commit 重新构建 installer + ZIP，并重新核对 SHA-256 / artifact scan / exact commit identity；
+- [ ] final clean-machine package/cleanup/uninstall sign-off；
+- [ ] Final Release Gate sign-off；
+- [ ] tag `v0.1.0` 与 GitHub Release。
+
+### 3.2 状态同步纪律
+
+从 2026-08-29 起执行以下规则：
+
+1. 每完成一个 Phase 6/7、Security、Reliability、Real-project、Docs、Packaging 或 Release Gate 项，**立即更新本 Live Acceptance Ledger**；
+2. 同步更新对应的 `docs/acceptance/phase-6-validation.md`、`docs/acceptance/acceptance-test-plan.md` 或相关 validation report；
+3. PASS / FAIL / BLOCKED / ENVIRONMENT BLOCKED 必须绑定具体证据，不以“代码已实现”替代验收；
+4. 若修复改变 artifact 或安全语义，立即把受影响 Gate 重新标记为待复核，直到新证据重新 PASS；
+5. Final Release Gate sign-off 前，再将本计划的 Stage summary、blocker list 与 Definition of Done 做一次最终一致性收口。
 
 ---
 
@@ -207,9 +258,10 @@ local CLI project add/remove
 
 ### Stage 6 联动项
 
-- [ ] 复核全部第三方 dependency license；
-- [ ] 明确是否生成 `THIRD_PARTY_NOTICES.md`；
-- [ ] 如果生成，区分本项目 AGPL 与第三方依赖各自许可证。
+- [x] 已复核全部第三方 dependency license；
+- [x] third-party notice 策略已确定并进入 release contract：`THIRD_PARTY_NOTICES.txt` + `BUILD_PROVENANCE.json` + component license files；
+- [x] 已区分本项目 `AGPL-3.0-only` 与第三方依赖各自许可证；
+- [x] `codemcp==0.3.0` 的 METADATA=MIT / bundled License-File=Apache-2.0 差异已作为 documented discrepancy 完成人工 signoff。
 
 ---
 
