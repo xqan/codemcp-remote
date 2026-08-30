@@ -156,13 +156,32 @@ Path(sys.argv[2]).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", 
 PY
 
 CPYTHON_LICENSE=$(python3.12 - <<'PY'
+import os
 import sys
 from pathlib import Path
-for name in ("LICENSE", "LICENSE.txt"):
-    candidate = Path(sys.base_prefix) / name
-    if candidate.is_file():
-        print(candidate)
-        break
+
+stdlib = Path(getattr(sys, "_stdlib_dir", "") or Path(os.__file__).resolve().parent)
+roots = (stdlib.parent, stdlib, Path(sys.base_prefix))
+seen = set()
+for root in roots:
+    try:
+        root = root.resolve()
+    except OSError:
+        continue
+    if root in seen:
+        continue
+    seen.add(root)
+    for name in ("LICENSE.txt", "LICENSE"):
+        candidate = root / name
+        if not candidate.is_file():
+            continue
+        try:
+            text = candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        if "PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2" in text:
+            print(candidate)
+            raise SystemExit(0)
 PY
 )
 [ -n "$CPYTHON_LICENSE" ] || fail "CPython license evidence is missing"

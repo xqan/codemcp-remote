@@ -193,6 +193,8 @@ def test_macos_build_script_uses_native_onedir_adhoc_contract() -> None:
         '"extracted_pre_sign_sha256"',
         '"expected_release_tag": "v0.1.0"',
         'SOURCE_TAG=$(git -C "$ROOT" describe --tags --exact-match HEAD',
+        'getattr(sys, "_stdlib_dir", "")',
+        "PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2",
         "cloudflared-license",
         "SHA256SUMS.txt",
     )
