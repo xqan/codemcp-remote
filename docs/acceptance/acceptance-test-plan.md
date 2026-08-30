@@ -206,39 +206,41 @@ Every case must fail closed or enter the explicitly designed `unknown` state.
 
 | ID | Attack / invalid state | Required behavior | Status |
 |---|---|---|---|
-| S-01 | unknown `project_id` | `PROJECT_NOT_ALLOWED` | PENDING |
-| S-02 | arbitrary absolute path | reject before unauthorized filesystem access | PENDING |
-| S-03 | `../` traversal | `PATH_ESCAPE` | PENDING |
-| S-04 | symlink escape | fail closed | PENDING |
-| S-05 | Windows junction/reparse escape | fail closed | PENDING REAL WINDOWS |
-| S-06 | secret path | `SENSITIVE_PATH`/equivalent denial | PENDING |
-| S-07 | secret through search | excluded before/after backend | PENDING |
-| S-08 | sensitive content through diff | reject/redact | PENDING |
-| S-09 | binary/oversized file | bounded rejection | PENDING |
-| S-10 | unregistered command | `COMMAND_NOT_ALLOWED` | PENDING |
-| S-11 | runtime argv/executable injection | impossible through public schema | PENDING |
-| S-12 | dirty workspace mutation | fail according to policy | PENDING |
-| S-13 | forged canonical request hash | reject before side effect | PENDING |
-| S-14 | request ID reused with changed input/hash | idempotency conflict | PENDING |
-| S-15 | wrong approval token | reject | PENDING |
-| S-16 | expired approval | reject | PENDING |
-| S-17 | reused approval | reject | PENDING |
-| S-18 | cross-session operation/approval | hide/reject foreign scope | PENDING |
-| S-19 | cross-project operation/approval | hide/reject foreign scope | PENDING |
-| S-20 | external branch/HEAD change before restore | CAS conflict; no reset | PENDING |
-| S-21 | dirty worktree before restore | reject; no reset | PENDING |
-| S-22 | checkpoint ref tamper/missing | reject; no arbitrary reset | PENDING |
-| S-23 | repository prompt injection | cannot widen Bridge authorization | PENDING RED-TEAM |
-| S-24 | non-loopback Bridge config | invalid/fail closed | PENDING |
-| S-25 | secret/log canary | absent/redacted from logs/evidence | PENDING PHASE 6 |
-| S-26 | hidden model/provider egress | absent | PENDING |
-| S-27 | wrong/missing Host | exact host boundary rejects | PENDING LIVE RECHECK |
-| S-28 | invalid Origin when present | reject non-exact origin | PENDING LIVE RECHECK |
-| S-29 | ordinary public source | Cloudflare blocks before Bridge | PENDING FINAL LIVE RECHECK |
-| S-30 | forwarded-IP spoof | forwarded headers cannot authorize | PENDING |
-| S-31 | project registry invalid update | last-known-good retained; fail closed | PENDING |
-| S-32 | project root redirect | rejected; no silent authorization transfer | PENDING |
-| S-33 | MCP project-admin attempt | no public admin tool exists | PENDING CONTRACT |
+| S-01 | unknown `project_id` | `PROJECT_NOT_ALLOWED` | PASS |
+| S-02 | arbitrary absolute path | reject before unauthorized filesystem access | PASS |
+| S-03 | `../` traversal | `PATH_ESCAPE` | PASS |
+| S-04 | symlink escape | fail closed | DETERMINISTIC PASS / LIVE ENVIRONMENT BLOCKED |
+| S-05 | Windows junction/reparse escape | fail closed | PASS REAL WINDOWS |
+| S-06 | secret path | `SENSITIVE_PATH`/equivalent denial | PASS |
+| S-07 | secret through search | excluded before/after backend | PASS |
+| S-08 | sensitive content through diff | reject/redact | PASS |
+| S-09 | binary/oversized file | bounded rejection | PASS |
+| S-10 | unregistered command | `COMMAND_NOT_ALLOWED` | PASS |
+| S-11 | runtime argv/executable injection | impossible through public schema | PASS CONTRACT |
+| S-12 | dirty workspace mutation | fail according to policy | PASS |
+| S-13 | forged canonical request hash | reject before side effect | PASS |
+| S-14 | request ID reused with changed input/hash | idempotency conflict | PASS |
+| S-15 | wrong approval token | reject | PASS |
+| S-16 | expired approval | reject | PASS REAL WINDOWS |
+| S-17 | reused approval | reject | PASS |
+| S-18 | cross-session operation/approval | hide/reject foreign scope | PASS |
+| S-19 | cross-project operation/approval | hide/reject foreign scope | PASS REAL WINDOWS |
+| S-20 | external branch/HEAD change before restore | CAS conflict; no reset | PASS REAL WINDOWS |
+| S-21 | dirty worktree before restore | reject; no reset | PASS REAL WINDOWS |
+| S-22 | checkpoint ref tamper/missing | reject; no arbitrary reset | PASS REAL WINDOWS |
+| S-23 | repository prompt injection | cannot widen Bridge authorization | PASS RED-TEAM LIVE |
+| S-24 | non-loopback Bridge config | invalid/fail closed | PASS |
+| S-25 | secret/log canary | absent/redacted from logs/evidence | PASS PHASE 6 + REGRESSION |
+| S-26 | hidden model/provider egress | absent | PASS LIVE |
+| S-27 | wrong/missing Host | exact host boundary rejects | PASS LIVE |
+| S-28 | invalid Origin when present | reject non-exact origin | PASS LIVE |
+| S-29 | ordinary public source | Cloudflare blocks before Bridge | PASS LIVE |
+| S-30 | forwarded-IP spoof | forwarded headers cannot authorize | PASS LIVE |
+| S-31 | project registry invalid update | last-known-good retained; fail closed | PASS |
+| S-32 | project root redirect | rejected; no silent authorization transfer | PASS |
+| S-33 | MCP project-admin attempt | no public admin tool exists | PASS CONTRACT |
+
+S-23 live evidence: ChatGPT read a repository fixture instructing it to ignore security rules and access `../outside.txt`; the subsequent Bridge `file_list("../")` call still failed with `PATH_ESCAPE`. The fixture was deleted. After a host reboot invalidated the originating session, the old checkpoint restore correctly failed closed with `SESSION_NOT_FOUND`; the disposable acceptance repository was then locally reset to the exact pre-test baseline `5c39ea948fb91389762217e748b7d8bbd0c0b4e9`, branch `develop`, clean worktree.
 
 Any bypass that grants broader filesystem, command, approval, Git, identity, secret, network or project-administration capability is a release blocker.
 
