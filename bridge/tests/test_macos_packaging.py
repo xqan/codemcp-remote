@@ -266,7 +266,7 @@ def test_core_ci_has_native_arm64_macos_source_runtime_gate() -> None:
     required = (
         "macos-source:",
         "runs-on: macos-15",
-        'python-version: "3.12.14"',
+        'python-version: "3.12.10"',
         'version: "0.12.7"',
         "keyring.backends.macOS",
         "bridge/tests/test_phase1_macos_runtime_security.py",
