@@ -1,7 +1,7 @@
 # Phase 7 Acceptance Test Plan — v0.1.0 Final Release Gate
 
-> Status: **IN PROGRESS / FINAL RELEASE CANDIDATE PENDING**  
-> Updated: 2026-08-28  
+> Status: **IN PROGRESS / FINAL RELEASE GATE**  
+> Updated: 2026-08-30  
 > Target: first stable `v0.1.0`
 
 ## 1. Purpose
@@ -185,7 +185,7 @@ Required checks:
 - approval remains explicit where designed;
 - schema differences from the accepted baseline are reviewed.
 
-Status: **PENDING FINAL-RC RE-RUN.**
+Status: **PASS / COMPLETE.**
 
 ## 7. Functional acceptance
 
@@ -193,26 +193,26 @@ Use the real acceptance projects through the supported Profile A remote path.
 
 | ID | Flow | Required result | Status |
 |---|---|---|---|
-| F-01 | open registered project | correct project/session/branch/HEAD metadata | PENDING |
-| F-02 | project status | readiness and Git state accurate | PENDING |
-| F-03 | list/read text | bounded correct content/metadata | PENDING |
-| F-04 | code search | relevant results; sensitive paths omitted | PENDING |
-| F-05 | create file | one intended committed change; replay idempotent | PENDING |
-| F-06 | exact edit | only intended target change | PENDING |
-| F-07 | whole-file write | matching SHA succeeds; stale SHA rejects | PENDING |
-| F-08 | move tracked file | no clobber; correct tracked semantics | PENDING |
-| F-09 | delete tracked file | intended tracked file only | PENDING |
-| F-10 | create directory | intended `.gitkeep`/Git-trackable behavior | PENDING |
-| F-11 | registered command | only configured command ID runs | PENDING |
-| F-12 | format/test wrappers | only registered expected-kind command runs | PENDING |
-| F-13 | git status/diff | bounded state corresponds to repository | PENDING |
-| F-14 | manual checkpoint | explicit approval + registered ref | PENDING |
-| F-15 | checkpoint restore | second approval + expected-HEAD CAS restore | PENDING |
-| F-16 | operation status/audit | lifecycle reconstructable | PENDING |
-| F-17 | cancel operation | only eligible owned operation cancelled | PENDING |
-| F-18 | reconcile unknown | evidence-backed transition preserves safety | PENDING |
-| F-19 | project add hot reload | local CLI add observed without Bridge/Tunnel/Connector restart | PENDING |
-| F-20 | project remove revocation | local CLI removal blocks new access and affected active sessions | PENDING |
+| F-01 | open registered project | correct project/session/branch/HEAD metadata | PASS |
+| F-02 | project status | readiness and Git state accurate | PASS |
+| F-03 | list/read text | bounded correct content/metadata | PASS |
+| F-04 | code search | relevant results; sensitive paths omitted | PASS |
+| F-05 | create file | one intended committed change; replay idempotent | PASS |
+| F-06 | exact edit | only intended target change | PASS |
+| F-07 | whole-file write | matching SHA succeeds; stale SHA rejects | PASS |
+| F-08 | move tracked file | no clobber; correct tracked semantics | PASS |
+| F-09 | delete tracked file | intended tracked file only | PASS |
+| F-10 | create directory | intended `.gitkeep`/Git-trackable behavior | PASS |
+| F-11 | registered command | only configured command ID runs | PASS |
+| F-12 | format/test wrappers | only registered expected-kind command runs | PASS |
+| F-13 | git status/diff | bounded state corresponds to repository | PASS |
+| F-14 | manual checkpoint | explicit approval + registered ref | PASS |
+| F-15 | checkpoint restore | second approval + expected-HEAD CAS restore | PASS |
+| F-16 | operation status/audit | lifecycle reconstructable | PASS |
+| F-17 | cancel operation | only eligible owned operation cancelled | PASS |
+| F-18 | reconcile unknown | evidence-backed transition preserves safety | PASS |
+| F-19 | project add hot reload | local CLI add observed without Bridge/Tunnel/Connector restart | PASS |
+| F-20 | project remove revocation | local CLI removal blocks new access and affected active sessions | PASS |
 
 Project administration F-19/F-20 is executed locally, not through MCP.
 
@@ -264,20 +264,20 @@ Any bypass that grants broader filesystem, command, approval, Git, identity, sec
 
 | ID | Fault | Required result | Status |
 |---|---|---|---|
-| R-01 | duplicate successful mutation | persisted result replay; no duplicate edit | PENDING |
-| R-02 | same request ID / changed hash | conflict; no second side effect | PENDING |
-| R-03 | Bridge restart before dispatch | operation fails safely | PENDING |
-| R-04 | Bridge restart after uncertain backend boundary | operation becomes `unknown` | PENDING |
-| R-05 | approval pending during restart | plaintext approval unavailable; fail closed | PENDING |
-| R-06 | Cloudflare Tunnel disconnect | no transparent mutation replay | PENDING REAL TUNNEL |
-| R-07 | Native Windows worker crash | failure/unknown preserves project safety block | PENDING REAL WORKER |
-| R-08 | registered command timeout | bounded timeout + owned process-tree cleanup/unknown | PENDING |
-| R-09 | external Git race | mutation/restore detects changed state | PENDING |
-| R-10 | reconcile verified not-applied | releases block only with scoped evidence | PENDING |
-| R-11 | reconcile verified applied | successor recovery follows designed constraints | PENDING |
-| R-12 | 20 packaged start/doctor/status/stop cycles | 20/20 with no owned residue | PENDING PHASE 6 |
-| R-13 | invalid project-registry generation | keep last-known-good | PENDING |
-| R-14 | remove/re-add project ID | old sessions do not regain authorization | PENDING |
+| R-01 | duplicate successful mutation | persisted result replay; no duplicate edit | PASS |
+| R-02 | same request ID / changed hash | conflict; no second side effect | PASS |
+| R-03 | Bridge restart before dispatch | operation fails safely | PASS |
+| R-04 | Bridge restart after uncertain backend boundary | operation becomes `unknown` | PASS |
+| R-05 | approval pending during restart | plaintext approval unavailable; fail closed | PASS |
+| R-06 | Cloudflare Tunnel disconnect | no transparent mutation replay | PASS |
+| R-07 | Native Windows worker crash | failure/unknown preserves project safety block | PASS |
+| R-08 | registered command timeout | bounded timeout + owned process-tree cleanup/unknown | PASS |
+| R-09 | external Git race | mutation/restore detects changed state | PASS |
+| R-10 | reconcile verified not-applied | releases block only with scoped evidence | PASS |
+| R-11 | reconcile verified applied | successor recovery follows designed constraints | PASS |
+| R-12 | 20 packaged start/doctor/status/stop cycles | 20/20 with no owned residue | PASS |
+| R-13 | invalid project-registry generation | keep last-known-good | PASS |
+| R-14 | remove/re-add project ID | old sessions do not regain authorization | PASS |
 
 Prefer explicit unavailable/blocked/unknown results over guessing.
 
@@ -348,7 +348,7 @@ Verify from final RC:
 
 Expected Tunnel/control-plane traffic is not model egress.
 
-Status: **PENDING.**
+Status: **PASS / COMPLETE.** Evidence is the current `model_egress=deny` configuration check, S-23 prompt-injection fail-closed result, S-26 live network observation, and the explicit 22-tool ChatGPT MCP execution surface.
 
 ## 12. Network-trust live boundary
 
@@ -374,6 +374,8 @@ Final release acceptance must recheck that the current final RC has not invalida
 - ChatGPT Connector access.
 
 Do not reinterpret this as user authentication.
+
+Status: **PASS / COMPLETE.** The authoritative live evidence is `docs/reports/testing/phase-h-live-acceptance.md`, supplemented by the final-RC Host/Origin/public-source/forwarded-header checks recorded in the active Live Acceptance Ledger.
 
 ## 13. Documentation acceptance
 

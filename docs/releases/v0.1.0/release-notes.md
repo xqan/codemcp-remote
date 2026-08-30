@@ -2,7 +2,7 @@
 
 Status: **PRE-RELEASE / FINAL RELEASE GATE IN PROGRESS**
 
-These notes describe the intended first public release. They must not be used as evidence that `v0.1.0` has already been tagged or published. The final release commit, installer/ZIP SHA-256 values, signing decision, governance state, and clean-machine package sign-off are recorded only after their corresponding gates complete.
+These notes describe the intended first public release. They must not be used as evidence that `v0.1.0` has already been tagged or published. The signing decision is frozen as `NotSigned`; the final release commit, installer/ZIP SHA-256 values, governance state, and clean-machine package sign-off are recorded only after their corresponding gates complete.
 
 ## Highlights
 
@@ -31,7 +31,7 @@ These notes describe the intended first public release. They must not be used as
 - Profile A cannot identify a human user, ChatGPT account, Workspace, or conversation.
 - This first release is single-operator local policy infrastructure, not a multi-user RBAC system.
 - Automatic push, merge, rebase, deploy, arbitrary shell, arbitrary filesystem access, and model calls inside the Bridge are intentionally unavailable.
-- The current release candidate is `NotSigned`; Windows SmartScreen or reputation warnings may appear. The final release must either use a signed artifact or explicitly accept and publish this limitation.
+- `v0.1.0` is intentionally **`NotSigned`**. No Authenticode code-signing certificate will be used for this release. Windows SmartScreen or reputation/user-trust warnings may appear; this is an explicitly accepted and published limitation for the first stable release.
 - GitHub-hosted CI did not execute because of the recorded billing/spending-limit blocker. This is **WAIVED / ACCEPTED RISK**, not a CI PASS.
 - `codemcp==0.3.0` has a documented upstream license metadata discrepancy: distribution metadata reports MIT while the bundled audited `License-File` is Apache-2.0. Both facts and the bundled license evidence are preserved.
 
@@ -42,7 +42,6 @@ The following values are intentionally not frozen in this draft:
 - final release-only Git commit;
 - final installer SHA-256;
 - final Windows ZIP SHA-256;
-- final Authenticode/signing decision;
 - final ruleset / Dependabot governance record;
 - final clean-machine installer/ZIP/cleanup/uninstall sign-off;
 - tag `v0.1.0` and GitHub Release publication.

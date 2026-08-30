@@ -1,7 +1,7 @@
 # Phase 6 Validation — Windows 11 Operations
 
-> Status: **IN PROGRESS — RELEASE BLOCKER**  
-> Updated: 2026-08-29  
+> Status: **PASS / COMPLETE — FINAL RC MANDATORY PHASE 6 MATRIX CLOSED**  
+> Updated: 2026-08-30  
 > Release target: `v0.1.0`
 
 ## 1. Goal
@@ -87,7 +87,13 @@ artifact_scan = not-run
 dependency_license_compatibility_review = manual-required
 ```
 
-The two pytest warnings are non-failing environment/tooling warnings. This code baseline includes symmetric partial recovery for both `Bridge healthy / Tunnel dead` and `Bridge dead / Tunnel healthy`, plus regression coverage for both directions. It is ready to produce the next release candidate; it does **not** by itself satisfy the packaged Windows Phase 6 gate, final artifact audit, or manual dependency/license compatibility sign-off.
+The two pytest warnings are non-failing environment/tooling warnings. This code baseline includes symmetric partial recovery for both `Bridge healthy / Tunnel dead` and `Bridge dead / Tunnel healthy`, plus regression coverage for both directions. It was the repository-side baseline before the final packaged Phase 6 execution and does **not** by itself constitute the Phase 6 PASS evidence.
+
+### 3.2 Final Phase 6 closure synchronization
+
+The status text in Sections 4–8 below preserves the chronology of earlier/superseded RC attempts. Those historical `NEXT-RC RERUN REQUIRED` / `PENDING` labels are **not the current release status**. The current Live Acceptance Ledger in `docs/plans/v0.1.0/open-source-readiness-plan.md` records the final Windows 11 mandatory real-host/fault/path/log matrix as **PASS / COMPLETE**. Section 10 is the current Phase 6 exit record.
+
+A later source/runtime/artifact change that invalidates this evidence must reopen the affected Phase 6 cases. The final release-only artifact rebuild remains a separate Final Release Gate requirement and does not, by itself, rewrite the historical execution notes below.
 
 ## 4. A — Repeatable packaged lifecycle
 
@@ -325,23 +331,23 @@ A failure in an advertised compatibility feature must either be fixed or documen
 
 ## 10. Release exit criteria
 
-Phase 6 is PASS only when all mandatory items below have real evidence from the current release candidate:
+The final Phase 6 closure is synchronized to the current Live Acceptance Ledger. All mandatory Phase 6 items are closed:
 
-- [ ] 20/20 packaged lifecycle iterations PASS;
-- [ ] Bridge, Cloudflare Tunnel and Native Windows worker abnormal-exit cases PASS;
-- [ ] unrelated port/listener cases fail safely;
-- [ ] Git and transport-credential dependency failures produce actionable diagnostics;
-- [ ] restart/backend-boundary recovery follows `failed`/`unknown` semantics;
-- [ ] timeout/process-tree cleanup PASS;
-- [ ] synthetic log/credential canary scan PASS;
-- [ ] spaces, Chinese paths, line endings and supported long paths PASS;
-- [ ] dependency upgrade/rollback procedure reviewed against current pinned baseline;
-- [ ] no Phase 6 P0/P1 blocker remains open.
+- [x] 20/20 packaged lifecycle iterations PASS;
+- [x] Bridge, Cloudflare Tunnel and Native Windows worker abnormal-exit cases PASS;
+- [x] unrelated port/listener cases fail safely;
+- [x] Git and transport-credential dependency failures produce actionable diagnostics;
+- [x] restart/backend-boundary recovery follows `failed`/`unknown` semantics;
+- [x] timeout/process-tree cleanup PASS;
+- [x] synthetic log/credential canary scan PASS;
+- [x] spaces, Chinese paths, line endings and supported long paths PASS;
+- [x] dependency upgrade/rollback procedure reviewed against current pinned baseline;
+- [x] no Phase 6 P0/P1 blocker remains open.
 
-Until every mandatory checkbox has evidence, Phase 6 remains:
+Current Phase 6 decision:
 
 ```text
-IN PROGRESS
+PASS / COMPLETE
 ```
 
-and stable `v0.1.0` remains blocked.
+Stable `v0.1.0` remains blocked only by the later Final Release Gate items recorded in the active open-source readiness plan.

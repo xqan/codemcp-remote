@@ -8,7 +8,7 @@ Repository-side implementation: **COMPLETE**
 
 GitHub-hosted CI execution: **WAIVED / ACCEPTED RISK** — the hosted run was blocked by the recorded billing/spending-limit condition before runner/job execution and is not counted as PASS.
 
-Hosted governance activation: **PARTIAL / PENDING FINAL RECORD** — repository-side Dependabot/CI/templates are present, but branch/ruleset state and hosted Dependabot activation still require GitHub-side verification.
+Hosted governance activation: **PARTIAL / PENDING FINAL RECORD** — repository-side Dependabot/CI/templates are present, but branch/ruleset state, hosted Dependabot activation, and Issue forms / PR template hosted rendering still require GitHub-side verification.
 
 This distinction is intentional. Local repository configuration proves the intended governance files, but it cannot prove GitHub ruleset enforcement or hosted Dependabot scheduling. The hosted CI waiver does not convert an unexecuted Actions job into PASS.
 
@@ -75,4 +75,4 @@ These are activation/governance checks. Local files alone do not establish hoste
 
 ## Conclusion
 
-Stage 5 repository implementation is complete. The hosted CI billing blocker is explicitly waived for `v0.1.0` and is not a PASS. Stable release remains blocked on the final GitHub governance record (ruleset / Dependabot hosted activation) and the other remaining release gates in `docs/plans/v0.1.0/open-source-readiness-plan.md`.
+Stage 5 repository implementation is complete. The hosted CI billing blocker is explicitly waived for `v0.1.0` and is not a PASS. Stable release remains blocked on the final GitHub governance record (ruleset / merge policy, Dependabot hosted activation, and Issue forms / PR template hosted rendering) and the other remaining release gates in `docs/plans/v0.1.0/open-source-readiness-plan.md`.
