@@ -225,7 +225,9 @@ CF_EXTRACTED_SHA=$(shasum -a 256 "$CF_EXTRACTED" | awk '{print $1}')
 CF_INSTALLED_SHA=$(shasum -a 256 "$STAGE/.codemcp-runtime/bin/cloudflared" | awk '{print $1}')
 LOCK_SHA=$(shasum -a 256 "$BRIDGE/uv.lock" | awk '{print $1}')
 MANIFEST_SHA=$(shasum -a 256 "$MANIFEST" | awk '{print $1}')
-UV_VERSION=$(uv --version)
+UV_VERSION_OUTPUT=$(uv --version)
+UV_VERSION=$(printf '%s\n' "$UV_VERSION_OUTPUT" | awk '{print $2}')
+[ -n "$UV_VERSION" ] || fail "unable to determine uv semantic version"
 GENERATED_AT=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 python3.12 - "$STAGE/BUILD_PROVENANCE.json" "$MANIFEST" "$MANIFEST_SHA" "$CF_ASSET" \
