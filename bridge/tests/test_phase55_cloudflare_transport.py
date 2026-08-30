@@ -32,6 +32,7 @@ def _context(tmp_path: Path) -> TransportContext:
         path.mkdir(parents=True, exist_ok=True)
     return TransportContext(
         runtime_root=runtime_root,
+        bundled_runtime_root=runtime_root / ".codemcp-runtime",
         app_root=app_root,
         config_dir=config_dir,
         log_dir=log_dir,
@@ -115,8 +116,12 @@ def test_cloudflared_discovery_prefers_bundled_binary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = _context(tmp_path)
-    bundled = context.runtime_root / "cloudflared.exe"
+    executable_name = "cloudflared.exe" if os.name == "nt" else "cloudflared"
+    bundled = context.bundled_runtime_root / "bin" / executable_name
+    bundled.parent.mkdir(parents=True)
     bundled.write_bytes(b"placeholder")
+    legacy = context.runtime_root / executable_name
+    legacy.write_bytes(b"legacy")
     monkeypatch.setattr(cloudflare.shutil, "which", lambda _name: str(tmp_path / "other.exe"))
 
     assert CLOUDFLARE_TUNNEL_PROVIDER.find_client(context) == bundled.resolve()
