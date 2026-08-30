@@ -46,7 +46,7 @@ prompt_required() {
     prompt=$1
     value=""
     while [ -z "$value" ]; do
-        printf '%s' "$prompt"
+        printf '%s' "$prompt" >&2
         if ! IFS= read -r value; then
             fail "input ended before setup was complete"
         fi
