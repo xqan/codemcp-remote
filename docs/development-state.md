@@ -82,32 +82,42 @@ Validation:
 - A final full regression after that correction could not be started because ChatGPT blocked both `test_run` and the equivalent fixed `registered_command_run(test)` before either request reached the Bridge.
 - The pre-existing two integration failures remain the known baseline until a final rerun can be completed.
 
+## macOS Intel64 approval and restore acceptance
+
+The annotated `macos-intel64` candidate was deployed and re-tested through the live `codemacos` connector. The previously observed host-level blocking is resolved for the approval/restore control path.
+
+Verified PASS:
+
+- `project_open` succeeded on `sample_project` / `develop`, clean at baseline HEAD `ceca4c30486cf30a33b39e8ac7e932bd55c8b817`.
+- `checkpoint_create` operation `a1133255c6ec42728046a0e1acbd4555` entered `awaiting_approval` and created no checkpoint before confirmation.
+- `approval_confirm` reached the Bridge and succeeded, creating manual checkpoint `3b02ac21903e4f82a2697bfd211beeed`.
+- Replaying the same approval against the already-succeeded operation was rejected with `OPERATION_NOT_CANCELABLE`; the approval cannot execute the operation twice.
+- A controlled mutation created `checkpoint-restore-acceptance.txt` and advanced HEAD to `f64bc1853464162ee74d96f9174f0ff13de4deef`.
+- `checkpoint_restore` operation `68e59888488c4062ab9ca4516e52d5a9` correctly entered `awaiting_approval`.
+- Confirming that restore succeeded and returned HEAD to `ceca4c30486cf30a33b39e8ac7e932bd55c8b817`.
+- Restore automatically created rollback-safety checkpoint `31b6ca40996e49c4a9e4e471782b16fa`.
+- Reusing stale `expected_head=f64bc1853464162ee74d96f9174f0ff13de4deef` after restore was rejected before approval with `CHECKPOINT_CONFLICT`; actual HEAD remained `ceca4c30486cf30a33b39e8ac7e932bd55c8b817`.
+- The restore acceptance file is absent after rollback and the project is back at its pre-test Git state.
+
+Conclusion: MCP `ToolAnnotations` deployment restored ChatGPT-host compatibility for `checkpoint_create`, `approval_confirm`, and `checkpoint_restore` without weakening Bridge-side approval, checkpoint, CAS, audit, or fail-closed behavior.
+
 ## Current blocker
 
-The ChatGPT host currently blocks selected non-read-only/high-risk MCP calls before they reach the Bridge. The new ToolAnnotations implementation has not yet been deployed to the Intel64 Mac, so its effect on ChatGPT approval UX is not yet verified.
+The approval/restore blocker is closed. The project-side development command contract is now present:
 
-The earlier macOS pending operation may still exist:
+- `sample_project` HEAD after adding `codemcp.toml`: `60b4180d99680615fcf0ea4cc68146911df20a0f`.
+- Fixed commands `test`, `format`, and `verify` all use the deterministic read-only argv `["/usr/bin/grep", "-qx", "test", "test.md"]`.
+- The command contract is intentionally minimal and accepts no model-supplied argv or runtime parameters.
 
-- Operation id: `5c3df312bb1f45d0a30f098b15e7c4c0`
-- Kind: `checkpoint_create`
-- Last observed state: `awaiting_approval`
+The remaining blocker is Bridge authorization configuration: the runtime `projects.toml` entry for `sample_project` still has no `commands` tables. That file is outside the registered project root, so the Bridge correctly refuses to mutate it through project file tools. The runtime configuration must explicitly register the same fixed argv before command execution can become `development_ready`.
 
-Incomplete acceptance items:
-
-- verify ChatGPT host behavior after deploying the annotated tool surface
-- approval token consumption / one-time approval semantics
-- checkpoint restore
-- restore compare-and-swap conflict protection
-- registered command execution
-- `test_run`
-- `format_run`
-- final full regression after the contract-test correction
+A final full repository regression after correcting `bridge/tests/test_mcp_tool_annotations.py` also remains outstanding. The last completed full run before that test correction preserved the known baseline of 385 passed, 2 failed, 8 skipped.
 
 ## Next steps
 
-1. Push `dcbfad5bea3d2e24a46b2f06adb7e880b7013b92` (or a descendant) to `codex/macos-cli-packaging` so the macOS RC workflow builds the annotated MCP surface.
-2. Install the fresh `macos-intel64` candidate and restart the Mac Bridge.
-3. Refresh/reconnect the ChatGPT MCP connector so it re-discovers the new tool metadata.
-4. Re-test `checkpoint_create` / `approval_confirm` and observe whether ChatGPT now presents/permits the correct host approval flow.
-5. If host approval still blocks `approval_confirm`, redesign the Bridge approval protocol so the model never receives a secret approval token; retain Bridge-side CAS/checkpoint/audit fail-closed guarantees.
-6. Complete checkpoint-restore and registered command/test/format acceptance, then rerun native macOS Intel64 release acceptance.
+1. Add matching `test`, `format`, and `verify` command entries under `projects.sample_project.commands` in the macOS runtime `projects.toml`.
+2. Let project-registry hot reload pick up the saved configuration; no Bridge restart should be required when the project root is unchanged.
+3. Verify `project_status` reports `test`, `format`, and `verify` as matched commands with `development_ready=true`.
+4. Run live Intel64 `registered_command_run(verify)`, `test_run(test)`, and `format_run(format)` acceptance.
+5. Re-run the full `codemcp-remote` regression including `test_mcp_tool_annotations.py`; distinguish any remaining known integration failures from new regressions.
+6. Re-run native macOS Intel64 release acceptance and update this document with the final gate result.
