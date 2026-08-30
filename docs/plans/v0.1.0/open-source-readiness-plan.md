@@ -446,7 +446,7 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 
 当前规范文档已完成仓库侧对齐：
 
-- [x] `docs/implementation-plan.md` 已从绿色场景/旧 Phase 计划改为当前 `v0.1.0` 实施基线；
+- [x] 冻结的 [Windows release baseline](windows-release-baseline-2026-08-28.md) 已从绿色场景/旧 Phase 计划改为当时的 `v0.1.0` 实施基线；
 - [x] `docs/architecture/architecture.md` 已改为 Cloudflare Profile A + Native Windows 默认拓扑；
 - [x] `docs/guides/operations-runbook.md` 已以 packaged managed CLI 为主运维路径；
 - [x] `docs/guides/codemcp-baseline.md` 已明确 Native Windows 默认、WSL2 compatibility fallback；
