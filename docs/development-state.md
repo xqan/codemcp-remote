@@ -1,69 +1,88 @@
-# Development State — codemcp-remote
+# Development State
 
-Updated: 2026-08-30
-Plan: `docs/plans/v0.1.0/open-source-readiness-plan.md`
-Branch: `codex/open-source-readiness`
-Session restore baseline HEAD: `a8fdb0139dc6ab21662ed41d8e72aa969b43f1a1`
+Last updated: 2026-08-30
 
-## Current Phase
+## Current branch and source state
 
-`v0.1.0` Open Source Readiness — **Final Release Gate IN PROGRESS**.
+- Branch: `codex/macos-cli-packaging`
+- Source commit containing the BridgeError fix: `2ccfc5a5654b2c3077bedde0d498f4abebb27eff`
+- macOS Release Candidate workflow is configured to run on pushes to `codex/macos-cli-packaging`.
+- macOS candidate matrix includes `macos-arm64` and `macos-intel64`.
 
-The Live Acceptance Ledger in the plan and the acceptance reports are authoritative for completed release evidence. Completed Phase/Stage gates must not be repeated unless a later code/artifact change invalidates their evidence.
+## macOS Intel64 live acceptance
 
-## Completed
+Test host: Intel Mac (`x86_64`).
+Registered project: `sample_project`.
+Project root observed through codemacos: `/Users/qyf/projects/example-project`.
 
-- Phase 6 / Stage 2 mandatory Windows real-host matrix: PASS / COMPLETE.
-- Phase 7 functional F-01..F-20: PASS.
-- Reliability R-01..R-14: PASS.
-- Security acceptance: accounted for through S-33, with the documented Windows symlink privilege environment limitation.
-- 10/10 real-project remote tasks: PASS / COMPLETE.
-- Stage 6 secrets/dependency/license/supply-chain audit: PASS with documented `codemcp==0.3.0` license-metadata discrepancy.
-- Hosted CI billing/spending-limit condition: WAIVED / ACCEPTED RISK; never record as CI PASS.
-- Final automated source gate: PASS / COMPLETE.
-- Documentation consistency: PASS.
-- Acceptance-record synchronization completed on 2026-08-30 without rerunning completed phases: Phase 6 top-level/exit status, Phase 7 22-tool contract/F-01..F-20/R-01..R-14/ChatGPT-only/network-trust status, and the plan's Stage 2/3/4/5/7 summaries now match the Live Acceptance Ledger.
-- The fourth audited RC production clean-machine `Prepare -> Start -> remote contract -> Cleanup` using disposable `phase5-clean` is historical PASS evidence; the old Phase H temporary-real-repository/Cleanup-deferred deviation is no longer a current packaging blocker.
-- Draft release notes exist at `docs/releases/v0.1.0/release-notes.md`.
-- Stage 5 GitHub Governance / CI: **PASS / COMPLETE with hosted CI WAIVED / ACCEPTED RISK**. Active ruleset `protect-master` protects the default branch, Dependabot hosted activation is proven for `uv` and `github-actions`, and template structure is verified.
-- Final release-only source identity: **FROZEN by this checkpoint commit**. The exact immutable identity is the Git HEAD produced by this edit; all installer/ZIP builds and the `v0.1.0` tag must bind to that commit. Later evidence-only documentation must not redefine the release source identity.
+Verified PASS:
 
-## Remaining
+- Remote MCP connection to the Mac host.
+- `project_open` succeeds on an allowed branch.
+- Branch policy enforcement works: `main` was rejected with `BRANCH_NOT_ALLOWED`.
+- Current accepted project branch: `develop`.
+- `git_status` succeeds and reports a clean worktree.
+- `file_list` succeeds.
+- `file_read` succeeds.
+- `file_create` succeeds.
+- Mutations automatically create Git commits and Bridge-owned checkpoints.
+- `git_diff(checkpoint)` returns the expected bounded diff.
+- `file_delete` succeeds and commits the cleanup.
+- Worktree returned to clean after the create/delete acceptance cycle.
+- `checkpoint_create` correctly enters `awaiting_approval` and does not create a checkpoint before approval.
+- Approval audit trail contains `operation.created -> validated -> approval.created -> awaiting_approval`.
 
-1. Rebuild installer + ZIP from the frozen release-only source commit.
-2. Recompute SHA-256, run artifact/security scan, and prove exact source/artifact identity.
-3. Complete final clean-machine package / README onboarding / disposable-repo / cleanup / uninstall sign-off.
-4. Bind final CHANGELOG / known limitations / release notes / checksum record to the frozen release commit and artifacts.
-5. Final Release Gate sign-off.
-6. Tag `v0.1.0` at the frozen release commit and publish the GitHub Release.
+Observed acceptance commits in `sample_project`:
 
-## Decisions
+- Baseline: `84aa5b9ca05d701d4dbc5fd935fc09ffef339356`
+- Create acceptance file: `441cf87f45e3a761954ff81ff9a820e5d978915e`
+- Cleanup acceptance file: `ceca4c30486cf30a33b39e8ac7e932bd55c8b817`
 
-- Signing decision is **FINAL for `v0.1.0`: `NotSigned` / ACCEPTED LIMITATION**. No Authenticode certificate will be used; Windows SmartScreen / reputation / user-trust warnings are an explicitly accepted first-release limitation.
-- GitHub hosted CI remains explicitly waived because billing blocked execution before runner/job start.
-- Do not add required CI checks that cannot execute under the accepted hosted-CI waiver.
-- `codemcp-remote-3243` is a separate parallel worktree/task and is out of scope for this release-gate session.
+## Fixed macOS blocker
 
-## Blockers
+A packaged-runtime failure surfaced as:
 
-- No signing or GitHub-governance blocker remains. Public GitHub verification on 2026-08-30 proves `xqan/codemcp-remote` is public; active `protect-master` ruleset id `21844217` protects the default branch; Dependabot hosted activation is live for both `uv` and `github-actions`; PR template and Issue Form structure are verified.
-- Hosted CI remains WAIVED / ACCEPTED RISK and the active ruleset intentionally has no required status-check rule.
-- Remote `codex/open-source-readiness` is currently behind the local release-prep HEAD; final publication must push the frozen release commit before merge/tag.
+`super(type, obj): obj must be an instance or subtype of type`
 
-## Tests
+Root cause was `BridgeError` using zero-argument `super()` inside a `@dataclass(slots=True)` exception class.
 
-Revalidated on the restore baseline `a8fdb0139dc6ab21662ed41d8e72aa969b43f1a1`:
+Fix:
 
-- Registered full test recheck: **PASS** — `353 passed, 7 skipped, 2 warnings` in 160.15s.
-- Registered Ruff format check: **PASS** — `79 files already formatted`.
-- Registered security audit: **PASS** for dependency audit, dependency-license evidence, current tracked-tree secret scan, and all-ref Git-history secret scan; `1339 commits scanned`, no leaks.
-- Artifact scan: intentionally not rerun yet; final artifact must be rebuilt after the final release-only commit.
-- A preceding full-test attempt hit transient Windows `WinError 32` while PyInstaller removed an old shared `.local/dist/codemcp-remote` tree. An immediate exact-HEAD recheck passed 353/7; no source change was made for that transient lock.
-- Worktree remained clean after the revalidation commands.
+```python
+Exception.__init__(self, self.message)
+```
 
-## Next
+After the fix, the previous broad test failure collapsed from 42 failures to:
 
-1. Rebuild installer + ZIP from the frozen release-only source commit.
-2. Revalidate SHA-256, artifact/security scan, and exact source/artifact identity.
-3. Complete final clean-machine README/package/disposable-repo/cleanup/uninstall sign-off.
-4. Bind final release notes/checksums, sign off the Final Release Gate, then tag/publish `v0.1.0`.
+- 385 passed
+- 2 failed
+- 8 skipped
+
+The remaining two failures are unrelated integration failures in the real codemcp read/edit path and are not the original BridgeError constructor failure.
+
+## Current blocker
+
+The ChatGPT platform currently blocks calls to high-risk execution tools before they reach codemacos, including attempts to consume or cancel the pending approval operation.
+
+Pending operation:
+
+- Operation id: `5c3df312bb1f45d0a30f098b15e7c4c0`
+- Kind: `checkpoint_create`
+- State: `awaiting_approval`
+
+Because the platform blocks `approval_confirm` / `operation_cancel`, the following acceptance items remain incomplete:
+
+- approval token consumption
+- one-time approval semantics
+- checkpoint restore
+- restore compare-and-swap conflict protection
+- registered command execution
+- `test_run`
+- `format_run`
+
+## Next steps
+
+1. Resolve or characterize the platform-level blocking of high-risk MCP execution calls.
+2. Complete approval-confirm and checkpoint-restore acceptance on macOS Intel64.
+3. Configure a development command profile for `sample_project` and verify registered command, test, and format flows.
+4. Re-run native macOS Intel64 release acceptance after any related code changes.

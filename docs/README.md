@@ -5,7 +5,7 @@
 ## 从这里开始
 
 - [项目总览](../README.md)
-- [当前实施计划](implementation-plan.md)
+- [当前 macOS 双架构 CLI 实施计划（未实现）](implementation-plan.md)
 - [当前架构](architecture/architecture.md)
 - [Windows 从构建到安装与使用](guides/windows-build-install-use.md)
 - [运维手册](guides/operations-runbook.md)
@@ -47,9 +47,11 @@
 
 ### 当前验收与计划
 
+- [当前 macOS 双架构 CLI 实施计划（未实现）](implementation-plan.md)
 - [Phase 6 Windows 运维验收](acceptance/phase-6-validation.md)
 - [Phase 7 / v0.1.0 最终验收](acceptance/acceptance-test-plan.md)
 - [v0.1.0 开源整改计划](plans/v0.1.0/open-source-readiness-plan.md)
+- [冻结的 v0.1.0 Windows release baseline（历史）](plans/v0.1.0/windows-release-baseline-2026-08-28.md)
 
 ### 版本记录与验证证据
 
@@ -67,6 +69,7 @@
 - Cloudflare IP allowlist 是 network trust boundary，不是 authentication 或 user identity；
   需要 subject/client/scope 身份时使用可选 OAuth Resource Server profile。
 - 当前可执行说明以 `guides/`、`architecture/` 和 `acceptance/` 中的文档为准。
+- macOS arm64/Intel CLI 当前仍是未实现计划；计划只打包 `cloudflared`，并因无 Developer ID 证书采用 ad-hoc 签名且不做 notarization，不能据此宣称现已支持 macOS。
 - `releases/` 中的 Phase 0–5 文件是已完成阶段记录；`reports/` 中的内容是当时的
   验证证据，不能替代当前 runbook 或尚未完成的 release gate。
 - Cloudflare No-Auth network-trust 的 Phase A–H live acceptance 已通过；项目注册热加载也已实现：本机 CLI 是唯一项目授权控制面，运行中的 Bridge 可自动观察经过验证的 `projects.toml` add/remove 变更，无需重启 Bridge/Tunnel/Connector；MCP 不提供项目管理能力。
