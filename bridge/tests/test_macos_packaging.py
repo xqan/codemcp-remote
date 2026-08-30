@@ -202,3 +202,77 @@ def test_macos_build_script_uses_native_onedir_adhoc_contract() -> None:
     assert "notarytool" not in script
     assert "tunnel-client" not in script
     assert "HEAD must be exactly tagged" not in script
+
+
+def test_macos_release_workflow_uses_native_dual_arch_and_immutable_actions() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "macos-release.yml").read_text(encoding="utf-8")
+
+    required = (
+        "runner: macos-15",
+        "arch: arm64",
+        "label: macos-arm64",
+        "runner: macos-15-intel",
+        "arch: x86_64",
+        "label: macos-intel64",
+        "version: ${{ env.UV_VERSION }}",
+        "bash ./scripts/build-macos-release.sh",
+        "bash ./scripts/validate-macos-release.sh",
+        "--expect-spctl-rejection",
+        '--source-commit "$GITHUB_SHA"',
+        "macos-candidate-convergence",
+        "codemcp-remote-macos-convergence-v1",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53",
+    )
+    for value in required:
+        assert value in workflow
+
+    assert "actions/upload-artifact@v" not in workflow
+    assert "actions/download-artifact@v" not in workflow
+    assert "notarytool" not in workflow
+    assert "lipo -create" not in workflow
+    assert "chmod +x scripts/" not in workflow
+
+
+def test_macos_release_validator_enforces_layout_signing_and_gatekeeper_limit() -> None:
+    script = (SCRIPTS / "validate-macos-release.sh").read_text(encoding="utf-8")
+
+    required = (
+        "unexpected top-level archive entry",
+        "hardlink is not allowed",
+        "symlink escapes release root",
+        "directory mode must be 0755",
+        "shasum -a 256 -c SHA256SUMS.txt",
+        "foreign or universal Mach-O",
+        "codesign --verify --strict --all-architectures",
+        "Signature=adhoc",
+        "TeamIdentifier=not set",
+        "/opt/homebrew/",
+        "codemcp-remote-build-provenance-v2",
+        "spctl --assess --type execute",
+        "Gatekeeper unexpectedly accepted",
+        "codemcp-remote-macos-validation-v1",
+    )
+    for value in required:
+        assert value in script
+
+    assert "notarytool" not in script
+    assert "tunnel-client must not be present" in script
+
+
+def test_core_ci_has_native_arm64_macos_source_runtime_gate() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    required = (
+        "macos-source:",
+        "runs-on: macos-15",
+        'python-version: "3.12.14"',
+        'version: "0.12.7"',
+        "keyring.backends.macOS",
+        "bridge/tests/test_phase1_macos_runtime_security.py",
+        "bridge/tests/test_phase3_lifecycle.py",
+        "bridge/tests/test_phase55_cloudflare_transport.py",
+        "bridge/tests/test_macos_packaging.py",
+    )
+    for value in required:
+        assert value in workflow

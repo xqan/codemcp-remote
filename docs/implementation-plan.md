@@ -2,7 +2,7 @@
 
 > 更新日期：2026-08-30
 > 工作分支：`codex/macos-cli-packaging`
-> 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / VALIDATION IN PROGRESS / RELEASE BLOCKED**
+> 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 IMPLEMENTED / GITHUB NATIVE VALIDATION PENDING / RELEASE BLOCKED**
 > 冻结前序计划：[`plans/v0.1.0/windows-release-baseline-2026-08-28.md`](plans/v0.1.0/windows-release-baseline-2026-08-28.md)
 
 本文件只授权并规划 macOS 双架构支持，不表示 macOS 已受支持。当前可运行产品基线仍以代码、主 README 和现行验收记录中的 Windows 说明为准，直到本文所有发布门禁均有真实证据。
@@ -41,7 +41,7 @@ codemcp-remote/.codemcp-runtime/
 
 完成定义：
 
-- `macos-arm64` 是原生 `arm64` thin Mach-O，可在 M2 上运行；
+- `macos-arm64` 是原生 `arm64` thin Mach-O，可在 Apple Silicon Mac 上运行；
 - `macos-intel64` 是原生 `x86_64` thin Mach-O；`intel64` 只用于用户指定的文件名；
 - 安装后运行不要求 Python、`uv`、PowerShell 或 Homebrew；
 - Git 仍是明确运行时前置条件；
@@ -51,7 +51,7 @@ codemcp-remote/.codemcp-runtime/
 - 密钥可安全持久化到 macOS Keychain，绝不退化成明文文件或命令行参数；
 - 最终产物使用 ad-hoc 签名、不做 Apple notarization，并在 provenance、安装指南和验收证据中明确这一限制；
 - 完成内部/外部 SHA-256、许可证清单和供应链审计；
-- 在真实 M2 和真实 Intel Mac 上完成 clean-machine 验收，并重新执行受共享代码影响的 Windows 回归。
+- 在真实 Apple Silicon Mac 和真实 Intel Mac 上完成 clean-machine 验收，并重新执行受共享代码影响的 Windows 回归；不绑定特定 M 系列代际，最终支持声明以实际验收 hardware/OS evidence 为准。
 
 macOS `v0.1.0` 只打包并支持 `cloudflared`。现存 OpenAI Tunnel provider 不在本次删除范围内，但不打包 `tunnel-client`，也不把 PATH 中的 `tunnel-client` 作为 macOS 发布契约或验收路径。
 
@@ -105,7 +105,7 @@ macOS `v0.1.0` 只打包并支持 `cloudflared`。现存 OpenAI Tunnel provider 
 ## 已确认约束与待确认资源
 
 - 用户已确认本轮没有 Developer ID Application 证书；两个精确命名的 tar.gz 因此是 ad-hoc 签名、未 notarized 的最终交付物。不得把它们描述为 Apple-trusted、notarized 或可无提示通过 Gatekeeper。
-- 是否有可用于最终验收的真实 M2、Intel 和最低支持版本 macOS 主机。
+- 是否有可用于最终验收的真实 Apple Silicon、Intel 和最低支持版本 macOS 主机；当前已知有 Intel Mac，Apple Silicon 可在 Final Gate 前补齐。
 - GitHub billing 状态能否启动 macOS runner；现有 open-source readiness 记录说明 hosted CI 曾在 runner 启动前被 billing 阻塞。
 
 # Architecture Decision
@@ -134,7 +134,7 @@ macOS `v0.1.0` 只打包并支持 `cloudflared`。现存 OpenAI Tunnel provider 
 - 向导不调用 Cloudflare API，也不创建 Tunnel、DNS、WAF/IP List；操作者必须先取得 remotely managed Tunnel token 和 public hostname，向导只生成本地配置。
 - `arm64` 包内所有 Mach-O 必须含且只含 `arm64` slice；`intel64` 包必须含且只含 `x86_64` slice。
 - 禁止在 Intel 产物中混入 Rosetta 构建结果，禁止用 `lipo` 合并或拆分 PyInstaller 产物。
-- release build 必须来自 clean worktree、精确 commit 和与版本一致的 tag；构建后不得修改跟踪文件。
+- candidate build 必须来自 clean worktree 与精确 commit；Phase 2/3 允许 pre-tag candidate，若 HEAD 已存在 exact tag 则必须与版本一致。Final Gate signoff 后才创建 `v0.1.0` tag，并从最终 release commit 重新收敛发布证据；构建后不得修改跟踪文件。
 - 安装运行时不得依赖 Python、`uv`、PowerShell、Homebrew 或源码仓库；Git 是唯一新增之外的明确工具前置条件。
 - distribution 中不得出现运行期 `bridge.toml`、`projects.toml`、`remote.toml`、`tunnel.env`、Keychain 导出、token、API key、用户路径、日志、SQLite、PID/state 文件。
 - `SHA256SUMS.txt` 必须按 POSIX 相对路径字节序排序，覆盖其自身之外的所有 regular files，包括隐藏 runtime 和 `BUILD_PROVENANCE.json`。
@@ -235,11 +235,11 @@ uv run --project bridge --frozen pytest -q bridge/tests tests/integration
 - MCP/DB/public CLI contract 除 source 文案与平台路径外不变。
 - 阶段 commit 完成后停止，不进入 Phase 2。
 
-## Phase 2: 双架构冻结包与供应链产物
+## Phase 2: 双架构构建链与供应链产物
 
 ### Goal
 
-在原生 macOS arm64 与 Intel x86_64 主机上，从 clean commit 生成结构、权限、依赖、校验和与 provenance 全部可验证的本地 candidate。此阶段允许 ad-hoc signing，不宣称可公开发布。
+完成可在原生 macOS arm64 与 Intel x86_64 环境执行的确定性冻结、签名、assembly、供应链 pin 与安装脚本实现，并用平台无关自动测试证明其安全契约。Phase 2 不再要求开发者本地拥有两种架构 Mac，也不以本地产出两个 candidate 作为 Gate；双架构权威 candidate 统一由 Phase 3 GitHub Actions 原生 runner 从同一 clean commit 生成。若开发者手头有原生 Mac，可额外运行对应单架构构建作为非阻塞 smoke。此阶段不宣称可公开发布。
 
 ### Files / Modules
 
@@ -296,8 +296,8 @@ uv run --project bridge --frozen pytest -q bridge/tests tests/integration
 ### Dependencies
 
 - 依赖 Phase 1 的 runtime root、Keychain 和 process lifecycle contract。
-- 构建机需要原生 macOS、Xcode Command Line Tools、Python 3.12 和 `uv`；这些只是 build prerequisites，不进入运行时要求。
-- CI 原生构建、ad-hoc 签名验证与双产物收敛在 Phase 3 完成。
+- Phase 2 实现与平台无关测试不要求开发者同时拥有 Intel 与 Apple Silicon Mac；只有执行可选 native smoke 时才需要对应原生 macOS、Xcode Command Line Tools、Python 3.12 和 `uv`。
+- 双架构 candidate 的权威构建、ad-hoc 签名验证与产物收敛统一在 Phase 3 GitHub-hosted 原生 macOS runners 完成。
 
 ### Risks
 
@@ -309,43 +309,45 @@ uv run --project bridge --frozen pytest -q bridge/tests tests/integration
 
 ### Validation
 
-每个原生架构分别执行：
+Phase 2 的必需 Gate 以平台无关的实现与安全测试为准：
 
 ```text
-./scripts/build-macos-release.sh --version 0.1.0 --arch <arm64|x86_64> --mode candidate
-tar -tzf <artifact>
-shasum -a 256 -c codemcp-remote/SHA256SUMS.txt
-file codemcp-remote/codemcp-remote
-lipo -archs codemcp-remote/codemcp-remote
-codesign --verify --deep --strict --verbose=2 codemcp-remote/codemcp-remote
-./codemcp-remote/codemcp-remote --version
-./codemcp-remote/codemcp-remote check
-./codemcp-remote/codemcp-remote status --home <temporary-home>
-sh -n ./codemcp-remote/codemcp-install.sh
-sh -n ./codemcp-remote/codemcp-start.sh
-sh -n ./codemcp-remote/codemcp-stop.sh
+uv lock --project bridge --check
+uv sync --project bridge --frozen --all-groups --python 3.12
+uv run --project bridge --frozen ruff check bridge/src bridge/tests tests/integration scripts/dependency_license_audit.py scripts/prepare-verified-release-asset.py
+uv run --project bridge --frozen ruff format --check bridge/src bridge/tests tests/integration scripts/dependency_license_audit.py scripts/prepare-verified-release-asset.py
+uv run --project bridge --frozen pytest -q bridge/tests/test_macos_packaging.py bridge/tests/test_phase1_macos_runtime_security.py
+uv run --project bridge --frozen pytest -q bridge/tests tests/integration
+uv build --project bridge
+git diff --check
+git status --short
 ```
 
-随后运行 frozen worker mutation smoke、bundled `cloudflared --version`，并扫描全部 Mach-O 的 slice、load path 和 ad-hoc 签名。使用 pseudo-TTY 驱动安装向导的成功、拒绝覆盖、空输入、非法 URL/host、空 token、EOF、INT/TERM、空格/中文/引号/反引号/`$()` 输入；确认 terminal echo 总能恢复，输入从未被执行，secret canary 不出现在 argv、配置、临时文件、stdout/stderr、日志或 archive 中。
+同时直接执行 manifest `--check`，证明 URL/version/SHA-256/license pin 完整，恶意 archive 与 digest drift 会 fail closed；shell/static tests 必须覆盖非 TTY、existing-home、secret 不进入 argv/TOML/log、无 `eval`、bundled `cloudflared` 优先级与 provenance schema。
+
+如果当前开发者恰好拥有某一种原生 Mac，可额外执行该架构的非阻塞 smoke：
+
+```text
+./scripts/build-macos-release.sh --version 0.1.0 --arch <native-arch> --mode candidate
+```
+
+该 smoke 可提前发现 PyInstaller/Mach-O/Keychain 问题，但 **不作为 Phase 2 完成条件，也不构成另一架构或正式发布证据**。两个架构的权威 candidate、Mach-O slice/signature、tar layout/checksum 与 frozen worker smoke 在 Phase 3 原生 CI 中统一验证。
 
 ### Acceptance Criteria
 
-- 两个 candidate 文件名与用户要求完全一致，且 archive 顶层/layout/权限满足契约；`codemcp-install.sh` 存在且可执行。
-- 可见顶层没有额外文件；唯一允许的隐藏顶层条目是 `.codemcp-runtime/`。
-- arm64 与 Intel 包均为单架构，所有内嵌 Mach-O 架构一致；没有意外 universal2 或 foreign slice。
-- `otool -L` / rpath 检查不存在构建机 Homebrew、runner workspace 或绝对用户路径。
-- `--version` 输出 `0.1.0`；`check`、isolated `status`、frozen worker read/edit/Git-clean smoke PASS。
-- 交互安装从全新用户 home 自动生成 `config/bridge.toml`、`projects.toml`、`remote.toml`、无 secret 的 `tunnel.env` 和 Keychain item；可选项目注册正确，成功/失败均不自动启动服务。
-- 非 TTY、非法或注入式输入、用户取消、partial/existing home 都 fail closed，不覆盖已有配置、不留下明文 token，且 terminal 状态恢复。
-- bundled `cloudflared` 来自 pinned asset、版本正确、可执行且不被 PATH 中同名程序取代；产物、provenance 和 `THIRD_PARTY/` 均不含 `tunnel-client`。
-- checksum 覆盖所有 shipped regular files，逐项 PASS；provenance 可由构建日志重算且无 secret/本机私有路径。
-- license inventory 无缺失证据；阶段 commit 后停止，不进入 Phase 3。
+- 构建器、verified asset helper、manifest、三个用户 shell 脚本及对应 tests 全部落地，且供应链输入固定并 fail closed。
+- 构建脚本明确要求 Darwin 与 requested arch 匹配；不提供 Windows/Linux 交叉构建、Rosetta 伪构建、`lipo` 合并/切片路径。
+- PyInstaller contract 固定为 `onedir` + `.codemcp-runtime`，bundled `cloudflared`、ad-hoc signing、provenance、内部 checksum、license evidence 与 deterministic tar assembly 都有自动 contract test。
+- 安装向导只编排正式 CLI；非 TTY、existing/partial home、secret handling、quoting 与取消路径有平台无关测试，且不存在 plaintext fallback、`eval` 或 secret argv。
+- shared runtime/transport 改动没有引入新的自动回归；若主线存在预先记录的基线失败，Phase 2 只允许保持同一 failure set，不混入无关修复。
+- Phase 2 不要求本地产出 arm64 与 Intel 两个 tar；正式双架构 candidate 必须由 Phase 3 同一 source commit 的两个 GitHub-hosted 原生 macOS jobs 生成。
+- dependency/license inventory 与 secret audit 无新增 blocker；阶段 commit 后停止，不进入 Phase 3。
 
 ## Phase 3: 原生 CI、ad-hoc 签名与发布收敛
 
 ### Goal
 
-把 Phase 2 的本地 candidate 升级为从同一 release commit 原生生成、双架构收敛、ad-hoc 签名且明确未 notarized 的发布候选；仍不自动创建 stable GitHub Release。
+由 GitHub Actions 作为双架构 candidate 的权威构建来源：从同一 clean source commit 分别在原生 Apple Silicon 与 Intel GitHub-hosted macOS runner 上生成、验证并收敛两个 ad-hoc 签名且明确未 notarized 的发布候选；仍不自动创建 stable GitHub Release。开发者本地 Mac 不承担权威发布构建职责。
 
 ### Files / Modules
 
@@ -371,14 +373,14 @@ sh -n ./codemcp-remote/codemcp-stop.sh
 
 ### Dependencies
 
-- Phase 2 两个原生 candidate 都已 PASS。
-- 需要可用 GitHub macOS runners 和 GitHub billing；不需要 Apple Developer Program、Developer ID certificate 或 notary credentials。
-- 若 hosted runner 不可用，可使用受控的原生 self-hosted Mac，但必须记录 runner identity、工具版本与 waiver。
+- Phase 2 构建链、供应链 manifest、packaging/security contract tests 与 shared regression Gate 已完成；不要求 Phase 2 本地产出两个 candidate。
+- 需要可用 GitHub-hosted macOS runners：Apple Silicon job 与 Intel x86_64 job；不需要 Apple Developer Program、Developer ID certificate 或 notary credentials。
+- 对公开仓库优先使用 GitHub standard hosted runners；若 hosted runner 因平台/billing/availability 不可用，可使用受控的原生 self-hosted Mac，但必须记录 runner identity、工具版本与 waiver，且不能把 self-hosted 结果表述为 GitHub-hosted PASS。
 
 ### Risks
 
 - 带 quarantine 的互联网下载通常不会无提示通过 Gatekeeper；这是“无证书”的已接受产品限制，不得通过修改测试期望或删除下载证据来隐藏。
-- GitHub arm64 runner 是 M1 架构环境；它能原生构建 arm64，但不能替代真实 M2 验收。
+- GitHub arm64 runner 能提供原生 Apple Silicon 构建证据，但不能替代 Phase 4 的真实 Apple Silicon clean-machine 用户环境验收。
 - ad-hoc identity 不提供开发者来源认证；供应链信任必须依赖可信发布渠道中的 archive SHA-256、内部逐文件 checksum 和 provenance。
 
 ### Validation
@@ -403,7 +405,7 @@ sh -n ./codemcp-remote/codemcp-stop.sh
 
 ### Goal
 
-在真实 M2 与 Intel Mac 上证明两个 ad-hoc 签名、未 notarized tar 的校验、人工放行、运行、安全、升级与清理行为；同步现行文档，并把结论并入 `v0.1.0` Final Release Gate。
+在真实 Apple Silicon 与 Intel Mac 上分别验证由 Phase 3 CI 产生的两个 ad-hoc 签名、未 notarized tar 的下载校验、人工放行、运行、安全、升级与清理行为；真机负责用户环境验收，不负责重新定义权威构建来源。同步现行文档，并把结论并入 `v0.1.0` Final Release Gate。
 
 ### Files / Modules
 
@@ -435,8 +437,8 @@ sh -n ./codemcp-remote/codemcp-stop.sh
 
 ### Dependencies
 
-- Phase 3 ad-hoc signed、未 notarized candidates。
-- 至少一台真实 M2、一台真实 Intel Mac；最低支持 macOS 版本必须有真实 host/VM 证据。
+- Phase 3 GitHub Actions 从同一 clean source commit 生成并收敛的 arm64 与 Intel ad-hoc signed、未 notarized candidates。
+- 至少一台真实 Apple Silicon Mac、一台真实 Intel Mac；不要求特定 M1/M2/M3/M4 代际。最低支持 macOS 版本必须有真实 host/VM 证据，最终声明只覆盖实际验证的 hardware/OS 范围。
 - Windows 回归需要 Windows 11 x64 host。
 - 真正 remote Connector 验收需要受控 Cloudflare 配置，但不得把凭据写入仓库或公开 evidence。
 
@@ -465,7 +467,7 @@ git status --short
 
 ### Acceptance Criteria
 
-- 真实 M2 与 Intel clean host 都能从 tar 运行交互向导，逐项输入后自动生成正确用户态配置，再完成诊断、受控 mutation、恢复与停止，无手工 TOML 或开发工具隐式依赖。
+- 真实 Apple Silicon 与 Intel clean host 都能从 Phase 3 CI tar 运行交互向导，逐项输入后自动生成正确用户态配置，再完成诊断、受控 mutation、恢复与停止，无手工 TOML 或开发工具隐式依赖。
 - Gatekeeper 对真实 quarantine 下载的默认拒绝与文档一致；外部/内部校验成功并由用户显式放行后，主程序和 `cloudflared` 可运行，ad-hoc identity 与 provenance 一致。
 - Keychain 与 process ownership 的正常、升级、拒绝、崩溃分支全部有证据；没有 secret/log/process 残留。
 - 两架构 20/20 lifecycle PASS，关键安全/可靠性 matrix PASS，无未解释 skip。
@@ -501,7 +503,7 @@ git status --short
 | 最低 macOS 版本未由用户指定 | 默认 macOS 13+，待证据 | 只声明真实 clean-host 验证过的最低版本；不能仅靠 deployment target 推断 |
 | 用户给出的树未列隐藏 runtime | 已选 `.codemcp-runtime/` | Phase 2 前若要求零隐藏条目，必须重新做 onefile/lifecycle ADR |
 | Keychain ACL/升级提示 | 未验证 | ad-hoc binary 升级与 distribution relocation 是 mandatory clean-host case；失败时 fail closed |
-| Intel 与 M2 真机资源 | 未确认 | 缺任一架构真实验收，不发布对应 tar，也不完成同一 v0.1.0 gate |
+| Intel 与 Apple Silicon 真机资源 | Intel 已有；Apple Silicon 待补 | CI 可先生成两架构 candidate，但缺任一架构真实 clean-host 验收时，不完成对应平台最终支持声明，也不完成同一 v0.1.0 Final Gate |
 | tar 无 notarization ticket/staple | 无证书范围内的已知限制 | quarantine 默认拒绝 + checksum 后人工放行 smoke；若未来要求免提示分发，另立证书/notarization/`.pkg` 或 `.dmg` 范围 |
 | 交互向导输入/中断/重复运行 | 已实现；真实 macOS TTY matrix 未验证 | 正式 CLI 负责解析与写配置；TTY/quoting/signal/secret-canary/existing-home matrix 为发布硬门禁 |
 | `codemcp==0.3.0` macOS 兼容性 | 尚无真实 macOS host 证据 | 两架构 frozen mutation smoke 与真实项目验收为硬门禁；不在失败时静默替换 backend |
