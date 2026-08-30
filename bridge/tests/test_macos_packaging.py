@@ -281,3 +281,30 @@ def test_core_ci_has_native_arm64_macos_source_runtime_gate() -> None:
     )
     for value in required:
         assert value in workflow
+
+
+def test_clean_macos_harness_keeps_secret_interactive_and_records_native_evidence() -> None:
+    script = (SCRIPTS / "validate-clean-macos-release.sh").read_text(encoding="utf-8")
+
+    required = (
+        "prepare|verify|secret-scan|lifecycle|cleanup",
+        'env -i HOME="$SANDBOX_HOME" PATH="$SAFE_PATH"',
+        "codemcp-remote-macos-clean-host-v1",
+        "archive hash differs from CI evidence",
+        "candidate architecture differs from host",
+        "signing.mode",
+        "notarization.status",
+        "spctl --assess --type execute",
+        'xattr -dr com.apple.quarantine "$DIST"',
+        "checks.tunnel_token.source",
+        "macos-keychain",
+        "grep -R -l -F -f -",
+        "lifecycle_cycles_passed",
+        "security delete-generic-password",
+    )
+    for value in required:
+        assert value in script
+
+    assert "--tunnel-token" not in script
+    assert "--token " not in script
+    assert "CODEMCP_HOME=" not in script

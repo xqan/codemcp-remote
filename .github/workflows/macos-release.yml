@@ -2,9 +2,6 @@ name: macOS Release Candidate
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/macos-cli-packaging
 
 permissions:
   contents: read

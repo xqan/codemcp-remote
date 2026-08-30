@@ -2,7 +2,7 @@
 
 > 更新日期：2026-08-30
 > 工作分支：`codex/macos-cli-packaging`
-> 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 IMPLEMENTED / GITHUB NATIVE VALIDATION PENDING / RELEASE BLOCKED**
+> 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 CLEAN-HOST PENDING / RELEASE BLOCKED**
 > 冻结前序计划：[`plans/v0.1.0/windows-release-baseline-2026-08-28.md`](plans/v0.1.0/windows-release-baseline-2026-08-28.md)
 
 本文件只授权并规划 macOS 双架构支持，不表示 macOS 已受支持。当前可运行产品基线仍以代码、主 README 和现行验收记录中的 Windows 说明为准，直到本文所有发布门禁均有真实证据。

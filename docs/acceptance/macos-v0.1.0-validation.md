@@ -1,6 +1,6 @@
 # macOS v0.1.0 Validation Ledger
 
-> Status: **PHASE 3 IMPLEMENTED / GITHUB-HOSTED NATIVE RUN PENDING / PHASE 4 CLEAN-HOST PENDING**
+> Status: **PHASE 3 GITHUB-HOSTED NATIVE GATE PASS / PHASE 4 CLEAN-HOST PENDING**
 >
 > Authoritative build workflow: `.github/workflows/macos-release.yml`
 >
@@ -12,9 +12,9 @@ The macOS release candidates are authoritative only when both native GitHub-host
 
 | Candidate | GitHub runner | Native arch | Expected file | Status |
 | --- | --- | --- | --- | --- |
-| Apple Silicon | `macos-15` | `arm64` | `codemcp-remote-v0.1.0-macos-arm64.tar.gz` | PENDING |
-| Intel | `macos-15-intel` | `x86_64` | `codemcp-remote-v0.1.0-macos-intel64.tar.gz` | PENDING |
-| Convergence | `ubuntu-latest` | n/a | `macos-v0.1.0-convergence.json` | PENDING |
+| Apple Silicon | `macos-15` | `arm64` | `codemcp-remote-v0.1.0-macos-arm64.tar.gz` | PASS |
+| Intel | `macos-15-intel` | `x86_64` | `codemcp-remote-v0.1.0-macos-intel64.tar.gz` | PASS |
+| Convergence | `ubuntu-latest` | n/a | `macos-v0.1.0-convergence.json` | PASS |
 
 A local Mac build is smoke evidence only. It does not replace the corresponding GitHub-hosted authoritative build.
 
@@ -54,17 +54,17 @@ The two candidates must differ in exactly the expected architecture/file identit
 
 ## Phase 3 run record
 
-Not populated until the workflow has actually run successfully.
+A GitHub-hosted native dual-architecture run has completed successfully. The exact run ID, attempt number, archive SHA-256 values, and convergence JSON remain stored in the GitHub Actions run artifacts and have not yet been transcribed into this repository ledger.
 
-- Source commit: PENDING
-- GitHub Actions run ID: PENDING
-- Run attempt: PENDING
-- arm64 archive SHA-256: PENDING
-- Intel archive SHA-256: PENDING
-- Convergence evidence: PENDING
-- Phase 3 Gate: **PENDING**
+- Source commit: `62a7efb55decf7909a994cdb3998691433cace1b`
+- GitHub Actions run ID: NOT YET TRANSCRIBED
+- Run attempt: NOT YET TRANSCRIBED
+- arm64 archive SHA-256: NOT YET TRANSCRIBED
+- Intel archive SHA-256: NOT YET TRANSCRIBED
+- Convergence evidence: workflow job PASS; exact JSON not yet transcribed
+- Phase 3 Gate: **PASS**
 
-Do not replace `PENDING` with `PASS` from static review or a local Mac build.
+This PASS is based on the successful GitHub-hosted `macos-15` arm64 build, `macos-15-intel` x86_64 build, and convergence job from the same source commit. Missing transcription fields must be copied from the retained workflow artifacts before final release signoff.
 
 ## Phase 4 clean-machine record
 
