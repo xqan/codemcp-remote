@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from ctypes import wintypes
@@ -23,6 +24,7 @@ DEFAULT_ORIGIN_URL = "http://127.0.0.1:46200/mcp"
 DEFAULT_METRICS_ADDR = "127.0.0.1:46202"
 BUNDLED_WINDOWS_AMD64_VERSION = "2026.7.3"
 BUNDLED_WINDOWS_AMD64_SHA256 = "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841"
+BUNDLED_MACOS_VERSION = "2026.7.3"
 SECRET_ENV_NAME = "TUNNEL_TOKEN"
 SECRET_FILE_NAME = "cloudflare-tunnel-token.dpapi"
 ALLOWED_ENV_NAMES = {
@@ -298,6 +300,9 @@ class CloudflareTunnelProvider:
         legacy_windows = os.name == "nt" and client == (
             context.runtime_root / "cloudflared.exe"
         ).resolve(strict=False)
+        bundled_macos = sys.platform == "darwin" and client == (
+            context.bundled_runtime_root / "bin" / "cloudflared"
+        ).resolve(strict=False)
         pinned_windows = bundled_windows or legacy_windows
         if pinned_windows:
             digest = hashlib.sha256(client.read_bytes()).hexdigest()
@@ -329,6 +334,8 @@ class CloudflareTunnelProvider:
             raise LifecycleError("cloudflared version output is not recognized")
         version = match.group(1)
         if pinned_windows and version != BUNDLED_WINDOWS_AMD64_VERSION:
+            raise LifecycleError("bundled cloudflared version does not match the pinned release")
+        if bundled_macos and version != BUNDLED_MACOS_VERSION:
             raise LifecycleError("bundled cloudflared version does not match the pinned release")
         return version
 

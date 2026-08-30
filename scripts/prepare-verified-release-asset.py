@@ -91,6 +91,16 @@ def _validate_manifest(data: dict[str, Any]) -> list[dict[str, str]]:
         if github_digest is not None:
             if not isinstance(github_digest, str) or not SHA256_RE.fullmatch(github_digest):
                 raise AssetError(f"invalid GitHub asset digest for {asset_id}")
+            if github_digest != expected:
+                raise AssetError(
+                    f"release asset SHA-256 must match the GitHub asset digest for {asset_id}"
+                )
+        release_notes_digest = value.get("upstream_release_notes_sha256")
+        if release_notes_digest is not None and (
+            not isinstance(release_notes_digest, str)
+            or not SHA256_RE.fullmatch(release_notes_digest)
+        ):
+            raise AssetError(f"invalid upstream release-notes SHA-256 for {asset_id}")
 
     blockers = data.get("integrity_blockers", [])
     if not isinstance(blockers, list):

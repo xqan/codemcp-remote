@@ -137,6 +137,39 @@ def test_bundled_cloudflared_sha256_mismatch_fails_closed(tmp_path: Path) -> Non
         CLOUDFLARE_TUNNEL_PROVIDER.client_version(context)
 
 
+def test_bundled_macos_cloudflared_version_is_pinned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _context(tmp_path)
+    bundled = context.bundled_runtime_root / "bin" / "cloudflared"
+    monkeypatch.setattr(cloudflare.sys, "platform", "darwin")
+    monkeypatch.setattr(CLOUDFLARE_TUNNEL_PROVIDER, "find_client", lambda _context: bundled)
+    monkeypatch.setattr(
+        cloudflare.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="cloudflared version 2026.7.3 (built 2026-08-01)\n",
+            stderr="",
+        ),
+    )
+
+    assert CLOUDFLARE_TUNNEL_PROVIDER.client_version(context) == "2026.7.3"
+
+    monkeypatch.setattr(
+        cloudflare.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="cloudflared version 2026.8.0 (built 2026-08-30)\n",
+            stderr="",
+        ),
+    )
+    with pytest.raises(LifecycleError, match="pinned release"):
+        CLOUDFLARE_TUNNEL_PROVIDER.client_version(context)
+
+
 def test_cloudflared_missing_and_bad_version_fail_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

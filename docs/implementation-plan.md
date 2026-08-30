@@ -2,7 +2,7 @@
 
 > 更新日期：2026-08-30
 > 工作分支：`codex/macos-cli-packaging`
-> 状态：**PLANNED / NOT IMPLEMENTED / RELEASE BLOCKED**
+> 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / VALIDATION IN PROGRESS / RELEASE BLOCKED**
 > 冻结前序计划：[`plans/v0.1.0/windows-release-baseline-2026-08-28.md`](plans/v0.1.0/windows-release-baseline-2026-08-28.md)
 
 本文件只授权并规划 macOS 双架构支持，不表示 macOS 已受支持。当前可运行产品基线仍以代码、主 README 和现行验收记录中的 Windows 说明为准，直到本文所有发布门禁均有真实证据。
@@ -257,7 +257,7 @@ uv run --project bridge --frozen pytest -q bridge/tests tests/integration
 
 ### Changes
 
-1. 构建脚本第一步验证：Darwin、`uname -m` 与 requested arch 一致、Git clean、HEAD/tag/version 一致、`uv`/Python 3.12/Xcode tools 可用；禁止 Rosetta/foreign arch。
+1. 构建脚本第一步验证：Darwin、`uname -m` 与 requested arch 一致、Git clean、HEAD/version 一致、`uv`/Python 3.12/Xcode tools 可用；Phase 2/3 candidate 允许尚未创建 release tag，但若 HEAD 已存在 exact tag，则只能是 `v0.1.0`。最终 tag 仍由 Phase 4 Final Gate signoff 后创建；禁止 Rosetta/foreign arch。
 2. 仓库 manifest 固定所有网络输入，下载到 `.local/third-party`，先写临时文件，校验 SHA-256 后原子替换；安全解包拒绝 absolute path、`..`、symlink/hardlink 和多余 executable candidate。
 3. PyInstaller 构建工具闭包固定为：
 
@@ -272,12 +272,12 @@ uv run --project bridge --frozen pytest -q bridge/tests tests/integration
 
 4. transport 输入只固定：
 
-   | 架构 | 资产 | SHA-256 |
-   | --- | --- | --- |
-   | x86_64 | `cloudflared-darwin-amd64.tgz` 2026.7.3 | `e88fe5874d42a94f49a7ea59cabc3722d2962d0449232b0f3b1a426a712e275c` |
-   | arm64 | `cloudflared-darwin-arm64.tgz` 2026.7.3 | `f35c50089cd25f77a4cb5a2152036bc26db15aa31fbe11f7995d2e42a4ed6257` |
+   | 架构 | 资产 | 当前 GitHub release asset SHA-256 | upstream release-notes SHA-256 |
+   | --- | --- | --- | --- |
+   | x86_64 | `cloudflared-darwin-amd64.tgz` 2026.7.3 | `70d1c8684fa6d14b5843787ec8d1ea8e18b23650e424f4ea43d849a506487c3b` | `e88fe5874d42a94f49a7ea59cabc3722d2962d0449232b0f3b1a426a712e275c` |
+   | arm64 | `cloudflared-darwin-arm64.tgz` 2026.7.3 | `90c5a4f914d705fd70c135dba6d80b1791d254b08d6d4136301941f88330dd09` | `f35c50089cd25f77a4cb5a2152036bc26db15aa31fbe11f7995d2e42a4ed6257` |
 
-   同步保存 cloudflared upstream checksum 与 license 证据；任何版本变化都必须更新 manifest、runtime pins、tests 和 license review。manifest 中不得出现 `tunnel-client` 输入。
+   2026-08-30 复核发现 Cloudflare 2026.7.3 release notes 中的 Darwin checksum 与 GitHub 当前 release asset digest 不一致。GitHub 将 `ReleaseAsset.digest` 定义为资产内容的 SHA-256，因此构建下载 pin 使用当前 GitHub asset digest；release-notes checksum 作为上游不一致证据保留在 manifest/provenance 中，不用于放行当前下载。任何后续 asset digest 变化必须 fail closed，并更新 manifest、runtime pins、tests 和 license review。同步保存 commit-pinned cloudflared license 证据；manifest 中不得出现 `tunnel-client` 输入。
 5. PyInstaller 使用 `--onedir --console --target-arch <arm64|x86_64> --contents-directory .codemcp-runtime`，显式收集 `codemcp` metadata/submodules 与 macOS Keychain backend；不使用 UPX。
 6. 把 verified `cloudflared` 放入 `.codemcp-runtime/bin/`，运行时优先使用它。先记录 upstream/extracted hash，再执行 ad-hoc signing，最后记录 installed hash 与 `Signature=adhoc` 证据；不得查找 Developer ID identity 或提交 notarization。
 7. assembly 只复制：主 binary、三个 `.sh`、两个现有 config template、根 LICENSE、完整 `THIRD_PARTY/`、provenance 和 checksum；不复制任何本地 runtime 配置或状态。
@@ -503,9 +503,9 @@ git status --short
 | Keychain ACL/升级提示 | 未验证 | ad-hoc binary 升级与 distribution relocation 是 mandatory clean-host case；失败时 fail closed |
 | Intel 与 M2 真机资源 | 未确认 | 缺任一架构真实验收，不发布对应 tar，也不完成同一 v0.1.0 gate |
 | tar 无 notarization ticket/staple | 无证书范围内的已知限制 | quarantine 默认拒绝 + checksum 后人工放行 smoke；若未来要求免提示分发，另立证书/notarization/`.pkg` 或 `.dmg` 范围 |
-| 交互向导输入/中断/重复运行 | 未实现 | 正式 CLI 负责解析与写配置；TTY/quoting/signal/secret-canary/existing-home matrix 为发布硬门禁 |
-| `codemcp==0.3.0` macOS 兼容性 | 尚无仓库证据 | 两架构 frozen mutation smoke 与真实项目验收为硬门禁；不在失败时静默替换 backend |
-| 新增 keyring/license closure | 未审计 | lock、artifact license inventory、人工 compatibility signoff 后才可发布 |
+| 交互向导输入/中断/重复运行 | 已实现；真实 macOS TTY matrix 未验证 | 正式 CLI 负责解析与写配置；TTY/quoting/signal/secret-canary/existing-home matrix 为发布硬门禁 |
+| `codemcp==0.3.0` macOS 兼容性 | 尚无真实 macOS host 证据 | 两架构 frozen mutation smoke 与真实项目验收为硬门禁；不在失败时静默替换 backend |
+| 新增 keyring/license closure | 自动 dependency/license inventory 与 secret audit 已通过；macOS exact-payload 人工 compatibility signoff 待 native candidate | lock、artifact license inventory、人工 compatibility signoff 后才可发布 |
 | v0.1.0 从 Windows-only 扩大到 macOS | 明确 scope change | 两平台共享代码回归与文档门禁必须更新；旧 Windows RC 不能证明新 tag 全部通过 |
 
 # Developer Handoff

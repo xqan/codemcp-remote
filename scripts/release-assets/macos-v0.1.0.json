@@ -12,7 +12,8 @@
       "filename": "cloudflared-darwin-arm64.tgz",
       "github_asset_digest_sha256": "90c5a4f914d705fd70c135dba6d80b1791d254b08d6d4136301941f88330dd09",
       "kind": "tgz",
-      "sha256": "f35c50089cd25f77a4cb5a2152036bc26db15aa31fbe11f7995d2e42a4ed6257",
+      "sha256": "90c5a4f914d705fd70c135dba6d80b1791d254b08d6d4136301941f88330dd09",
+      "upstream_release_notes_sha256": "f35c50089cd25f77a4cb5a2152036bc26db15aa31fbe11f7995d2e42a4ed6257",
       "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-darwin-arm64.tgz",
       "version": "2026.7.3"
     },
@@ -21,7 +22,8 @@
       "filename": "cloudflared-darwin-amd64.tgz",
       "github_asset_digest_sha256": "70d1c8684fa6d14b5843787ec8d1ea8e18b23650e424f4ea43d849a506487c3b",
       "kind": "tgz",
-      "sha256": "e88fe5874d42a94f49a7ea59cabc3722d2962d0449232b0f3b1a426a712e275c",
+      "sha256": "70d1c8684fa6d14b5843787ec8d1ea8e18b23650e424f4ea43d849a506487c3b",
+      "upstream_release_notes_sha256": "e88fe5874d42a94f49a7ea59cabc3722d2962d0449232b0f3b1a426a712e275c",
       "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-darwin-amd64.tgz",
       "version": "2026.7.3"
     },
@@ -62,22 +64,13 @@
     }
   },
   "cloudflared_license": {
-    "sha256": null,
+    "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
     "source_commit": "3a2b45c",
     "spdx": "Apache-2.0",
     "url": "https://raw.githubusercontent.com/cloudflare/cloudflared/3a2b45c/LICENSE",
     "version": "2026.7.3"
   },
-  "integrity_blockers": [
-    {
-      "id": "cloudflared-darwin-asset-digest-conflict",
-      "reason": "The implementation plan/release notes SHA-256 values differ from the current GitHub release-asset digests; do not choose one silently."
-    },
-    {
-      "id": "cloudflared-license-sha256-not-recorded",
-      "reason": "The commit-pinned cloudflared LICENSE source still needs an independently recorded SHA-256 before release assembly may fetch it."
-    }
-  ],
+  "integrity_blockers": [],
   "release_version": "0.1.0",
   "schema": "codemcp-remote-release-assets-v1"
 }
