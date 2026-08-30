@@ -208,8 +208,11 @@ while IFS= read -r -d '' path; do codesign --force --sign - "$path"; done < "$MA
 while IFS= read -r -d '' path; do
   [ "$(lipo -archs "$path")" = "$ARCH" ] || fail "foreign/universal Mach-O: ${path#$STAGE/}"
   codesign --verify --strict --verbose=2 "$path"
-  ! otool -L "$path" | grep -E '/Users/|/opt/homebrew/|/usr/local/Cellar/' >/dev/null ||
+  OTOOL_OUTPUT=$(otool -L "$path")
+  if printf '%s\n' "$OTOOL_OUTPUT" | sed '1d' |
+    grep -E '/Users/|/opt/homebrew/|/usr/local/Cellar/' >/dev/null; then
     fail "build-host dependency leaked into ${path#$STAGE/}"
+  fi
 done < "$MACHO_LIST"
 
 CF_ARCHIVE_SHA=$(python3.12 - "$MANIFEST" "$CF_ASSET" <<'PY'

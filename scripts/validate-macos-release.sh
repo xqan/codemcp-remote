@@ -183,7 +183,7 @@ while IFS= read -r -d '' path; do
   fi
 
   OTOOL_OUTPUT=$(otool -L "$path")
-  if printf '%s\n' "$OTOOL_OUTPUT" |
+  if printf '%s\n' "$OTOOL_OUTPUT" | sed '1d' |
     grep -E '/Users/|/opt/homebrew/|/usr/local/Cellar/' >/dev/null; then
     fail "build-host dependency leaked into ${path#$ROOT/}"
   fi

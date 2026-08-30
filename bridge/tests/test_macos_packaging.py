@@ -196,6 +196,7 @@ def test_macos_build_script_uses_native_onedir_adhoc_contract() -> None:
         'getattr(sys, "_stdlib_dir", "")',
         "PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2",
         "cloudflared-license",
+        "printf '%s\\n' \"$OTOOL_OUTPUT\" | sed '1d' |",
         "SHA256SUMS.txt",
     )
     for value in required:
@@ -250,6 +251,7 @@ def test_macos_release_validator_enforces_layout_signing_and_gatekeeper_limit() 
         "Signature=adhoc",
         "TeamIdentifier=not set",
         "/opt/homebrew/",
+        "printf '%s\\n' \"$OTOOL_OUTPUT\" | sed '1d' |",
         "codemcp-remote-build-provenance-v2",
         "spctl --assess --type execute",
         "Gatekeeper unexpectedly accepted",
