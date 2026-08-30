@@ -8,9 +8,21 @@ Repository-side implementation: **COMPLETE**
 
 GitHub-hosted CI execution: **WAIVED / ACCEPTED RISK** — the hosted run was blocked by the recorded billing/spending-limit condition before runner/job execution and is not counted as PASS.
 
-Hosted governance activation: **PARTIAL / PENDING FINAL RECORD** — repository-side Dependabot/CI/templates are present, but branch/ruleset state, hosted Dependabot activation, and Issue forms / PR template hosted rendering still require GitHub-side verification.
+Hosted governance activation: **PASS / COMPLETE** — the repository is public, Dependabot hosted activation is proven for both `uv` and `github-actions`, the PR template is recognized on the default branch, both Issue Form YAML files are present and schema-valid, and the default branch is protected by an active GitHub ruleset.
 
-This distinction is intentional. Local repository configuration proves the intended governance files, but it cannot prove GitHub ruleset enforcement or hosted Dependabot scheduling. The hosted CI waiver does not convert an unexecuted Actions job into PASS.
+Public GitHub evidence captured and reverified on 2026-08-30:
+- repository `xqan/codemcp-remote`: `visibility=public`, default branch `master`;
+- active ruleset `protect-master` (id `21844217`), target `branch`, condition `~DEFAULT_BRANCH`;
+- `master`: `protected=true`;
+- ruleset requires pull-request-based changes with `required_approving_review_count=0`;
+- ruleset restricts branch deletion and blocks non-fast-forward / force-push updates;
+- no required status-check rule is configured, preserving the hosted-CI waiver;
+- Dependabot dynamic workflows: active;
+- generated Dependabot branches exist for both `github_actions` and `uv`, with open Dependabot PRs proving hosted scheduling/activation;
+- GitHub Community Profile recognizes `.github/pull_request_template.md`;
+- `.github/ISSUE_TEMPLATE/bug_report.yml` and `feature_request.yml` are present on `master` and validate as GitHub Issue Form syntax.
+
+The interactive New Issue form itself could not be inspected from the unauthenticated verification client, so this record does not claim visual rendering evidence beyond the default-branch files/schema validation. The hosted CI waiver does not convert an unexecuted Actions job into PASS.
 
 ## Delivered
 
@@ -61,18 +73,14 @@ Result: **PASS**
 - branch: `codex/20260824`
 - working tree: clean
 
-## Hosted checks still required
+## Hosted governance final record
 
-Before stable release, record the remaining GitHub-side governance state:
-
-1. hosted CI remains **WAIVED / ACCEPTED RISK** for `v0.1.0` unless the billing condition is resolved and a real Ubuntu/Windows run actually executes;
-2. verify Dependabot accepts both `uv` and `github-actions` ecosystems;
-3. verify the repository branch/ruleset protects the intended release branch with the chosen merge policy; do not require a CI check that cannot execute under the accepted waiver unless the billing blocker is resolved;
-4. verify issue forms and the pull-request template render correctly;
-5. capture the final governance decision in the release record.
-
-These are activation/governance checks. Local files alone do not establish hosted PASS, and the CI waiver must remain visible.
+1. hosted CI remains **WAIVED / ACCEPTED RISK** for `v0.1.0`; the `CI` workflow is currently disabled and no CI check is required by the release ruleset;
+2. **PASS** — Dependabot hosted activation is proven for both `uv` and `github-actions` by active Dependabot workflows plus generated branches/PRs;
+3. **PASS** — `master` is protected by active ruleset `protect-master` (id `21844217`), which requires pull-request-based changes, restricts deletion, and blocks non-fast-forward / force-push updates;
+4. **PASS / STRUCTURAL HOSTED EVIDENCE** — the PR template is recognized by GitHub Community Profile; both Issue Form files are present on the default branch and schema-valid. Interactive visual rendering remains a manual authenticated UI spot-check, not a repository-content blocker;
+5. **PASS** — the active ruleset contains no required status-check rule, so it does not conflict with the hosted-CI waiver.
 
 ## Conclusion
 
-Stage 5 repository implementation is complete. The hosted CI billing blocker is explicitly waived for `v0.1.0` and is not a PASS. Stable release remains blocked on the final GitHub governance record (ruleset / merge policy, Dependabot hosted activation, and Issue forms / PR template hosted rendering) and the other remaining release gates in `docs/plans/v0.1.0/open-source-readiness-plan.md`.
+Stage 5 GitHub Governance / CI is **PASS / COMPLETE with hosted CI WAIVED / ACCEPTED RISK**. Public GitHub verification proves repository visibility, default-branch governance files, active Dependabot for both configured ecosystems, PR-template recognition, and active `master` protection through `protect-master`. Hosted CI remains explicitly waived and is not counted as PASS. No Stage 5 blocker remains.

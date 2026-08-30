@@ -25,17 +25,17 @@ The Live Acceptance Ledger in the plan and the acceptance reports are authoritat
 - Acceptance-record synchronization completed on 2026-08-30 without rerunning completed phases: Phase 6 top-level/exit status, Phase 7 22-tool contract/F-01..F-20/R-01..R-14/ChatGPT-only/network-trust status, and the plan's Stage 2/3/4/5/7 summaries now match the Live Acceptance Ledger.
 - The fourth audited RC production clean-machine `Prepare -> Start -> remote contract -> Cleanup` using disposable `phase5-clean` is historical PASS evidence; the old Phase H temporary-real-repository/Cleanup-deferred deviation is no longer a current packaging blocker.
 - Draft release notes exist at `docs/releases/v0.1.0/release-notes.md`.
+- Stage 5 GitHub Governance / CI: **PASS / COMPLETE with hosted CI WAIVED / ACCEPTED RISK**. Active ruleset `protect-master` protects the default branch, Dependabot hosted activation is proven for `uv` and `github-actions`, and template structure is verified.
+- Final release-only source identity: **FROZEN by this checkpoint commit**. The exact immutable identity is the Git HEAD produced by this edit; all installer/ZIP builds and the `v0.1.0` tag must bind to that commit. Later evidence-only documentation must not redefine the release source identity.
 
 ## Remaining
 
-1. Record final GitHub governance state: ruleset / merge policy, Dependabot `uv` + `github-actions` hosted activation, and Issue forms / PR template hosted rendering. Hosted CI remains waived, not PASS.
-2. Create final release-only commit after the governance record is closed.
-3. Rebuild installer + ZIP from that exact commit.
-4. Recompute SHA-256, run artifact/security scan, and prove exact source/artifact identity.
-5. Complete final clean-machine package / README onboarding / disposable-repo / cleanup / uninstall sign-off.
-6. Bind final CHANGELOG / known limitations / release notes / checksum record to the exact final commit and artifacts.
-7. Final Release Gate sign-off.
-8. Tag `v0.1.0` and publish the GitHub Release.
+1. Rebuild installer + ZIP from the frozen release-only source commit.
+2. Recompute SHA-256, run artifact/security scan, and prove exact source/artifact identity.
+3. Complete final clean-machine package / README onboarding / disposable-repo / cleanup / uninstall sign-off.
+4. Bind final CHANGELOG / known limitations / release notes / checksum record to the frozen release commit and artifacts.
+5. Final Release Gate sign-off.
+6. Tag `v0.1.0` at the frozen release commit and publish the GitHub Release.
 
 ## Decisions
 
@@ -46,8 +46,9 @@ The Live Acceptance Ledger in the plan and the acceptance reports are authoritat
 
 ## Blockers
 
-- GitHub-side ruleset/merge policy, Dependabot hosted activation, and Issue forms / PR template hosted rendering cannot be proven from repository files alone. The currently connected GitHub source exposes no accessible `codemcp-remote` repository/installation, so hosted governance remains pending external verification/record.
-- Final release-only artifact work must not start until the GitHub final governance record is closed, because the final commit/artifact identity must be immutable for the remaining release evidence.
+- No signing or GitHub-governance blocker remains. Public GitHub verification on 2026-08-30 proves `xqan/codemcp-remote` is public; active `protect-master` ruleset id `21844217` protects the default branch; Dependabot hosted activation is live for both `uv` and `github-actions`; PR template and Issue Form structure are verified.
+- Hosted CI remains WAIVED / ACCEPTED RISK and the active ruleset intentionally has no required status-check rule.
+- Remote `codex/open-source-readiness` is currently behind the local release-prep HEAD; final publication must push the frozen release commit before merge/tag.
 
 ## Tests
 
@@ -62,8 +63,7 @@ Revalidated on the restore baseline `a8fdb0139dc6ab21662ed41d8e72aa969b43f1a1`:
 
 ## Next
 
-1. Close the GitHub final governance record: ruleset / merge policy, Dependabot hosted activation, and hosted Issue forms / PR template rendering.
-2. Freeze the final release-only commit.
-3. Rebuild installer + ZIP and revalidate SHA-256, artifact/security scan, and exact source/artifact identity.
-4. Complete final clean-machine README/package/disposable-repo/cleanup/uninstall sign-off.
-5. Bind final release notes/checksums, sign off the Final Release Gate, then tag/publish `v0.1.0`.
+1. Rebuild installer + ZIP from the frozen release-only source commit.
+2. Revalidate SHA-256, artifact/security scan, and exact source/artifact identity.
+3. Complete final clean-machine README/package/disposable-repo/cleanup/uninstall sign-off.
+4. Bind final release notes/checksums, sign off the Final Release Gate, then tag/publish `v0.1.0`.

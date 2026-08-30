@@ -151,9 +151,9 @@ local CLI project add/remove
 | Stage 0 — Readiness baseline | **COMPLETE** | 否 | 初始开源整改基线已建立；最终 release freeze 仍在末尾执行 |
 | Stage 1 — License / Security / Threat Model | **COMPLETE** | 否 | 核心法律/安全文档与 third-party notices 策略已完成 |
 | Stage 2 — Phase 6 Windows Operations | **PASS / COMPLETE** | 否 | final RC Windows 11 mandatory real-host/fault/path/log matrix 已完成 |
-| Stage 3 — Phase 7 Final Acceptance | **IN PROGRESS — FINAL RELEASE GATE** | **是** | Functional / Security / Reliability / 10 real-project tasks / final automated gate / documentation consistency / signing decision 已收口；剩 GitHub governance、final release-only commit、artifact rebuild、final clean-machine/sign-off |
+| Stage 3 — Phase 7 Final Acceptance | **IN PROGRESS — FINAL RELEASE GATE** | **是** | Functional / Security / Reliability / 10 real-project tasks / final automated gate / documentation consistency / signing / GitHub governance 已收口；剩 final release-only commit、artifact rebuild、final clean-machine/sign-off |
 | Stage 4 — README / Onboarding | **DOCUMENTATION CONSISTENCY PASS / CLEAN-MACHINE EXECUTION PENDING** | 是 | README/Windows/Cloudflare/CHANGELOG/draft release notes/known limitations 已对齐；README-only clean-machine execution 与 final checksum binding 留待最终 artifact gate |
-| Stage 5 — GitHub Governance / CI | **REPOSITORY IMPLEMENTATION COMPLETE / HOSTED CI WAIVER RECORDED** | 是 | hosted CI 因 billing 在 runner 前阻塞并已记录 waiver；ruleset/Dependabot/最终治理记录仍待收口 |
+| Stage 5 — GitHub Governance / CI | **PASS / COMPLETE WITH HOSTED CI WAIVER** | 否 | `protect-master` active ruleset、Dependabot `uv` + `github-actions` hosted activation、PR template 与 Issue Form 结构均已验证；hosted CI 仍为 WAIVED / ACCEPTED RISK，不是 PASS |
 | Stage 6 — Secrets / Privacy / Supply Chain | **PASS WITH DOCUMENTED LICENSE DISCREPANCY / HOSTED-CI WAIVER** | 否 | working tree/history/artifact/dependency/license audit 已完成；`codemcp==0.3.0` metadata discrepancy 已记录 |
 | Stage 7 — Release Packaging | **CURRENT RC CLEAN-MACHINE VALIDATED / FINAL-COMMIT REBUILD PENDING** | **是** | 当前 RC installer/ZIP/SHA 与 clean-machine 路径已验证；最终 release-only commit 后必须重建、复核、cleanup/sign-off |
 | Network Trust Phase A–H | **COMPLETE** | 否 | 推荐 Profile A 的 live path 已完成，并在 final RC 上重查 Host/Origin/public-source/forwarded-header 边界 |
@@ -192,7 +192,7 @@ local CLI project add/remove
 - [x] final automated gate：**PASS / COMPLETE** — automated-gate code identity `083aef7a1e1aefb19164a48a1e6fb2f3e2f3f458` 已完成 standalone Ruff lint（`All checks passed!`）、full Ruff format scope（`80 files already formatted`）、configuration check（`status=ok`，`worker_mode=local`，`model_egress=deny`）、Python package build（sdist + wheel）、`git diff --check`、`git diff --exit-code`、clean worktree 与 exact identity；registered full test 为 `353 passed, 7 skipped, 2 warnings`，security audit re-PASS（1291 commits scanned，no leaks）。其后的 release-prep 变更仅为文档/验收记录收口；最终 artifact 仍必须从 final release-only commit 重建并复验；
 - [x] documentation consistency：**PASS** — README / Windows guide / Cloudflare guide / CHANGELOG / draft release notes / dependency-license wording 已对齐；`NotSigned`、SmartScreen、Profile A network-only、hosted-CI waiver、codemcp MIT/Apache discrepancy 均已显式披露；clean-machine README execution 与 final release-note/checksum binding 继续归入最终 artifact / clean-machine gate；
 - [x] signing decision：**`NotSigned` / ACCEPTED LIMITATION** — 2026-08-30 已明确确认 `v0.1.0` 不使用 Authenticode 代码签名证书发布；Windows SmartScreen / reputation / user-trust warning 可能出现，作为首版公开发布的已知限制保留在 release notes 与 onboarding 文档中；
-- [ ] GitHub final governance：ruleset / merge policy、Dependabot `uv` + `github-actions` hosted activation、Issue forms / PR template hosted rendering；hosted CI 维持 **WAIVED / ACCEPTED RISK**；
+- [x] GitHub final governance：**PASS / COMPLETE WITH HOSTED CI WAIVER** — 2026-08-30 已复验 active `protect-master` ruleset（id `21844217`）作用于默认分支，`master.protected=true`；规则要求 PR、限制删除、阻止 force-push/non-fast-forward，且不要求 status checks；Dependabot `uv` + `github-actions` hosted activation、PR template 与 Issue Form 结构证据均已闭环。hosted CI 维持 **WAIVED / ACCEPTED RISK**，不是 PASS；
 - [ ] final release-only commit；
 - [ ] 从该最终 commit 重新构建 installer + ZIP，并重新核对 SHA-256 / artifact scan / exact commit identity；
 - [ ] final clean-machine package / README onboarding / cleanup / uninstall sign-off；
@@ -662,22 +662,20 @@ WSL2 fallback 与 OpenAI Secure MCP Tunnel 已不是 installed release 的 manda
 
 ## P0 — 当前未关闭，不得发布 stable
 
-1. **signing decision**：正式签名，或明确接受 `NotSigned` + Windows SmartScreen / reputation limitation；
-2. **GitHub final governance record**：ruleset / merge policy、Dependabot `uv` + `github-actions` hosted activation、Issue forms / PR template hosted rendering；hosted CI 保持 **WAIVED / ACCEPTED RISK**，不得伪装为 PASS；
-3. **final release-only commit**：在 release decisions / governance record 收口后冻结；
-4. **exact-commit artifact rebuild**：从该 commit 重建 installer + ZIP，重新生成 SHA-256，并完成 artifact secret scan / exact source-artifact identity；
-5. **final clean-machine sign-off**：按 final artifact 完成 package / README onboarding / disposable repo / cleanup / uninstall；
-6. **final release-note / checksum binding**：CHANGELOG、known limitations、release notes 与 exact commit / artifacts 一致；
-7. **Final Release Gate + publication**：完成 sign-off 后才可 tag `v0.1.0` 并发布 GitHub Release。
+1. **final release-only commit**：release decisions / governance record 已收口，当前进入唯一 release source identity 冻结；
+2. **exact-commit artifact rebuild**：从该 commit 重建 installer + ZIP，重新生成 SHA-256，并完成 artifact secret scan / exact source-artifact identity；
+3. **final clean-machine sign-off**：按 final artifact 完成 package / README onboarding / disposable repo / cleanup / uninstall；
+4. **final release-note / checksum binding**：CHANGELOG、known limitations、release notes 与 exact commit / artifacts 一致；
+5. **Final Release Gate + publication**：完成 sign-off 后才可 tag `v0.1.0` 并发布 GitHub Release。
 
-以下原 P0 已有真实证据并关闭，不得重复执行，除非后续 source/runtime/artifact 变更使对应证据失效：Phase 6 mandatory matrix、Phase 7 functional/security/reliability、10/10 real-project tasks、working-tree/history security scan、dependency/license signoff、第四版 RC clean-machine contract、documentation consistency。
+以下原 P0 已有真实证据并关闭，不得重复执行，除非后续 source/runtime/artifact 变更使对应证据失效：signing decision（`NotSigned` / accepted limitation）、GitHub final governance、Phase 6 mandatory matrix、Phase 7 functional/security/reliability、10/10 real-project tasks、working-tree/history security scan、dependency/license signoff、第四版 RC clean-machine contract、documentation consistency。
 
 ## P1 — 已记录但必须持续显式披露
 
 1. GitHub hosted CI：**WAIVED / ACCEPTED RISK**（billing/spending-limit 在 runner/job 前阻塞，未记为 PASS）；
 2. `codemcp==0.3.0` MIT / bundled Apache-2.0 metadata discrepancy；
 3. Profile A 仅提供 network trust，不提供 human user identity；
-4. 若最终选择 `NotSigned`，SmartScreen / reputation warning 必须继续出现在 known limitations / release notes。
+4. `v0.1.0` 已选择 `NotSigned`；SmartScreen / reputation warning 必须继续出现在 known limitations / release notes。
 
 ## P2 — `v0.1.x / v0.2` 可继续
 
@@ -701,9 +699,9 @@ Native Windows mutation **不再是 P2**，因为它已经是当前默认实现�
 从当前分支开始只执行真实未完成项：
 
 1. **状态/验收文档同步：COMPLETE**；已完成 Phase/Gate 不重复；
-2. **关闭 signing decision**：签名，或明确接受 `NotSigned` + SmartScreen / reputation limitation；
-3. **关闭 GitHub final governance record**：ruleset / merge policy、Dependabot hosted activation、Issue forms / PR template hosted rendering；hosted CI 维持已记录 waiver；
-4. **创建 final release-only commit**，冻结唯一 release source identity；
+2. **signing decision：COMPLETE** — `NotSigned` / accepted limitation；
+3. **GitHub final governance：COMPLETE** — active `protect-master` ruleset + Dependabot hosted activation + templates verified；hosted CI 保持 waiver；
+4. **当前：创建 final release-only commit**，冻结唯一 release source identity；
 5. 从该 exact commit **重新构建 installer + ZIP**；
 6. **重新生成并核对 SHA-256、artifact/security scan、exact source/artifact identity**；
 7. 用 final artifact 完成 **clean-machine package / README onboarding / disposable repo / cleanup / uninstall** sign-off；

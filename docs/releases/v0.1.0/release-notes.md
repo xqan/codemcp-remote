@@ -24,6 +24,7 @@ These notes describe the intended first public release. They must not be used as
 - Real-project remote tasks: **10/10 PASS / COMPLETE** — Java 5/5, frontend 3/3, recovery 2/2.
 - Final automated source gate: **PASS / COMPLETE** — standalone Ruff lint, Ruff format, configuration check, Python package build, `git diff --check`, tracked-diff verification, clean worktree/exact identity; registered regression remains `353 passed, 7 skipped, 2 warnings`.
 - Security audit: dependency audit, dependency-license evidence, current tracked-tree secret scan, and all-ref Git-history scan PASS. The codemcp 0.3.0 MIT/Apache metadata discrepancy remains explicitly documented and accepted by the engineering compatibility review.
+- GitHub governance: **PASS / COMPLETE with hosted CI WAIVED / ACCEPTED RISK** — active `protect-master` ruleset protects the default branch, Dependabot hosted activation is proven for both configured ecosystems, and PR/Issue template structure is verified; no required CI check is configured.
 
 ## Known limitations and accepted risks
 
@@ -42,7 +43,6 @@ The following values are intentionally not frozen in this draft:
 - final release-only Git commit;
 - final installer SHA-256;
 - final Windows ZIP SHA-256;
-- final ruleset / Dependabot governance record;
 - final clean-machine installer/ZIP/cleanup/uninstall sign-off;
 - tag `v0.1.0` and GitHub Release publication.
 
