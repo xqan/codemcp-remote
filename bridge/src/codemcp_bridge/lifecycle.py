@@ -1442,7 +1442,8 @@ def start_services(
             )
             if not tunnel_owned and tunnel_healthy:
                 raise LifecycleError(
-                    "Tunnel health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                    "Tunnel health endpoint is occupied by an unowned process; "
+                    "refusing unsafe takeover"
                 )
             if tunnel_owned and tunnel_healthy:
                 raise LifecycleError(
@@ -1526,7 +1527,8 @@ def start_services(
             )
             if not bridge_owned and bridge_healthy:
                 raise LifecycleError(
-                    "Bridge health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                    "Bridge health endpoint is occupied by an unowned process; "
+                    "refusing unsafe takeover"
                 )
 
             state = json.loads(paths.state_file.read_text(encoding="utf-8"))
@@ -1618,7 +1620,8 @@ def start_services(
             )
             if not bridge_owned and bridge_healthy:
                 raise LifecycleError(
-                    "Bridge health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                    "Bridge health endpoint is occupied by an unowned process; "
+                    "refusing unsafe takeover"
                 )
             old_bridge_pid = int(state.get("bridge_pid", 0))
             if bridge_owned and old_bridge_pid > 0:
@@ -1632,7 +1635,8 @@ def start_services(
             )
             if not tunnel_owned and tunnel_healthy:
                 raise LifecycleError(
-                    "Tunnel health endpoint is occupied by an unowned process; refusing unsafe takeover"
+                    "Tunnel health endpoint is occupied by an unowned process; "
+                    "refusing unsafe takeover"
                 )
             old_tunnel_pid = int(state.get("tunnel_pid", 0))
             if tunnel_owned and old_tunnel_pid > 0:

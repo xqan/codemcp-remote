@@ -53,6 +53,7 @@
 
 ### 版本记录与验证证据
 
+- [v0.1.0 Draft Release Notes](releases/v0.1.0/release-notes.md)
 - [v0.1.0 阶段记录](releases/v0.1.0/)
 - [迁移与基线报告](reports/migration/)
 - [测试报告](reports/testing/)

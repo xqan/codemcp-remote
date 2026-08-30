@@ -6,9 +6,11 @@ Date: 2026-08-24
 
 Repository-side implementation: **COMPLETE**
 
-GitHub-hosted activation/first-run verification: **PENDING until the repository is hosted on GitHub**
+GitHub-hosted CI execution: **WAIVED / ACCEPTED RISK** — the hosted run was blocked by the recorded billing/spending-limit condition before runner/job execution and is not counted as PASS.
 
-This distinction is intentional. The repository contains the complete governance and CI configuration, but a local checkout cannot prove GitHub branch protection, Dependabot scheduling, or the first hosted Actions run.
+Hosted governance activation: **PARTIAL / PENDING FINAL RECORD** — repository-side Dependabot/CI/templates are present, but branch/ruleset state and hosted Dependabot activation still require GitHub-side verification.
+
+This distinction is intentional. Local repository configuration proves the intended governance files, but it cannot prove GitHub ruleset enforcement or hosted Dependabot scheduling. The hosted CI waiver does not convert an unexecuted Actions job into PASS.
 
 ## Delivered
 
@@ -61,16 +63,16 @@ Result: **PASS**
 
 ## Hosted checks still required
 
-After the repository is created/pushed to GitHub, verify:
+Before stable release, record the remaining GitHub-side governance state:
 
-1. the first `CI` workflow run succeeds on `ubuntu-latest` and `windows-latest`;
-2. pull requests automatically receive the CI checks;
-3. Dependabot accepts both `uv` and `github-actions` ecosystems;
-4. repository branch/ruleset settings require the chosen CI checks before merging to the protected release branch;
-5. issue forms and the pull-request template render correctly.
+1. hosted CI remains **WAIVED / ACCEPTED RISK** for `v0.1.0` unless the billing condition is resolved and a real Ubuntu/Windows run actually executes;
+2. verify Dependabot accepts both `uv` and `github-actions` ecosystems;
+3. verify the repository branch/ruleset protects the intended release branch with the chosen merge policy; do not require a CI check that cannot execute under the accepted waiver unless the billing blocker is resolved;
+4. verify issue forms and the pull-request template render correctly;
+5. capture the final governance decision in the release record.
 
-These are activation checks, not permission to move the release gate to PASS without evidence.
+These are activation/governance checks. Local files alone do not establish hosted PASS, and the CI waiver must remain visible.
 
 ## Conclusion
 
-Stage 5 repository implementation is complete. Stable `v0.1.0` remains blocked by the pending hosted activation check and by the other P0 release gates defined in `docs/plans/v0.1.0/open-source-readiness-plan.md`.
+Stage 5 repository implementation is complete. The hosted CI billing blocker is explicitly waived for `v0.1.0` and is not a PASS. Stable release remains blocked on the final GitHub governance record (ruleset / Dependabot hosted activation) and the other remaining release gates in `docs/plans/v0.1.0/open-source-readiness-plan.md`.

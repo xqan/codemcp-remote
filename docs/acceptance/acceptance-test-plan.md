@@ -131,6 +131,22 @@ The final RC must re-run the complete gate and justify every remaining skip.
 - worktree remains clean;
 - test execution does not mutate release source state.
 
+### Current final-gate evidence (2026-08-30)
+
+- initial local standalone Ruff lint: **FAIL, FIXED** — 11 findings were reported and corrected without intended runtime-semantic changes;
+- current-HEAD standalone Ruff lint: **PASS** — `All checks passed!`;
+- current-HEAD full Ruff format scope: **PASS** — `80 files already formatted`;
+- full registered test workflow after fixes: **PASS** — `353 passed, 7 skipped, 2 warnings`;
+- configuration check: **PASS** — `status=ok`, `worker_mode=local`, `model_egress=deny`;
+- Python package build: **PASS** — source distribution and wheel built successfully;
+- `git diff --check`: **PASS**;
+- `git diff --exit-code`: **PASS** — no tracked-file mutation from the gate;
+- exact locally rechecked source identity: `083aef7a1e1aefb19164a48a1e6fb2f3e2f3f458`, branch `codex/open-source-readiness`, clean worktree;
+- security audit after fixes: **PASS** — dependency audit, dependency-license evidence, current-tree secret scan, and Git-history secret scan all passed; 1291 commits scanned with no leaks; compatibility review remains manual as already documented;
+- the earlier RC artifact audit remains historical evidence only because source HEAD changed after the lint fixes; final artifact evidence must be regenerated from the final release commit.
+
+Status: **PASS / COMPLETE.**
+
 ## 6. MCP contract gate
 
 The expected public surface is exactly 22 tools:
@@ -300,7 +316,24 @@ Required:
 
 with explainable operation/audit/Git lineage and no unexplained side effect.
 
-Status: **PENDING.**
+Status: **PASS — 10/10 COMPLETE.**
+
+### Real-project task ledger
+
+| Task | Project | Start | End | Session | Operations / command | Diff / side effects | Result |
+|---|---|---|---|---|---|---|---|
+| J-01 | `phase7-java-acceptance` | `develop` / `f7e90db814dd9f728c778436b305792fcd774447` | `develop` / `fec6972cfd948f930a3215358bc9e4d5c189de7e` | `e5bb37fb4cc94ceba8af0f402c089159` | edits `075d0d5c…`, `86ae7759…`; UTF-8 normalization `31e9104c…`, `cedd058c…`; test `96444dbb…` | `Calculator.java` + `CalculatorTest.java`; final worktree clean; no approval; no unknown/reconcile | **PASS** — added multiply behavior + test; Maven `Tests run: 3, Failures: 0, Errors: 0`, `BUILD SUCCESS` |
+| J-02 | `phase7-java-acceptance` | `develop` / `fec6972cfd948f930a3215358bc9e4d5c189de7e` | `develop` / `79684a69511f76abd781c88eb9d5d9fe59c0ffea` | `e5bb37fb4cc94ceba8af0f402c089159` | edits `354d2538…`, `d218bfff…`, `b4889142…`; test `60641059…` | `Calculator.java` + `CalculatorTest.java`; diff reviewed; final worktree clean; no approval; no unknown/reconcile | **PASS** — guarded divide + zero-divisor test; Maven `Tests run: 4, Failures: 0, Errors: 0`, `BUILD SUCCESS` |
+| J-03 | `phase7-java-acceptance` | `develop` / `79684a69511f76abd781c88eb9d5d9fe59c0ffea` | `develop` / `5edb1a00522f2617b03539c141124d8e8ca9f3fb` | `e5bb37fb4cc94ceba8af0f402c089159` | creates `c353dd29…`, `1aed56b5…`; test `c9f30c36…` | new `NumberRange.java` + `NumberRangeTest.java`; diff reviewed; final worktree clean; no approval; no unknown/reconcile | **PASS** — clamp utility + boundary tests; Maven `Tests run: 6, Failures: 0, Errors: 0`, `BUILD SUCCESS` |
+| J-04 | `phase7-java-acceptance` | `develop` / `5edb1a00522f2617b03539c141124d8e8ca9f3fb` | `develop` / `332dea59e0ae464663214011165d8ccb6e25400d` | `e5bb37fb4cc94ceba8af0f402c089159` | edits `59426c91…`, `a159adc9…`; test `77d62385…` | `NumberRange.java` + `NumberRangeTest.java`; diff reviewed; final worktree clean; no approval; no unknown/reconcile | **PASS** — inclusive range membership + shared range validation; Maven `Tests run: 7, Failures: 0, Errors: 0`, `BUILD SUCCESS` |
+| J-05 | `phase7-java-acceptance` | `develop` / `332dea59e0ae464663214011165d8ccb6e25400d` | `develop` / `c2597943f3b29bff084483bba3e8d653988029fe` | `e5bb37fb4cc94ceba8af0f402c089159` | moves `db6a7ccf…`, `695c9d12…`; writes `af023a4b…`, `aabad496…`; test `2d461ce4…` | source/test rename diff reviewed; final worktree clean; no approval; no unknown/reconcile | **PASS** — `NumberRange` → `RangeMath` refactor via tracked moves; Maven `Tests run: 7, Failures: 0, Errors: 0`, `BUILD SUCCESS` |
+| F-01 | `phase7-frontend-acceptance` | `develop` / `e74eb6ee4c7643e66efb3fd8a21b0f22f5b8b086` | `develop` / `679c32bdc277e9102fe15e6b7d182b74d83f7001` | `775d9db154ca4667873592ba056396ab` | edits `2579490d…`, `800f61a2…`, `cd9e49e8…`; test `ff460760…`; build `a9e2652d…` | `src/app.js` + `test.mjs`; diff reviewed; build output ignored; final worktree clean; no approval; no unknown/reconcile | **PASS** — added farewell behavior; `npm test` PASS + `npm run build` PASS |
+| F-02 | `phase7-frontend-acceptance` | `develop` / `679c32bdc277e9102fe15e6b7d182b74d83f7001` | `develop` / `9e71b8993daea3716f45864c7da88d5cc161a5a0` | `775d9db154ca4667873592ba056396ab` | edits `f1fa04f2…`, `8022d8b6…`; test `a3df8c06…`; build `fcd1688d…` | `src/app.js` + `test.mjs`; final worktree clean; no approval; no unknown/reconcile | **PASS** — trimmed names + blank-name rejection; `npm test` PASS + `npm run build` PASS |
+| F-03 | `phase7-frontend-acceptance` | `develop` / `9e71b8993daea3716f45864c7da88d5cc161a5a0` | `develop` / `cfd7bcb8215b306764d6cb2a5d50e534180d8a48` | `775d9db154ca4667873592ba056396ab` | create `c2149945…`; edits `54385eab…`, `380c032a…`, `3617c418…`; test `355f37f0…`; build `9b9e1af8…` | `src/meta.js` + `build.mjs` + `test.mjs`; diff reviewed; final worktree clean; no approval; no unknown/reconcile | **PASS** — metadata added to tests/build output; `npm test` PASS + `npm run build` PASS |
+| R-01 | `phase7-frontend-acceptance` | `develop` / `cfd7bcb8215b306764d6cb2a5d50e534180d8a48` | `develop` / `cfd7bcb8215b306764d6cb2a5d50e534180d8a48` | `775d9db154ca4667873592ba056396ab` | temp edits `b4e98e0f…`, `281a117b…`; pre-restore test `41f4c05e…`; expired approval rejected, stale blocker cancelled `90f406bd…`; restore `e69cb182…` confirmed by `36cada12…`; post-restore test `23acc289…`; build `d1a68e6e…` | rollback-safety checkpoint `a7aa4139…`; restored exact baseline HEAD; final worktree clean; explicit approval used; no unknown side effect | **PASS** — checkpoint/CAS rollback restored `1.0.1` trial back to exact `1.0.0` baseline; post-restore `npm test` + build PASS |
+| R-02 | `phase7-java-acceptance` | `develop` / `c2597943f3b29bff084483bba3e8d653988029fe` | `develop` / `c2597943f3b29bff084483bba3e8d653988029fe` | `e5bb37fb4cc94ceba8af0f402c089159` | manual checkpoint create `796f2290…` confirmed by `1aaa2c88…`; trial edits `f9ed25d2…`, `055f71e9…`; pre-restore test `341672db…`; restore `76723c2e…` confirmed by `e3994bc9…`; post-restore test `2010270a…` | manual checkpoint `acebff17…`; rollback-safety checkpoint `21548e44…`; exact baseline restored; final worktree clean; explicit approval used; no unknown side effect | **PASS** — explicit Bridge-owned checkpoint rollback; trial Maven `8 tests` PASS, restored baseline Maven `7 tests` PASS, both `BUILD SUCCESS` |
+
+J-01 setup note: the first remote Maven test correctly failed because the disposable project had UTF-8 BOMs introduced by local PowerShell fixture creation. The files were normalized through MCP with SHA-256 CAS and the same task was rerun to PASS. This is acceptance-harness setup evidence, not a product failure.
 
 ## 11. ChatGPT-only reasoning boundary
 
@@ -363,9 +396,10 @@ Current public/normative documents:
 - [x] `CODE_OF_CONDUCT.md`
 - [x] `CHANGELOG.md`
 - [x] `.github` CI / issue / PR / Dependabot configuration
-- [ ] final third-party notices decision
+- [x] final third-party notices decision — preserve bundled notices/license evidence and the documented codemcp MIT/Apache metadata discrepancy
 - [ ] clean-machine README execution PASS
-- [ ] final known-limitations cross-check
+- [x] final known-limitations cross-check — `NotSigned`/SmartScreen, Profile A network-only identity, Git prerequisite, hosted-CI waiver, and codemcp metadata discrepancy are explicitly disclosed
+- [x] draft `v0.1.0` release notes are present and intentionally do not freeze final commit/SHA values before the final artifact rebuild
 - [ ] final release notes/checksum verification against final RC
 
 Documentation must not claim:
@@ -375,18 +409,20 @@ Documentation must not claim:
 - Secure MCP Tunnel is the mandatory default remote path;
 - Profile A provides human user identity.
 
+Current documentation consistency: **PASS**. Clean-machine README execution and final release-note/checksum binding remain release-artifact gates, not unresolved documentation contradictions.
+
 ## 14. Secrets and supply-chain acceptance
 
 Before tag:
 
-- [ ] scan tracked working tree;
-- [ ] scan complete Git history;
-- [ ] scan `.github/`, scripts, configs, docs, tests and fixtures;
-- [ ] scan final release artifact;
-- [ ] audit locked dependencies for known vulnerabilities;
-- [ ] review dependency license compatibility/notices;
-- [ ] confirm local project registry/runtime logs/SQLite/secret data are not packaged;
-- [ ] verify `codemcp==0.3.0` provenance remains intentional.
+- [x] scan tracked working tree;
+- [x] scan complete Git history;
+- [x] scan `.github/`, scripts, configs, docs, tests and fixtures;
+- [ ] scan final release artifact after the final release-only commit rebuild;
+- [x] audit locked dependencies for known vulnerabilities;
+- [x] review dependency license compatibility/notices — PASS WITH DOCUMENTED DISCREPANCY;
+- [x] confirm local project registry/runtime logs/SQLite/secret data are excluded by the packaging/security gate;
+- [x] verify `codemcp==0.3.0` provenance remains intentional and preserve its MIT/Apache metadata discrepancy.
 
 If a real secret is discovered:
 
@@ -396,7 +432,7 @@ If a real secret is discovered:
 4. rebuild candidate;
 5. rerun affected gates.
 
-Status: **PENDING.**
+Status: **PASS WITH FINAL-ARTIFACT RECHECK PENDING.** Source/dependency/history/notices checks are complete; the final installer/ZIP artifact scan must be rerun after the final release-only commit rebuild.
 
 ## 15. Packaging and clean-machine acceptance
 
@@ -443,15 +479,15 @@ Repository-side governance is already implemented.
 
 Before stable release:
 
-- [ ] first hosted CI run passes on Ubuntu and Windows;
-- [ ] pull requests automatically receive required checks;
-- [ ] Dependabot recognizes uv and GitHub Actions;
-- [ ] branch/ruleset protects the release branch using required checks;
-- [ ] issue forms render;
-- [ ] PR template renders;
-- [ ] workflow permissions remain least-privilege.
+- [x] repository-side CI / issue / PR / Dependabot configuration is present;
+- [x] hosted CI billing/spending-limit blocker is recorded as **WAIVED / ACCEPTED RISK**; no unexecuted runner/job is counted as PASS;
+- [ ] verify Dependabot recognizes both `uv` and `github-actions` on GitHub;
+- [ ] verify the branch/ruleset protects the intended release branch with the chosen merge policy; do not require an unavailable hosted-CI check unless the billing blocker is resolved;
+- [ ] verify issue forms render;
+- [ ] verify the PR template renders;
+- [x] workflow permissions remain least-privilege in the repository configuration.
 
-Local workflow files alone do not establish hosted PASS.
+Local workflow files do not establish hosted activation. The accepted CI waiver and the final GitHub-side governance state must both be recorded before release.
 
 ## 17. Signing decision
 
@@ -488,7 +524,7 @@ Stable `v0.1.0` requires:
 | Secrets | PASS |
 | Dependency/license supply chain | PASS |
 | Strict clean-machine packaging | PASS |
-| Hosted GitHub CI/ruleset | PASS |
+| Hosted GitHub CI / governance | Hosted CI **WAIVED / ACCEPTED RISK** because billing blocked execution; ruleset/Dependabot/final governance state must be RECORDED |
 | SHA-256 integrity | PASS |
 | Signing decision | RECORDED |
 | Worktree/tag identity | CLEAN / VERIFIED |

@@ -112,7 +112,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--home",
         type=Path,
-        help="writable runtime home (overrides CODEMCP_HOME; packaged default is the EXE directory)",
+        help="writable runtime home (overrides CODEMCP_HOME; packaged default: EXE directory)",
     )
     parser.add_argument("--app-root", type=Path)
     parser.add_argument("--transport", choices=("openai-tunnel", "cloudflare"))

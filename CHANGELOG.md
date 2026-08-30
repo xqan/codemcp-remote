@@ -37,8 +37,12 @@ The project is currently pre-release. Version `v0.1.0` must not be published unt
 
 - Native Windows local mutation is the default packaged worker and requires Git for Windows; WSL2 remains an optional source-mode compatibility fallback.
 - ChatGPT Connector availability depends on the capabilities enabled for the user's OpenAI/ChatGPT account or workspace.
+- Profile A is a `network-only` trust boundary and does not identify a ChatGPT user, account, Workspace, or conversation.
 - The Bridge is single-operator local policy infrastructure, not a multi-user authorization service.
 - Arbitrary shell, automatic push/merge/deploy, and model calls inside the Bridge are intentionally unavailable.
+- The current Windows release candidate is `NotSigned`; Windows SmartScreen or other reputation warnings may appear. Stable release requires either a signed artifact or an explicit release decision accepting and documenting this limitation.
+- GitHub-hosted CI did not execute because of the recorded billing/spending-limit blocker. The v0.1.0 gate records this as **WAIVED / ACCEPTED RISK**, not PASS; local deterministic gates remain the release evidence.
+- Installer/ZIP hashes and the release commit are not final until the release-only commit is created and the artifacts are rebuilt from that exact commit.
 
 ## Release policy
 

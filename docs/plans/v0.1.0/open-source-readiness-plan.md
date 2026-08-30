@@ -151,8 +151,8 @@ local CLI project add/remove
 | Stage 0 — Readiness baseline | **COMPLETE** | 否 | 初始开源整改基线已建立；最终 release freeze 仍在末尾执行 |
 | Stage 1 — License / Security / Threat Model | **COMPLETE** | 否 | 核心法律/安全文档与 third-party notices 策略已完成 |
 | Stage 2 — Phase 6 Windows Operations | **PASS / COMPLETE** | 否 | final RC Windows 11 mandatory real-host/fault/path/log matrix 已完成 |
-| Stage 3 — Phase 7 Final Acceptance | **IN PROGRESS — FINAL RELEASE GATE** | **是** | Functional 与 Reliability 已收口；Security 仅剩 prompt-injection 收尾；10 real-project tasks 与 final automated/docs/rebuild/sign-off 仍待完成 |
-| Stage 4 — README / Onboarding | **REPOSITORY IMPLEMENTATION COMPLETE / FINAL VERIFICATION PENDING** | 是 | 当前规范文档已对齐；final artifact README-only clean-machine execution/known limitations 待最终复核 |
+| Stage 3 — Phase 7 Final Acceptance | **IN PROGRESS — FINAL RELEASE GATE** | **是** | Functional / Security / Reliability / 10 real-project tasks / final automated gate / documentation consistency 已收口；剩 signing、GitHub governance、final release-only commit、artifact rebuild、final clean-machine/sign-off |
+| Stage 4 — README / Onboarding | **DOCUMENTATION CONSISTENCY PASS / CLEAN-MACHINE EXECUTION PENDING** | 是 | README/Windows/Cloudflare/CHANGELOG/draft release notes/known limitations 已对齐；README-only clean-machine execution 与 final checksum binding 留待最终 artifact gate |
 | Stage 5 — GitHub Governance / CI | **REPOSITORY IMPLEMENTATION COMPLETE / HOSTED CI WAIVER RECORDED** | 是 | hosted CI 因 billing 在 runner 前阻塞并已记录 waiver；ruleset/Dependabot/最终治理记录仍待收口 |
 | Stage 6 — Secrets / Privacy / Supply Chain | **PASS WITH DOCUMENTED LICENSE DISCREPANCY / HOSTED-CI WAIVER** | 否 | working tree/history/artifact/dependency/license audit 已完成；`codemcp==0.3.0` metadata discrepancy 已记录 |
 | Stage 7 — Release Packaging | **CURRENT RC CLEAN-MACHINE VALIDATED / FINAL-COMMIT REBUILD PENDING** | **是** | 当前 RC installer/ZIP/SHA 与 clean-machine 路径已验证；最终 release-only commit 后必须重建、复核、cleanup/sign-off |
@@ -177,7 +177,7 @@ local CLI project add/remove
 - [x] S-27/S-28/S-29/S-30 network-trust live boundary：Host / Origin / ordinary public source / forwarded-header spoof 均 fail closed；
 - [x] Stage 6 working-tree / Git-history / artifact / dependency / license audit：**PASS WITH DOCUMENTED `codemcp==0.3.0` LICENSE METADATA DISCREPANCY**；
 - [x] 当前 final-RC registered regression：`353 passed, 7 skipped, 2 warnings`；
-- [x] 当前 same-HEAD format gate：`79 files already formatted`；
+- [x] final automated source gate format evidence：`80 files already formatted`；
 - [x] 当前 public MCP surface：exact **22 tools**；
 - [x] 当前 RC installer / ZIP / SHA identity 已生成并完成 artifact/security audit；
 - [x] GitHub hosted CI billing/spending-limit blocker 已记录为 **WAIVED / ACCEPTED RISK**，不得表述为 hosted CI PASS。
@@ -188,9 +188,9 @@ local CLI project add/remove
 
 #### Final Release Gate 剩余 blocker
 
-- [ ] 10/10 complete real-project remote tasks：至少 5 Java + 3 frontend + 2 recovery/checkpoint/reconcile；
-- [ ] final automated gate 补齐 standalone Ruff lint、final format/build/package、`git diff --check`、clean worktree 与 exact identity；
-- [ ] README-only clean-machine onboarding / known limitations / CHANGELOG / release notes 最终一致性；
+- [x] 10/10 complete real-project remote tasks：**10/10 PASS / COMPLETE**（Java 5/5，frontend 3/3，recovery 2/2）；distribution satisfied，所有任务均具备 operation/audit/Git lineage，最终 worktree clean。
+- [x] final automated gate：**PASS / COMPLETE** — automated-gate code identity `083aef7a1e1aefb19164a48a1e6fb2f3e2f3f458` 已完成 standalone Ruff lint（`All checks passed!`）、full Ruff format scope（`80 files already formatted`）、configuration check（`status=ok`，`worker_mode=local`，`model_egress=deny`）、Python package build（sdist + wheel）、`git diff --check`、`git diff --exit-code`、clean worktree 与 exact identity；registered full test 为 `353 passed, 7 skipped, 2 warnings`，security audit re-PASS（1291 commits scanned，no leaks）。其后的 release-prep 变更仅为文档/验收记录收口；最终 artifact 仍必须从 final release-only commit 重建并复验；
+- [x] documentation consistency：**PASS** — README / Windows guide / Cloudflare guide / CHANGELOG / draft release notes / dependency-license wording 已对齐；`NotSigned`、SmartScreen、Profile A network-only、hosted-CI waiver、codemcp MIT/Apache discrepancy 均已显式披露；clean-machine README execution 与 final release-note/checksum binding 继续归入最终 artifact / clean-machine gate；
 - [ ] signing decision：正式签名，或明确接受 `NotSigned` + Windows SmartScreen/user-trust limitation；
 - [ ] required checks / ruleset / Dependabot 最终治理状态记录；
 - [ ] final release-only commit；
