@@ -2,9 +2,9 @@
 
 [Simplified Chinese](zh-CN/implementation-plan.md)
 
-> Updated: 2026-08-30  
+> Updated: 2026-08-31  
 > Implementation branch: `codex/macos-cli-packaging`  
-> Status: **PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 CLEAN-HOST PENDING / RELEASE BLOCKED**  
+> Status: **PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 HARNESS IMPLEMENTED, HARDENING + REAL-HOST ACCEPTANCE PENDING / RELEASE BLOCKED**  
 > Previous frozen baseline: [`plans/v0.1.0/windows-release-baseline-2026-08-28.md`](plans/v0.1.0/windows-release-baseline-2026-08-28.md)
 
 This plan authorizes and records the additive macOS dual-architecture work. It does **not** by itself mean macOS is supported. Support claims must follow real acceptance evidence.
@@ -218,7 +218,23 @@ The repository validation ledger currently records the Phase 3 gate as PASS, whi
 
 ## Phase 4 — clean-host acceptance and final release gate
 
-**Status: PENDING / RELEASE BLOCKED**
+**Status: HARNESS IMPLEMENTED / HARDENING PENDING / REAL-HOST ACCEPTANCE PENDING / RELEASE BLOCKED**
+
+### Current Phase 4 repository state — 2026-08-31
+
+The current repository state, not chat history, records the following:
+
+- `scripts/validate-clean-macos-release.sh` is implemented with `prepare`, `verify`, `secret-scan`, `lifecycle`, and `cleanup` actions.
+- The harness keeps the Cloudflare Tunnel token out of argv and temporary files, requires a real TTY for secret re-entry, verifies `macos-keychain` as the persisted source, runs the bundled `cloudflared`, supports a 20-cycle lifecycle gate, and deletes only harness-owned acceptance state.
+- The macOS build/install guide contains the Phase 4 clean-host flow.
+- Packaging contract tests cover the Phase 4 harness safety invariants.
+- The latest full Windows-host suite completed with `42 failed, 345 passed, 8 skipped`. The failure count remains the same known pre-existing Windows/Python 3.12 baseline; the dominant failure is `BridgeError.__post_init__` raising `TypeError: super(type, obj): obj must be an instance or subtype of type`. This run is **not** a Phase 4 PASS and does not replace native macOS evidence.
+- Two harness hardening items remain before real-host execution:
+  1. explicit fail-closed preflight for required macOS system tools such as `shasum`, `lipo`, `codesign`, `spctl`, `security`, and `git`;
+  2. rescan every Mach-O in the extracted final artifact and verify each one is the expected thin architecture with a valid ad-hoc signature, rather than rechecking only the main executable and bundled `cloudflared`.
+- Intel clean-host acceptance has not yet been executed against the final harness.
+- Apple Silicon clean-host acceptance remains pending.
+- The release gate remains blocked until both real-host architecture tracks and the required Windows regression evidence are complete.
 
 Phase 4 validates the Phase 3 artifacts on:
 
@@ -284,7 +300,7 @@ Any later change to runtime code, the lockfile, external binaries, signing, or a
 | No Developer ID / notarization | Accepted product limitation | Publish only ad-hoc, non-notarized artifacts; never claim Apple trust |
 | Gatekeeper quarantine | Expected | Verify trusted digest before any manual quarantine release |
 | Apple Silicon clean-host resource | Pending | CI candidate does not replace real-host acceptance |
-| Intel clean-host resource | Available/partially exercised | Must still complete the formal clean-host matrix |
+| Intel clean-host resource | Available; Phase 4 harness implemented, formal run not yet executed | Complete harness hardening first, then run the formal clean-host matrix |
 | Minimum macOS version | Not yet proven | Claim only versions with real evidence |
 | Keychain ACL/upgrade behavior | Needs real-host matrix | Fail closed on denial or backend mismatch |
 | macOS `codemcp==0.3.0` runtime behavior | Requires final real-host proof | Never silently replace the backend |
@@ -292,6 +308,15 @@ Any later change to runtime code, the lockfile, external binaries, signing, or a
 
 ## Current handoff
 
-Do not restart completed Phase 1–3 work. Continue from the first genuinely incomplete Phase 4 acceptance item recorded by repository evidence.
+Do not restart completed Phase 1–3 work. Continue Phase 4 from this exact sequence:
 
-Use [`acceptance/macos-v0.1.0-validation.md`](acceptance/macos-v0.1.0-validation.md), current Git state, tests, and `docs/development-state.md` as the source of truth. Chat history is not authoritative.
+1. harden `scripts/validate-clean-macos-release.sh` with explicit required-tool preflight;
+2. make `prepare` rescan and validate **all** Mach-O files in the extracted candidate for native thin architecture and valid ad-hoc signatures;
+3. rerun formatting, targeted packaging contracts, the full regression suite, security audit where available, `git diff --check`, and Git status;
+4. only after the repository gate is clean enough for acceptance, run the Intel `prepare -> interactive install -> verify -> secret-scan -> lifecycle --cycles 20 -> cleanup` flow on the real Intel Mac;
+5. retain the Intel evidence in the repository acceptance ledger;
+6. repeat the same clean-host evidence chain on real Apple Silicon before declaring macOS support or releasing `v0.1.0`.
+
+The known Windows/Python 3.12 `BridgeError.__post_init__` failure baseline must remain explicitly separated from Phase 4 macOS evidence; do not silently call a failing full suite PASS.
+
+Use [`acceptance/macos-v0.1.0-validation.md`](acceptance/macos-v0.1.0-validation.md), current Git state, tests, and `docs/development-state.md` as the source of truth. Critical status must be written back to repository planning/acceptance documents; chat history is not authoritative.

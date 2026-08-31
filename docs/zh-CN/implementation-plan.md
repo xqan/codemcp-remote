@@ -4,9 +4,9 @@
 
 [English canonical](../implementation-plan.md)
 
-> 更新日期：2026-08-30
+> 更新日期：2026-08-31
 > 工作分支：`codex/macos-cli-packaging`
-> 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 CLEAN-HOST PENDING / RELEASE BLOCKED**
+> 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 HARNESS IMPLEMENTED, HARDENING + REAL-HOST ACCEPTANCE PENDING / RELEASE BLOCKED**
 > 冻结前序计划：[`../plans/v0.1.0/windows-release-baseline-2026-08-28.md`](../plans/v0.1.0/windows-release-baseline-2026-08-28.md)
 
 本文件只授权并规划 macOS 双架构支持，不表示 macOS 已受支持。当前可运行产品基线仍以代码、主 README 和现行验收记录中的 Windows 说明为准，直到本文所有发布门禁均有真实证据。
@@ -407,6 +407,23 @@ git status --short
 
 ## Phase 4: Clean-machine、文档一致性与最终发布门禁
 
+**当前状态：HARNESS IMPLEMENTED / HARDENING PENDING / REAL-HOST ACCEPTANCE PENDING / RELEASE BLOCKED**
+
+### 2026-08-31 仓库真实状态
+
+以下状态以仓库为准，不以聊天记录为准：
+
+- 已实现 `scripts/validate-clean-macos-release.sh`，包含 `prepare`、`verify`、`secret-scan`、`lifecycle`、`cleanup` 五个动作。
+- harness 保证 Cloudflare Tunnel token 不进入 argv 和临时文件；secret 二次扫描要求真实 TTY；持久化来源必须验证为 `macos-keychain`；生命周期门禁支持 20 次 start/status/stop；cleanup 只清理 harness 可证明归属的 acceptance sandbox。
+- macOS build/install 指南已包含 Phase 4 clean-host 流程；packaging contract tests 已覆盖 Phase 4 harness 的关键安全不变量。
+- 最近一次 Windows host 全量测试结果为 `42 failed, 345 passed, 8 skipped`。failure 数仍等于已知历史基线 42；主要失败根因仍是 Windows/Python 3.12 下 `BridgeError.__post_init__` 的 `TypeError: super(type, obj): obj must be an instance or subtype of type`。该结果**不能标记为 Phase 4 PASS**，也不能替代 macOS 真机证据。
+- 真机执行前还剩两个 harness hardening：
+  1. 对 `shasum`、`lipo`、`codesign`、`spctl`、`security`、`git` 等必需 macOS 系统工具做显式 fail-closed preflight；
+  2. `prepare` 解压后重新扫描最终 artifact 中的**全部 Mach-O**，逐个确认目标 thin architecture 和有效 ad-hoc signature，不能只复核主 executable 与 bundled `cloudflared`。
+- Intel clean-host 正式验收尚未执行。
+- Apple Silicon clean-host 正式验收尚未执行。
+- 两种架构真机链路和所需 Windows regression evidence 全部完成前，`v0.1.0` Release Gate 继续 BLOCKED。
+
 ### Goal
 
 在真实 Apple Silicon 与 Intel Mac 上分别验证由 Phase 3 CI 产生的两个 ad-hoc 签名、未 notarized tar 的下载校验、人工放行、运行、安全、升级与清理行为；真机负责用户环境验收，不负责重新定义权威构建来源。同步现行文档，并把结论并入 `v0.1.0` Final Release Gate。
@@ -516,4 +533,16 @@ git status --short
 
 # Developer Handoff
 
-从 **Phase 1** 开始。先解决 platform runtime contract，不要同时写打包脚本；否则打出的可执行文件会继承当前的 distribution 可写、DPAPI-only 和 PID-only 缺陷。每个 Phase 单独校验、提交并停止，等待下一阶段授权。
+不要重做已经完成的 Phase 1–3。Phase 4 必须从以下精确位置继续：
+
+1. 给 `scripts/validate-clean-macos-release.sh` 增加 required-tool fail-closed preflight；
+2. 让 `prepare` 对解压后的最终 candidate **全部 Mach-O** 做 thin architecture + ad-hoc codesign 重新验证；
+3. 重跑 format、targeted packaging contracts、full regression、可执行时的 security audit、`git diff --check` 和 Git status；
+4. 仓库 Gate 足够干净后，在真实 Intel Mac 执行 `prepare -> interactive install -> verify -> secret-scan -> lifecycle --cycles 20 -> cleanup`；
+5. 将 Intel evidence 写入仓库 acceptance ledger；
+6. 在真实 Apple Silicon 上重复相同 clean-host evidence chain；
+7. 两种架构都完成前，不得宣称 macOS supported，也不得发布 `v0.1.0`。
+
+Windows/Python 3.12 的已知 `BridgeError.__post_init__` 42-failure 基线必须与 Phase 4 macOS evidence 分开记录；失败的 full suite 不得静默标为 PASS。
+
+**项目规则：关键阶段状态、PASS/FAIL、阻塞项、待补证据和下一步入口必须同步写入仓库相关 planning/acceptance 文档；聊天记录不具备权威性。**
