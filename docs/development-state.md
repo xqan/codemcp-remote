@@ -159,11 +159,13 @@ This behavior is an unsigned-candidate usability measure. Re-evaluate whether it
 
 ## Current blocker
 
-No code, approval, restore, registered-command, repository-regression, or installer-source blocker remains for macOS Intel64. Because the packaged installer changed, the remaining gate is a fresh native macOS Intel64 release-candidate build and acceptance run.
+The latest quarantine-cleanup source HEAD `ec05cb04efdd7d596e479ee4a87ac9c6a707dd49` has been pushed by the user. No code, approval, restore, registered-command, repository-regression, or installer-source blocker remains for macOS Intel64.
+
+The final release gate is now limited to the fresh `macos-intel64` artifact: confirm the workflow/native packaging acceptance is green, then install that newly built artifact on the Intel Mac without manually running `xattr` first and verify the installer clears quarantine itself.
 
 ## Next steps
 
-1. Push the current `codex/macos-cli-packaging` HEAD so the macOS workflow builds a candidate containing the quarantine cleanup and its packaging contract test.
-2. Confirm the latest `macos-intel64` native packaging acceptance passes.
-3. Install/run that fresh candidate on the Intel Mac and confirm setup no longer requires a manual `xattr` quarantine-removal step.
-4. Record the final macOS Intel64 release gate result in this document.
+1. Confirm the latest `macos-intel64` native packaging acceptance for HEAD `ec05cb04efdd7d596e479ee4a87ac9c6a707dd49` passes.
+2. Download/extract that fresh Intel64 artifact without manually clearing quarantine.
+3. Run `./codemcp-install.sh` and confirm setup proceeds without a Gatekeeper/quarantine failure or a manual `xattr -dr` step.
+4. Record the final macOS Intel64 release gate PASS/FAIL in this document.
