@@ -157,15 +157,35 @@ Validation after the installer change:
 
 This behavior is an unsigned-candidate usability measure. Re-evaluate whether it should remain once a Developer ID signed and notarized release path is available.
 
+## macOS Intel64 final release gate
+
+Final live Intel64 quarantine acceptance: PASS.
+
+- The fresh `macos-intel64` candidate built from quarantine-cleanup source HEAD `ec05cb04efdd7d596e479ee4a87ac9c6a707dd49` was extracted and run on the Intel Mac.
+- `./codemcp-install.sh` proceeded without requiring a manual `xattr -dr` step.
+- No Gatekeeper/quarantine failure blocked the bundled executable or Python extension loading during this acceptance.
+- The installer-owned `xattr -dr com.apple.quarantine "$SCRIPT_DIR"` behavior therefore passed its intended real-machine acceptance.
+- Repository regression remains PASS at 393 passed, 0 failed, 8 skipped, 1 warning.
+
+Conclusion: macOS Intel64 final release gate PASS for the unsigned candidate path.
+
+## Implementation-plan synchronization
+
+Both active implementation plans have been synchronized to the same repository facts:
+
+- `docs/implementation-plan.md` is the English canonical implementation plan.
+- `docs/zh-CN/implementation-plan.md` is an independent Chinese implementation plan, not a redirect-only mirror.
+- Both record Intel64 live/final gate PASS, quarantine auto-cleanup PASS, MCP approval/restore/registered-command acceptance, the 393 passed / 0 failed / 8 skipped / 1 warning regression baseline, and the closure of the old `BridgeError` / WSL2 integration failure baselines.
+- Both explicitly retain Apple Silicon real-host acceptance as the remaining architecture gate and keep the combined macOS / `v0.1.0` release blocked until that evidence and dependent final signoff are complete.
+- Critical future status changes must be written to this development-state document, the English canonical plan, the independent Chinese plan, and the relevant acceptance ledger before the stage is considered complete.
+
 ## Current blocker
 
-The latest quarantine-cleanup source HEAD `ec05cb04efdd7d596e479ee4a87ac9c6a707dd49` has been pushed by the user. No code, approval, restore, registered-command, repository-regression, or installer-source blocker remains for macOS Intel64.
-
-The final release gate is now limited to the fresh `macos-intel64` artifact: confirm the workflow/native packaging acceptance is green, then install that newly built artifact on the Intel Mac without manually running `xattr` first and verify the installer clears quarantine itself.
+No Intel64 blocker remains. The remaining macOS dual-architecture release blocker is the real Apple Silicon / ARM64 final host acceptance and the documentation/release signoff that depends on it.
 
 ## Next steps
 
-1. Confirm the latest `macos-intel64` native packaging acceptance for HEAD `ec05cb04efdd7d596e479ee4a87ac9c6a707dd49` passes.
-2. Download/extract that fresh Intel64 artifact without manually clearing quarantine.
-3. Run `./codemcp-install.sh` and confirm setup proceeds without a Gatekeeper/quarantine failure or a manual `xattr -dr` step.
-4. Record the final macOS Intel64 release gate PASS/FAIL in this document.
+1. Push the documentation synchronization commits so the remote branch records the final Intel64 and plan state.
+2. Keep ARM64 candidate parity under the same packaging contract and run the equivalent real-host acceptance on an Apple Silicon Mac.
+3. Synchronize the ARM64 PASS/FAIL result back to `docs/development-state.md`, both implementation plans, and the macOS acceptance ledger.
+4. Re-evaluate automatic quarantine removal if the project later adopts Developer ID signing and notarization.

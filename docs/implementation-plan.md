@@ -4,10 +4,10 @@
 
 > Updated: 2026-08-31  
 > Implementation branch: `codex/macos-cli-packaging`  
-> Status: **PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 HARNESS IMPLEMENTED, HARDENING + REAL-HOST ACCEPTANCE PENDING / RELEASE BLOCKED**  
+> Status: **PHASE 1 COMPLETED / PHASE 2 COMPLETED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 INTEL64 LIVE GATE PASS / ARM64 REAL-HOST GATE PENDING / RELEASE BLOCKED**  
 > Previous frozen baseline: [`plans/v0.1.0/windows-release-baseline-2026-08-28.md`](plans/v0.1.0/windows-release-baseline-2026-08-28.md)
 
-This plan authorizes and records the additive macOS dual-architecture work. It does **not** by itself mean macOS is supported. Support claims must follow real acceptance evidence.
+This plan is the English canonical implementation record for the additive macOS dual-architecture work. Intel64 live acceptance is complete, but macOS support and the combined `v0.1.0` release remain blocked until the required Apple Silicon real-host gate is complete.
 
 ## Goal
 
@@ -218,23 +218,22 @@ The repository validation ledger currently records the Phase 3 gate as PASS, whi
 
 ## Phase 4 — clean-host acceptance and final release gate
 
-**Status: HARNESS IMPLEMENTED / HARDENING PENDING / REAL-HOST ACCEPTANCE PENDING / RELEASE BLOCKED**
+**Status: INTEL64 LIVE GATE PASS / ARM64 REAL-HOST ACCEPTANCE PENDING / RELEASE BLOCKED**
 
 ### Current Phase 4 repository state — 2026-08-31
 
 The current repository state, not chat history, records the following:
 
-- `scripts/validate-clean-macos-release.sh` is implemented with `prepare`, `verify`, `secret-scan`, `lifecycle`, and `cleanup` actions.
-- The harness keeps the Cloudflare Tunnel token out of argv and temporary files, requires a real TTY for secret re-entry, verifies `macos-keychain` as the persisted source, runs the bundled `cloudflared`, supports a 20-cycle lifecycle gate, and deletes only harness-owned acceptance state.
-- The macOS build/install guide contains the Phase 4 clean-host flow.
-- Packaging contract tests cover the Phase 4 harness safety invariants.
-- The latest full Windows-host suite completed with `42 failed, 345 passed, 8 skipped`. The failure count remains the same known pre-existing Windows/Python 3.12 baseline; the dominant failure is `BridgeError.__post_init__` raising `TypeError: super(type, obj): obj must be an instance or subtype of type`. This run is **not** a Phase 4 PASS and does not replace native macOS evidence.
-- Two harness hardening items remain before real-host execution:
-  1. explicit fail-closed preflight for required macOS system tools such as `shasum`, `lipo`, `codesign`, `spctl`, `security`, and `git`;
-  2. rescan every Mach-O in the extracted final artifact and verify each one is the expected thin architecture with a valid ad-hoc signature, rather than rechecking only the main executable and bundled `cloudflared`.
-- Intel clean-host acceptance has not yet been executed against the final harness.
-- Apple Silicon clean-host acceptance remains pending.
-- The release gate remains blocked until both real-host architecture tracks and the required Windows regression evidence are complete.
+- `scripts/validate-clean-macos-release.sh` is implemented with `prepare`, `verify`, `secret-scan`, `lifecycle`, and `cleanup` actions, and the macOS build/install guide contains the clean-host flow.
+- The `BridgeError` dataclass constructor failure was fixed by replacing zero-argument `super()` with explicit `Exception.__init__`; the raw `super(type, obj)` failure no longer reproduces on the deployed Intel64 runtime.
+- Standard MCP `ToolAnnotations` are published for effectful tools. Live ChatGPT-host compatibility is verified for `checkpoint_create`, `approval_confirm`, `checkpoint_restore`, `registered_command_run`, `test_run`, and `format_run` without weakening Bridge-side approval, CAS, checkpoint, audit, or fail-closed enforcement.
+- Intel64 live acceptance passed for project open/read/write, automatic commits/checkpoints/diff, one-time approval behavior, checkpoint restore, stale-HEAD CAS rejection, project-registry hot reload, and deterministic registered `verify`, `test`, and `format` commands.
+- `scripts/codemcp-install.sh` now removes `com.apple.quarantine` recursively from its extracted distribution directory on Darwin before continuing setup. This is a best-effort unsigned-candidate usability measure; it does not modify packaged file bytes, and release guidance must still preserve trusted archive digest verification.
+- Fresh Intel64 real-machine quarantine acceptance is PASS: `./codemcp-install.sh` proceeded without any manual `xattr -dr` step and without the previous bundled Python-extension Gatekeeper block.
+- The final repository regression after all of the above changes is **393 passed, 0 failed, 8 skipped, 1 warning**. The former two real-codemcp failures were traced to a stale Phase 2 test fixture that forced WSL2 even though the current release contract is `adapter_mode="native-stdio"` with `worker_mode="local"`; after aligning the integration fixture with the release default, the full suite passed.
+- Intel64 final release gate is PASS for the unsigned candidate path.
+- Apple Silicon real-host clean-machine acceptance remains pending. GitHub native arm64 build evidence does not replace this required real-host gate.
+- The combined macOS / `v0.1.0` release gate remains blocked only on the required ARM64 real-host evidence and any final documentation/release signoff that depends on it.
 
 Phase 4 validates the Phase 3 artifacts on:
 
@@ -246,11 +245,11 @@ Phase 4 validates the Phase 3 artifacts on:
 
 For each architecture:
 
-1. verify the outer archive SHA-256 from a trusted release channel;
-2. verify internal `SHA256SUMS.txt`;
-3. confirm the expected Gatekeeper rejection for a quarantined, ad-hoc, non-notarized binary;
-4. explicitly release quarantine only after integrity verification;
-5. run `codemcp-install.sh`;
+1. verify the outer archive SHA-256 from a trusted release channel before running any extracted code;
+2. verify internal `SHA256SUMS.txt` as part of the installer/distribution integrity flow;
+3. retain truthful provenance that the candidate is ad-hoc signed and not notarized;
+4. run `codemcp-install.sh`; on Darwin the installer best-effort clears `com.apple.quarantine` recursively from its own extracted distribution before continuing, without modifying packaged file bytes;
+5. verify that setup does not require a separate manual `xattr -dr` step on accepted unsigned-candidate hosts;
 6. verify Keychain secret persistence;
 7. register and operate on a disposable Git repository;
 8. exercise read, mutation, replay, checkpoint, and restore;
@@ -298,25 +297,27 @@ Any later change to runtime code, the lockfile, external binaries, signing, or a
 | Risk | Current state | Rule |
 | --- | --- | --- |
 | No Developer ID / notarization | Accepted product limitation | Publish only ad-hoc, non-notarized artifacts; never claim Apple trust |
-| Gatekeeper quarantine | Expected | Verify trusted digest before any manual quarantine release |
+| Gatekeeper quarantine | Intel64 installer auto-cleanup PASS; unsigned limitation remains | Verify trusted archive digest before running extracted code; installer cleanup is a usability measure, not Apple notarization/trust |
 | Apple Silicon clean-host resource | Pending | CI candidate does not replace real-host acceptance |
-| Intel clean-host resource | Available; Phase 4 harness implemented, formal run not yet executed | Complete harness hardening first, then run the formal clean-host matrix |
+| Intel clean-host resource | Final unsigned-candidate live gate PASS | Preserve the recorded Intel64 evidence; rerun if runtime, packaging, signing, or installer behavior changes materially |
 | Minimum macOS version | Not yet proven | Claim only versions with real evidence |
-| Keychain ACL/upgrade behavior | Needs real-host matrix | Fail closed on denial or backend mismatch |
-| macOS `codemcp==0.3.0` runtime behavior | Requires final real-host proof | Never silently replace the backend |
-| Shared Windows regression | Mandatory | macOS changes cannot weaken the accepted Windows contract |
+| Keychain ACL/upgrade behavior | Intel64 base live path accepted; ARM64/upgrade-relocation matrix still pending | Fail closed on denial or backend mismatch |
+| macOS `codemcp==0.3.0` runtime behavior | Intel64 real project read/write/checkpoint/restore/commands PASS; ARM64 pending | Never silently replace the backend |
+| Shared Windows/source regression | Current full repository suite PASS at 393/0/8; mandatory after affected changes | macOS changes cannot weaken the accepted Windows contract |
 
 ## Current handoff
 
-Do not restart completed Phase 1–3 work. Continue Phase 4 from this exact sequence:
+Do not restart completed Intel64 work. The repository and real Intel Mac have already proven the current implementation through the final unsigned-candidate Intel64 gate.
 
-1. harden `scripts/validate-clean-macos-release.sh` with explicit required-tool preflight;
-2. make `prepare` rescan and validate **all** Mach-O files in the extracted candidate for native thin architecture and valid ad-hoc signatures;
-3. rerun formatting, targeted packaging contracts, the full regression suite, security audit where available, `git diff --check`, and Git status;
-4. only after the repository gate is clean enough for acceptance, run the Intel `prepare -> interactive install -> verify -> secret-scan -> lifecycle --cycles 20 -> cleanup` flow on the real Intel Mac;
-5. retain the Intel evidence in the repository acceptance ledger;
-6. repeat the same clean-host evidence chain on real Apple Silicon before declaring macOS support or releasing `v0.1.0`.
+Continue Phase 4 from this exact sequence:
 
-The known Windows/Python 3.12 `BridgeError.__post_init__` failure baseline must remain explicitly separated from Phase 4 macOS evidence; do not silently call a failing full suite PASS.
+1. preserve the current green repository baseline: **393 passed, 0 failed, 8 skipped, 1 warning**;
+2. preserve the Intel64 evidence for approval/restore/CAS, registered commands, project-registry hot reload, quarantine auto-cleanup, and the final unsigned-candidate live gate;
+3. build/retain the matching arm64 candidate from the same release contract and confirm its CI/native packaging evidence remains green;
+4. run the equivalent clean-host evidence chain on a real Apple Silicon Mac, including installer/quarantine behavior, Keychain, read/write/checkpoint/restore, registered commands, lifecycle/security, and cleanup;
+5. update the acceptance ledger, this English canonical plan, the independent Chinese plan, and `docs/development-state.md` with the ARM64 result;
+6. only when the required ARM64 real-host gate and final documentation/release signoff are complete may the combined macOS / `v0.1.0` release gate be marked PASS.
 
-Use [`acceptance/macos-v0.1.0-validation.md`](acceptance/macos-v0.1.0-validation.md), current Git state, tests, and `docs/development-state.md` as the source of truth. Critical status must be written back to repository planning/acceptance documents; chat history is not authoritative.
+The old `BridgeError.__post_init__` and two-failure WSL2 integration baselines are closed; they must not be carried forward as accepted defects. Any later runtime, packaging, signing, external-binary, installer, or lockfile change invalidates the affected evidence and requires the corresponding gate to be rerun.
+
+Use [`acceptance/macos-v0.1.0-validation.md`](acceptance/macos-v0.1.0-validation.md), current Git state, tests, `docs/development-state.md`, this English canonical plan, and the independent Chinese plan as repository sources of truth. Critical status must be written back to all relevant repository documents; chat history is not authoritative.
