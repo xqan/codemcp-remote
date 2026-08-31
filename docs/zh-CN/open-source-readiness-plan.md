@@ -2,6 +2,8 @@
 
 [English canonical](../plans/v0.1.0/open-source-readiness-plan.md)
 
+[English canonical](../plans/v0.1.0/open-source-readiness-plan.md)
+
 > 更新基线：2026-08-30  
 > 目标版本：`v0.1.0`  
 > 最终公开仓库：`xqan/codemcp-remote-mcp`

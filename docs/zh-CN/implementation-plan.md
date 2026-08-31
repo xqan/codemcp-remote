@@ -2,6 +2,8 @@
 
 [English canonical](../implementation-plan.md)
 
+[English canonical](../implementation-plan.md)
+
 > 更新日期：2026-08-30
 > 工作分支：`codex/macos-cli-packaging`
 > 状态：**PHASE 1 COMPLETED / PHASE 2 IMPLEMENTED / PHASE 3 GITHUB NATIVE GATE PASS / PHASE 4 CLEAN-HOST PENDING / RELEASE BLOCKED**

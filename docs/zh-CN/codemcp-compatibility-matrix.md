@@ -1,5 +1,7 @@
 # codemcp Phase 1 兼容性矩阵
 
+[English canonical](../reports/compatibility/codemcp-compatibility-matrix.md)
+
 ## 结论
 
 固定的 `codemcp==0.3.0` 现在可以作为 **Windows 11 原生 stdio worker**

@@ -40,6 +40,8 @@ def test_simplified_chinese_documentation_is_independent() -> None:
         ROOT / "docs" / "zh-CN" / "operations.md",
         ROOT / "docs" / "zh-CN" / "macos.md",
         ROOT / "docs" / "zh-CN" / "implementation-plan.md",
+        ROOT / "docs" / "zh-CN" / "open-source-readiness-plan.md",
+        ROOT / "docs" / "zh-CN" / "codemcp-compatibility-matrix.md",
     ]
 
     for path in expected:
@@ -53,12 +55,23 @@ def test_language_entrypoints_are_linked() -> None:
     assert "README.zh-CN.md" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert "README.md" in (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
     assert "zh-CN/README.md" in (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
-    assert "../README.md" in (ROOT / "docs" / "zh-CN" / "README.md").read_text(
-        encoding="utf-8"
-    )
-    assert "README.zh-CN.md" in (ROOT / "bridge" / "README.md").read_text(
-        encoding="utf-8"
-    )
-    assert "README.md" in (ROOT / "bridge" / "README.zh-CN.md").read_text(
-        encoding="utf-8"
-    )
+    assert "../README.md" in (ROOT / "docs" / "zh-CN" / "README.md").read_text(encoding="utf-8")
+    assert "README.zh-CN.md" in (ROOT / "bridge" / "README.md").read_text(encoding="utf-8")
+    assert "README.md" in (ROOT / "bridge" / "README.zh-CN.md").read_text(encoding="utf-8")
+
+
+def test_chinese_deep_documents_link_to_english_canonical() -> None:
+    expected_links = {
+        ROOT / "docs" / "zh-CN" / "implementation-plan.md": "../implementation-plan.md",
+        ROOT
+        / "docs"
+        / "zh-CN"
+        / "open-source-readiness-plan.md": "../plans/v0.1.0/open-source-readiness-plan.md",
+        ROOT
+        / "docs"
+        / "zh-CN"
+        / "codemcp-compatibility-matrix.md": "../reports/compatibility/codemcp-compatibility-matrix.md",
+    }
+
+    for path, expected_link in expected_links.items():
+        assert expected_link in path.read_text(encoding="utf-8")

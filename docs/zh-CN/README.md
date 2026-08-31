@@ -14,6 +14,8 @@
 4. [运维与恢复](operations.md)
 5. [macOS 当前状态与使用限制](macos.md)
 6. [macOS 双架构实施计划](implementation-plan.md)
+7. [开源发布准备计划](open-source-readiness-plan.md)
+8. [codemcp 兼容性矩阵](codemcp-compatibility-matrix.md)
 
 ## 当前支持边界
 
@@ -48,6 +50,8 @@ macOS 仍是增量发布轨道：
 | [`operations.md`](operations.md) | start/status/stop、doctor、项目管理、故障恢复 |
 | [`macos.md`](macos.md) | macOS candidate、Gatekeeper、Keychain、clean-host 状态 |
 | [`implementation-plan.md`](implementation-plan.md) | macOS 双架构详细实施计划（中文） |
+| [`open-source-readiness-plan.md`](open-source-readiness-plan.md) | v0.1.0 开源发布准备、Gate 与历史状态（中文） |
+| [`codemcp-compatibility-matrix.md`](codemcp-compatibility-matrix.md) | 固定版 codemcp 的 Windows/WSL2 兼容性证据（中文） |
 
 ## 英文 canonical 文档
 
@@ -75,7 +79,7 @@ macOS 仍是增量发布轨道：
 
 ### 历史证据
 
-`docs/releases/` 和 `docs/reports/` 保留英文历史证据，不做机械中文镜像。它们记录“当时验证过什么”，不替代当前 `architecture/`、`guides/` 和 `acceptance/`。
+`docs/releases/` 和 `docs/reports/` 默认保留英文历史证据，不做机械中文镜像。高频使用、容易误解的历史材料可以提供独立中文版本，例如本目录中的 codemcp 兼容性矩阵；这些中文版本仍不能替代当前 `architecture/`、`guides/` 和 `acceptance/` 的英文 canonical 文档。
 
 ## 维护规则
 
