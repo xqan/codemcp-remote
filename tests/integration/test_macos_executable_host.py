@@ -75,6 +75,18 @@ def test_macos_candidate_executable_host(tmp_path: Path) -> None:
         assert os.access(script, os.X_OK)
         subprocess.run(["sh", "-n", str(script)], check=True)
 
+    installer_text = (candidate / "codemcp-install.sh").read_text(encoding="utf-8")
+    quarantine_cleanup = (
+        'xattr -dr com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true'
+    )
+    assert quarantine_cleanup in installer_text
+    assert installer_text.index("SCRIPT_DIR=") < installer_text.index(
+        quarantine_cleanup
+    )
+    assert installer_text.index(quarantine_cleanup) < installer_text.index(
+        'CODEMCP="$SCRIPT_DIR/'
+    )
+
     subprocess.run(
         [
             sys.executable,

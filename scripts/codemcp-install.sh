@@ -2,6 +2,12 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
+# Remove macOS quarantine attributes from the extracted distribution if present.
+if [ "$(uname -s)" = "Darwin" ]; then
+    xattr -dr com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true
+fi
+
 CODEMCP="$SCRIPT_DIR/codemcp-remote"
 CHECKSUMS="$SCRIPT_DIR/SHA256SUMS.txt"
 ECHO_DISABLED=0

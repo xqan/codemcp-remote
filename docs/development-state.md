@@ -138,13 +138,32 @@ The integration fixture now uses the release-default local/native worker path. W
 
 Conclusion: repository regression gate PASS. The previous 2-failure baseline is closed and is not an accepted outstanding defect.
 
+## macOS quarantine handling
+
+The macOS installer now clears quarantine metadata from the extracted candidate directory before the rest of interactive setup runs:
+
+- `scripts/codemcp-install.sh` preserves the existing POSIX `#!/bin/sh` contract.
+- After resolving `SCRIPT_DIR`, Darwin runs `xattr -dr com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true`.
+- Cleanup is recursive so the installer, executable, bundled Python extensions, and other extracted candidate files are covered.
+- Cleanup is best-effort and non-fatal; non-macOS hosts do not execute it.
+- Distribution checksum verification still runs immediately afterward. Removing the extended attribute does not modify packaged file bytes.
+- `tests/integration/test_macos_executable_host.py` now requires the packaged `codemcp-install.sh` to contain the quarantine cleanup and verifies that it appears after `SCRIPT_DIR` resolution and before the executable/checksum setup path.
+
+Validation after the installer change:
+
+- Formatting gate PASS: 86 files already formatted.
+- Full repository regression PASS: 393 passed, 0 failed, 8 skipped, 1 warning.
+- Full regression operation: `9a54c6d919fb469e9ca0350ad9d3accb`.
+
+This behavior is an unsigned-candidate usability measure. Re-evaluate whether it should remain once a Developer ID signed and notarized release path is available.
+
 ## Current blocker
 
-No code, approval, restore, registered-command, or repository-regression blocker remains for macOS Intel64. The remaining gate is final native macOS Intel64 release-candidate acceptance on the latest pushed commit.
+No code, approval, restore, registered-command, repository-regression, or installer-source blocker remains for macOS Intel64. Because the packaged installer changed, the remaining gate is a fresh native macOS Intel64 release-candidate build and acceptance run.
 
 ## Next steps
 
-1. Push the current `codex/macos-cli-packaging` HEAD so the macOS release workflow builds a candidate containing the final integration-test baseline.
-2. Confirm the latest `macos-intel64` workflow/native packaging acceptance passes.
-3. Install/run that candidate on the Intel Mac if the artifact changed materially from the currently deployed candidate.
+1. Push the current `codex/macos-cli-packaging` HEAD so the macOS workflow builds a candidate containing the quarantine cleanup and its packaging contract test.
+2. Confirm the latest `macos-intel64` native packaging acceptance passes.
+3. Install/run that fresh candidate on the Intel Mac and confirm setup no longer requires a manual `xattr` quarantine-removal step.
 4. Record the final macOS Intel64 release gate result in this document.
