@@ -101,23 +101,50 @@ Verified PASS:
 
 Conclusion: MCP `ToolAnnotations` deployment restored ChatGPT-host compatibility for `checkpoint_create`, `approval_confirm`, and `checkpoint_restore` without weakening Bridge-side approval, checkpoint, CAS, audit, or fail-closed behavior.
 
+## macOS Intel64 development command acceptance
+
+The registered development-command surface is now fully configured and accepted on the live Intel Mac:
+
+- `sample_project` HEAD: `60b4180d99680615fcf0ea4cc68146911df20a0f`.
+- Project-registry hot reload recognized runtime `projects.toml` changes without a Bridge restart.
+- `project_status` reported `commands_resolved=true`.
+- Available commands: `format`, `test`, `verify`.
+- Command verification reported all three commands in `matched`, with no missing or mismatched commands.
+- `codemcp_config_source=project`, `codemcp_config_ready=true`, `development_ready=true`, and `issues=[]`.
+- `registered_command_run(verify)` succeeded through operation `660c5f59de774e7ab5e76d7c09d01441`.
+- `test_run(test)` succeeded through operation `a6ab46a1c8d843cc91dd84a8071f436`.
+- `format_run(format)` succeeded through operation `0f3ccffaf1244631ab620c18c47bb4f0`.
+- Each command created a Bridge-owned mutation checkpoint with an empty diff hash and left branch `develop`, HEAD `60b4180d99680615fcf0ea4cc68146911df20a0f`, and the worktree clean.
+- All three commands use the deterministic fixed argv `["/usr/bin/grep", "-qx", "test", "test.md"]`; no arbitrary shell, executable path, argv, or runtime parameter is model-controlled.
+
+Conclusion: live Intel64 `registered_command_run`, `test_run`, and `format_run` acceptance is PASS, including project-registry hot reload and command-contract matching.
+
+## Full repository regression
+
+The final repository regression was re-run after the MCP annotation contract-test correction and after aligning the real Bridge integration fixture with the current release worker mode.
+
+Result:
+
+- 393 passed
+- 0 failed
+- 8 skipped
+- 1 warning
+- Runtime: 129.05 seconds
+- Test operation: `79bba81b27374573be9f89bbb52bbbdb`
+
+The two former failures in `bridge/tests/test_phase2_integration.py` were traced to a stale Phase 2 test assumption: the fixture still forced `worker_mode="wsl2"`, while the current release configuration uses `adapter_mode="native-stdio"` and `worker_mode="local"`.
+
+The integration fixture now uses the release-default local/native worker path. WSL2-specific parameter and compatibility behavior remains covered by dedicated worker tests rather than making the primary release regression depend on the repository-local `.local/bridge-venv-wsl` environment.
+
+Conclusion: repository regression gate PASS. The previous 2-failure baseline is closed and is not an accepted outstanding defect.
+
 ## Current blocker
 
-The approval/restore blocker is closed. The project-side development command contract is now present:
-
-- `sample_project` HEAD after adding `codemcp.toml`: `60b4180d99680615fcf0ea4cc68146911df20a0f`.
-- Fixed commands `test`, `format`, and `verify` all use the deterministic read-only argv `["/usr/bin/grep", "-qx", "test", "test.md"]`.
-- The command contract is intentionally minimal and accepts no model-supplied argv or runtime parameters.
-
-The remaining blocker is Bridge authorization configuration: the runtime `projects.toml` entry for `sample_project` still has no `commands` tables. That file is outside the registered project root, so the Bridge correctly refuses to mutate it through project file tools. The runtime configuration must explicitly register the same fixed argv before command execution can become `development_ready`.
-
-A final full repository regression after correcting `bridge/tests/test_mcp_tool_annotations.py` also remains outstanding. The last completed full run before that test correction preserved the known baseline of 385 passed, 2 failed, 8 skipped.
+No code, approval, restore, registered-command, or repository-regression blocker remains for macOS Intel64. The remaining gate is final native macOS Intel64 release-candidate acceptance on the latest pushed commit.
 
 ## Next steps
 
-1. Add matching `test`, `format`, and `verify` command entries under `projects.sample_project.commands` in the macOS runtime `projects.toml`.
-2. Let project-registry hot reload pick up the saved configuration; no Bridge restart should be required when the project root is unchanged.
-3. Verify `project_status` reports `test`, `format`, and `verify` as matched commands with `development_ready=true`.
-4. Run live Intel64 `registered_command_run(verify)`, `test_run(test)`, and `format_run(format)` acceptance.
-5. Re-run the full `codemcp-remote` regression including `test_mcp_tool_annotations.py`; distinguish any remaining known integration failures from new regressions.
-6. Re-run native macOS Intel64 release acceptance and update this document with the final gate result.
+1. Push the current `codex/macos-cli-packaging` HEAD so the macOS release workflow builds a candidate containing the final integration-test baseline.
+2. Confirm the latest `macos-intel64` workflow/native packaging acceptance passes.
+3. Install/run that candidate on the Intel Mac if the artifact changed materially from the currently deployed candidate.
+4. Record the final macOS Intel64 release gate result in this document.
