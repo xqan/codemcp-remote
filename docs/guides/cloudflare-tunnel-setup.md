@@ -103,10 +103,10 @@ Use a packaged executable or source-mode `codemcp-remote` command. The example u
 
 ```powershell
 $exe = "$env:LOCALAPPDATA\Programs\codemcp-remote\codemcp-remote.exe"
-$home = Join-Path $env:LOCALAPPDATA "codemcp-remote"
+$runtimeHome = Join-Path $env:LOCALAPPDATA "codemcp-remote"
 $env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
 
-& $exe init --home $home `
+& $exe init --home $runtimeHome `
   --transport cloudflare `
   --public-url "https://mcp.example.com/mcp" `
   --auth-mode none `
@@ -116,7 +116,7 @@ $env:TUNNEL_TOKEN = "<read from your secret manager; do not paste into chat>"
   --store-transport-secret
 $env:TUNNEL_TOKEN = $null
 
-& $exe project add phase5-clean "D:\workspace\phase5-clean" --home $home
+& $exe project add phase5-clean "D:\workspace\phase5-clean" --home $runtimeHome
 ```
 
 Profile A does not require `CODEMCP_RS_VERIFICATION_SECRET`, does not install an OAuth bearer authenticator, and does not imply `authenticated_user=true`. It still requires all existing project and mutation safety policies.
@@ -128,9 +128,9 @@ Profile A does not require `CODEMCP_RS_VERIFICATION_SECRET`, does not install an
 Run the profile-aware checks with the environment token already cleared:
 
 ```powershell
-& $exe doctor --home $home
-& $exe start --home $home
-& $exe status --home $home
+& $exe doctor --home $runtimeHome
+& $exe start --home $runtimeHome
+& $exe status --home $runtimeHome
 ```
 
 The relevant `doctor` fields should be equivalent to:

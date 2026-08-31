@@ -1,5 +1,7 @@
 # codemcp-remote
 
+[Simplified Chinese](README.zh-CN.md)
+
 A policy-controlled local MCP bridge for using **ChatGPT as the only reasoning engine** while safely operating on registered local code repositories.
 
 ```text
@@ -15,7 +17,7 @@ ChatGPT
   -> registered local Git project
 ```
 
-> **Pre-release:** the Cloudflare No-Auth network-trust path has completed Phase A–H live acceptance and is usable for controlled private operation. Stable public `v0.1.0` release remains blocked on the broader Phase 7 release gates in [`docs/acceptance/acceptance-test-plan.md`](docs/acceptance/acceptance-test-plan.md).
+> **v0.1.0 release baseline:** product/runtime acceptance gates are closed for the first stable release. The release is intentionally `NotSigned`; GitHub-hosted CI remains `WAIVED / ACCEPTED RISK`. Exact release commit and artifact SHA-256 values are bound by build provenance, `SOURCE_COMMIT.txt`, `SHA256SUMS.txt`, and the GitHub Release rather than being self-referentially embedded in this source file.
 
 Browse the [documentation center](docs/README.md) for current architecture,
 operator guides, release gates, plans, and historical validation records.
@@ -212,10 +214,10 @@ pwsh -File .\scripts\prepare-cloudflared.ps1
 Use an explicit source runtime home and keep the tunnel token only in the current process during initialization:
 
 ```powershell
-$home = Join-Path $PWD ".local\source-runtime"
+$runtimeHome = Join-Path $PWD ".local\source-runtime"
 $env:TUNNEL_TOKEN = "<load locally from a secret manager>"
 
-uv run --project bridge codemcp-bridge-server init --home $home `
+uv run --project bridge codemcp-bridge-server init --home $runtimeHome `
   --transport cloudflare `
   --public-url "https://<your-mcp-host>/mcp" `
   --auth-mode none `
@@ -234,15 +236,15 @@ For the optional OpenAI Secure MCP compatibility transport, follow [`docs/guides
 Use the same managed lifecycle from source mode:
 
 ```powershell
-uv run --project bridge codemcp-bridge-server doctor --home $home
-uv run --project bridge codemcp-bridge-server start --home $home
-uv run --project bridge codemcp-bridge-server status --home $home
+uv run --project bridge codemcp-bridge-server doctor --home $runtimeHome
+uv run --project bridge codemcp-bridge-server start --home $runtimeHome
+uv run --project bridge codemcp-bridge-server status --home $runtimeHome
 ```
 
 Stop the source-mode managed lifecycle with:
 
 ```powershell
-uv run --project bridge codemcp-bridge-server stop --home $home
+uv run --project bridge codemcp-bridge-server stop --home $runtimeHome
 ```
 
 The PowerShell `start-all.ps1` / `doctor.ps1` / `stop-all.ps1` helpers remain available for development and compatibility testing, but they are not the installed-product runtime contract.
@@ -378,4 +380,4 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT
 
 codemcp-remote is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`). See [`LICENSE`](LICENSE).
 
-`codemcp==0.3.0` is a separate third-party dependency and retains its upstream Apache-2.0 license. Other dependency licenses are reviewed as part of the release supply-chain gate.
+`codemcp==0.3.0` is a separate third-party dependency with a documented upstream metadata discrepancy: its distribution metadata reports MIT while the bundled audited `License-File` is Apache-2.0. The release preserves both facts and the bundled license evidence; see [`docs/reports/testing/v0.1.0-dependency-license-compatibility-signoff.md`](docs/reports/testing/v0.1.0-dependency-license-compatibility-signoff.md). Other dependency licenses are reviewed as part of the release supply-chain gate.

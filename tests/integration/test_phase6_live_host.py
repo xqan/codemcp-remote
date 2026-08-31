@@ -47,6 +47,7 @@ def test_phase6_live_host_doctor_and_stop_dry_run() -> None:
         encoding="utf-8",
         errors="replace",
         timeout=120,
+        check=False,
     )
     assert doctor.returncode == 0, doctor.stdout + "\n" + doctor.stderr
     doctor_payload = json.loads(doctor.stdout)
@@ -69,6 +70,7 @@ def test_phase6_live_host_doctor_and_stop_dry_run() -> None:
         encoding="utf-8",
         errors="replace",
         timeout=60,
+        check=False,
     )
     assert dry_run.returncode == 0, dry_run.stdout + "\n" + dry_run.stderr
     dry_run_payload = json.loads(dry_run.stdout)

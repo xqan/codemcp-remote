@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS = ROOT / "scripts" / "validate-phase6-windows.ps1"
 RC_SCRIPT = ROOT / "scripts" / "prepare-windows-release-candidate.ps1"

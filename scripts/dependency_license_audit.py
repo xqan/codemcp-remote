@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.metadata as metadata
 import json
 import sys
-import tomllib
+from importlib import metadata
 from pathlib import Path
+
+import tomllib
 
 FIRST_PARTY = {"codemcp-remote-bridge"}
 CODEMCP_VERSION = "0.3.0"
-CODEMCP_LICENSE_FILE_SHA256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+CODEMCP_LICENSE_FILE_SHA256 = (
+    "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+)
 EMPTY_LICENSE_VALUES = {"", "unknown", "n/a", "none"}
 
 
@@ -23,11 +26,7 @@ def _license_files(dist: metadata.Distribution) -> list[dict[str, str]]:
     for relative in dist.files or ():
         normalized = str(relative).replace("\\", "/")
         leaf = Path(normalized).name.lower()
-        if not (
-            leaf.startswith("license")
-            or leaf.startswith("copying")
-            or leaf.startswith("notice")
-        ):
+        if not leaf.startswith(("license", "copying", "notice")):
             continue
         target = Path(dist.locate_file(relative))
         if not target.is_file():
@@ -89,14 +88,18 @@ def _validate_codemcp(item: dict[str, object]) -> list[str]:
     if item["version"] != CODEMCP_VERSION:
         errors.append(f"codemcp version changed: {item['version']}")
     if str(item["license_field"]).strip() != "MIT":
-        errors.append("codemcp METADATA License field no longer matches audited value MIT")
+        errors.append(
+            "codemcp METADATA License field no longer matches audited value MIT"
+        )
     hashes = {
         str(entry["sha256"])
         for entry in item["license_files"]
         if isinstance(entry, dict) and "sha256" in entry
     }
     if CODEMCP_LICENSE_FILE_SHA256 not in hashes:
-        errors.append("codemcp bundled audited Apache-2.0 license file hash is missing or changed")
+        errors.append(
+            "codemcp bundled audited Apache-2.0 license file hash is missing or changed"
+        )
     return errors
 
 
@@ -141,7 +144,9 @@ def main() -> int:
 
     installed_locked_names = {str(item["name"]) for item in packages}
     report = {
-        "status": "ok" if not missing_license_evidence and not codemcp_errors else "failed",
+        "status": "ok"
+        if not missing_license_evidence and not codemcp_errors
+        else "failed",
         "lockfile": str(lock_path),
         "installed_locked_package_count": len(packages),
         "not_installed_locked_packages": sorted(locked_names - installed_locked_names),
